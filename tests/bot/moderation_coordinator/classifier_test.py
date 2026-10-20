@@ -270,3 +270,17 @@ async def test_usage_is_metered_under_the_shadow_operation(monkeypatch, labels):
     assert seen == [
         ("moderation_shadow_classifier", {"guild_id": "G", "channel_id": "C"})
     ]
+
+
+async def test_a_providers_own_http_timeout_is_recorded_as_a_timeout():
+    class APITimeoutError(Exception):
+        pass
+
+    def timed_out(messages, info):
+        raise APITimeoutError("read timed out")
+
+    classifier = ModerationClassifier(
+        budget=ClassifierBudget(per_guild_day=100), haiku_model=FunctionModel(timed_out)
+    )
+    result = await classifier.classify(_request({SCAM}))
+    assert result.outcome == TIMEOUT

@@ -53,6 +53,7 @@ from smarter_dev.bot.moderation_coordinator.model import RecentPost
 from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import Verdicts
 from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
+from smarter_dev.bot.moderation_coordinator.policy import in_scope
 from smarter_dev.bot.moderation_coordinator.state import RecentPosts
 from smarter_dev.bot.moderation_coordinator.state import RingRegistry
 from smarter_dev.bot.moderation_coordinator.state import SpamTracker
@@ -162,31 +163,6 @@ class Coordinator:
         hits: list[RuleHit] = []
         review: list[str] = []
 
-        # 1. Deterministic rules.
-        spam_obs = None
-        if policy.spam is not None and not facts.is_edit:
-            spam_obs = self.spam.observe(facts, policy.spam, now)
-            hits += rules.spam_engine_hits(
-                facts,
-                spam_obs.decision,
-                mute_duration_seconds=policy.spam.thresholds.mute_duration_seconds,
-            )
-        if policy.attachments is not None:
-            hits += rules.attachment_hits(facts, policy.attachments)
-        if policy.edit_ping:
-            hits += rules.edit_ping_hits(facts)
-        if policy.bump_channel_ids:
-            hits += rules.bump_channel_hits(facts, policy.bump_channel_ids)
-
-        # 2. Rules that need labels, and what they read first.
-        key = facts_hash(facts)
-        earlier_posts = self.recent.read(facts.guild_id, facts.author_id, now)
-        if not facts.is_edit:
-            self.recent.record(
-                facts.guild_id,
-                facts.author_id,
-                RecentPost(facts.channel_id, facts.message_id, now, key),
-            )
         author_refusal: str | None = None
         refusal_known = False
 
@@ -202,9 +178,42 @@ class Coordinator:
                 refusal_known = True
             return author_refusal is not None
 
+        # 1. Deterministic rules.
+        spam_obs = None
+        if policy.spam is not None and not facts.is_edit:
+            spam_obs = self.spam.observe(facts, policy.spam, now)
+            hits += rules.spam_engine_hits(
+                facts,
+                spam_obs.decision,
+                mute_duration_seconds=policy.spam.thresholds.mute_duration_seconds,
+            )
+            # Armed now, as the engine arms it once it acted, not after a
+            # classifier wait: the author's next messages in a burst must
+            # already see the mute (or the warning).
+            if spam_obs.decision is not NO_SPAM_ACTION and not await author_is_staff():
+                self.spam.commit(facts, policy.spam, spam_obs.decision, now)
+        if policy.attachments is not None:
+            hits += rules.attachment_hits(facts, policy.attachments)
+        if policy.edit_ping and in_scope(
+            policy.edit_ping_channel_ids, facts.channel_id
+        ):
+            hits += rules.edit_ping_hits(facts)
+        if policy.bump_channel_ids:
+            hits += rules.bump_channel_hits(facts, policy.bump_channel_ids)
+
+        # 2. Rules that need labels, and what they read first.
+        key = facts_hash(facts)
+        earlier_posts = self.recent.read(facts.guild_id, facts.author_id, now)
+        if not facts.is_edit:
+            self.recent.record(
+                facts.guild_id,
+                facts.author_id,
+                RecentPost(facts.channel_id, facts.message_id, now, key),
+            )
         scam_review = None
         if (
             policy.scam_gate
+            and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
             and not facts.is_edit
             and rules.scam_gate_content(facts)
             and not await author_is_staff()
@@ -416,13 +425,6 @@ class Coordinator:
             scam_outcome=scam_outcome,
             review=review,
         )
-        if (
-            spam_obs is not None
-            and policy.spam is not None
-            and spam_obs.decision is not NO_SPAM_ACTION
-            and not refusals.get(facts.author_id)
-        ):
-            self.spam.commit(facts, policy.spam, spam_obs.decision, now)
         return Evaluation(
             facts=facts,
             policy=policy,

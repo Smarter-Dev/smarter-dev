@@ -92,7 +92,7 @@ def test_attachment_tiers():
     assert warned[0].notice == "attachment_warned" and not warned[0].cleanup
     blocked = rules.attachment_hits(files("b.pdf", "c.exe"), policy)
     assert blocked[0].notice == "attachment_blocked" and blocked[0].cleanup
-    assert "c.exe" in blocked[0].reason
+    assert blocked[0].reason == "blocked attachment type .exe"  # never the name
 
 
 def test_edit_ping_only_on_edits_and_case_sensitive_like_the_handler():

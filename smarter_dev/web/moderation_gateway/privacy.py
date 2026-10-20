@@ -10,7 +10,7 @@ delivery says about them:
 * transcripts and model assessments that name them (by id);
 * outbox rows about them (a notice or DM not yet settled);
 * the moderation coordinator's shadow decisions about their messages or
-  naming them as a target (an experiment's record, not moderation history).
+  naming them anywhere (an experiment's record, not moderation history).
 
 ``docs/privacy-deletion-runbook.md`` step 6 runs the same deletes as SQL; this
 function is the tested statement of what they must do.
@@ -21,10 +21,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from sqlalchemy import delete
-from sqlalchemy import or_
 from sqlalchemy import String
 from sqlalchemy import cast
+from sqlalchemy import delete
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,28 +86,34 @@ async def delete_member_moderation_content(
     outbox = await session.execute(
         delete(ModerationOutbox).where(ModerationOutbox.target_user_id == did)
     )
+    # Anywhere in the row: as author, target, staff exclusion, a ring
+    # participant label, a review line or the legacy side.
+    named_in = (
+        ModerationShadowDecision.target_ids,
+        ModerationShadowDecision.staff_excluded,
+        ModerationShadowDecision.labels,
+        ModerationShadowDecision.decision,
+        ModerationShadowDecision.provisional,
+        ModerationShadowDecision.legacy,
+    )
     shadow_candidates = (
         await session.execute(
             select(
                 ModerationShadowDecision.id,
                 ModerationShadowDecision.author_id,
-                cast(ModerationShadowDecision.target_ids, String),
-                cast(ModerationShadowDecision.staff_excluded, String),
+                *(cast(column, String) for column in named_in),
             ).where(
                 or_(
                     ModerationShadowDecision.author_id == did,
-                    cast(ModerationShadowDecision.target_ids, String).contains(did),
-                    cast(ModerationShadowDecision.staff_excluded, String).contains(
-                        did
-                    ),
+                    *(cast(column, String).contains(did) for column in named_in),
                 )
             )
         )
     ).all()
     shadow = [
         row_id
-        for row_id, author_id, targets, excluded in shadow_candidates
-        if author_id == did or _names(targets, did) or _names(excluded, did)
+        for row_id, author_id, *texts in shadow_candidates
+        if author_id == did or any(_names(text, did) for text in texts)
     ]
     if shadow:
         await session.execute(

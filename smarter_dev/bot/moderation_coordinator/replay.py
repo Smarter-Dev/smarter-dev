@@ -79,11 +79,18 @@ def scripted_haiku(
     def respond(messages, info: AgentInfo) -> ModelResponse:
         prompt = messages[-1].parts[-1].content
         calls.haiku.append(prompt)
-        message = prompt.split("<untrusted>", 1)[-1].split("CONTEXT", 1)[0]
+        material = prompt.split("<untrusted>", 1)[-1]
+        message = re.split(r"\n(?:AD \(|CONTEXT)", material, maxsplit=1)[0]
+        # The message's own labels follow its text; the ring's follow the ad.
+        own = _answers_for(message, answers, by_text or {})
+        ring = _answers_for(material, answers, by_text or {})
+        chosen = {
+            label: (ring if participant_of(label) is not None else own)[label]
+            for label in {*own, *ring}
+            if label in (ring if participant_of(label) is not None else own)
+        }
         body: dict = {"participants": {}}
-        for label, (answer, confidence) in _answers_for(
-            message, answers, by_text or {}
-        ).items():
+        for label, (answer, confidence) in chosen.items():
             entry = {"answer": answer, "confidence": confidence}
             user_id = participant_of(label)
             if user_id is not None:

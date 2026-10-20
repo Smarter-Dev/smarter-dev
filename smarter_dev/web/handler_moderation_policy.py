@@ -43,15 +43,18 @@ REFUSAL = (
     "A handler may still post, react, manage threads and change non-staff roles"
 )
 
-_CALL = re.compile(r"\b(" + "|".join(sorted(SANCTION_FUNCTIONS)) + r")\s*\(")
+_NAME = re.compile(r"\b(" + "|".join(sorted(SANCTION_FUNCTIONS)) + r")\b")
 
 
 def sanction_calls(script: str | None) -> frozenset[str]:
-    """The sanction functions ``script`` calls.
+    """The sanction functions ``script`` uses.
 
-    Read from the syntax tree, so a name in a comment or a string does not
-    count; a script that does not parse is read with a plain pattern instead
-    (stricter: a mention counts).
+    Any use counts, not only a direct call: ``f = ban_user; await f(id)`` or
+    passing ``kick_user`` along reaches the same external function, and a
+    sanction function as a value has no other purpose. Read from the syntax
+    tree, so a name in a comment or a string does not count; a script that
+    does not parse is read with a plain pattern instead (stricter: any
+    mention counts).
     """
     if not script:
         return frozenset()
@@ -63,13 +66,11 @@ def sanction_calls(script: str | None) -> frozenset[str]:
             flags=ast.PyCF_ONLY_AST | ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
         )
     except (SyntaxError, ValueError):
-        return frozenset(_CALL.findall(script))
+        return frozenset(_NAME.findall(script))
     return frozenset(
-        node.func.id
+        node.id
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id in SANCTION_FUNCTIONS
+        if isinstance(node, ast.Name) and node.id in SANCTION_FUNCTIONS
     )
 
 

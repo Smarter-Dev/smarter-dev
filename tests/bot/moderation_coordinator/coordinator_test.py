@@ -138,3 +138,79 @@ async def test_a_ring_message_arriving_mid_sweep_waits_and_is_a_followup():
     assert follow.decision.targets[ALICE.id].sanction.kind == gw.TIMEOUT
     assert follow.classifier.requests == 0  # a known participant: no model
     assert len(calls.jev) == 1
+
+
+async def test_a_followups_scam_check_judges_the_followup_not_the_ad():
+    """A ring follow-up that also needs a scam check: the MESSAGE is the new
+    post; the ring's participant question is about the AD, in its own block."""
+    from tests.bot.moderation_coordinator.replay_cases import DAVE
+    from tests.bot.moderation_coordinator.replay_cases import staged_ring
+
+    case, m = staged_ring()
+    lure = say(
+        DAVE, "FREE NITRO claim https://dlscord.gift/x", NOW + timedelta(minutes=5)
+    )
+    case.messages = [m["ad"], lure]
+    case.answers = {**case.answers, SCAM: (True, 0.95), ABUSE: (False, 0.9)}
+    case.reads.histories = {DAVE.id: FIRST}
+    result = await replay(case)
+
+    follow = result.by_message(lure.message_id)
+    assert set(follow.labels_wanted) == {"scam", "abuse", f"participant:{DAVE.id}"}
+    [prompt] = result.calls.haiku
+    message = prompt.split("MESSAGE:\n", 1)[1].split("\nAD (", 1)[0]
+    assert "dlscord.gift" in message and "HackNova" not in message
+    assert "HackNova" in prompt.split("\nAD (", 1)[1]
+    assert follow.decision.targets[DAVE.id].sanction.kind == gw.BAN  # 2-day account
+
+
+async def test_a_burst_sees_the_first_mute_while_the_model_is_still_out():
+    """The spam engine's mute is armed before the scam check waits, so the
+    author's next message in the burst is not muted again (as legacy)."""
+    import asyncio
+
+    from pydantic_ai.models.function import FunctionModel
+
+    from smarter_dev.bot.moderation_coordinator.classifier import ClassifierBudget
+    from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
+    from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
+    from smarter_dev.bot.moderation_coordinator.replay import ModelCalls
+    from smarter_dev.bot.moderation_coordinator.replay import scripted_haiku
+
+    answers = {SCAM: (True, 0.95), ABUSE: (False, 0.9)}
+    scripted = scripted_haiku(answers, ModelCalls())
+
+    async def slow(messages, info):
+        await asyncio.sleep(0.05)
+        return scripted.function(messages, info)
+
+    coordinator = Coordinator(
+        ReplayReads(histories={NEWBIE.id: FIRST}),
+        ModerationClassifier(
+            budget=ClassifierBudget(per_guild_day=100), haiku_model=FunctionModel(slow)
+        ),
+    )
+    first = say(NEWBIE, SCAM_TEXT, NOW)
+    second = say(
+        NEWBIE,
+        "@everyone last chance https://dlscord.gift/y",
+        NOW + timedelta(seconds=1),
+    )
+    one, two = await asyncio.gather(
+        coordinator.evaluate(first, policy(ring=None)),
+        coordinator.evaluate(second, policy(ring=None)),
+    )
+    assert "spam_engine" in one.decision.targets[NEWBIE.id].rules
+    assert not any(rule.startswith("spam_engine") for rule in two.decision.rules_fired)
+
+
+async def test_the_live_handlers_channel_scope_is_kept():
+    case = ReplayCase(
+        name="scoped scam gate",
+        policy=policy(ring=None, scam_gate_channel_ids=frozenset({"elsewhere"})),
+        messages=[say(NEWBIE, "my wallet https://x.example", NOW)],
+        answers={SCAM: (True, 0.95)},
+        reads=ReplayReads(histories={NEWBIE.id: FIRST}),
+    )
+    result = await replay(case)
+    assert result.calls.total == 0

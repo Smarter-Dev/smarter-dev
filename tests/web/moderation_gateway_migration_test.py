@@ -468,7 +468,7 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
     assert (history.is_first_message, history.days_since_last_message) == (False, 31)
     assert [a.action_type for a in history.actions] == ["timeout"]
 
-    later = datetime.now(UTC).timestamp() + 200
+    later = datetime.now(UTC).timestamp() + 300
     assert await LegacyComparer(clock=lambda: later).sweep() == 1
     async with db() as session:
         row = (await session.execute(select(ModerationShadowDecision))).scalar_one()

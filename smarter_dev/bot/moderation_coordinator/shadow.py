@@ -33,6 +33,7 @@ from datetime import timedelta
 from typing import Any
 
 import hikari
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -40,6 +41,7 @@ from smarter_dev.bot import leadership
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
+from smarter_dev.bot.moderation_coordinator.decide import PROVISIONAL_SECONDS
 from smarter_dev.bot.moderation_coordinator.model import ACTION_RANK
 from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
@@ -62,11 +64,14 @@ logger = logging.getLogger(__name__)
 GUILDS_ENV_VAR = "MODERATION_SHADOW_GUILD_IDS"
 MAX_CONCURRENT = 4
 MAX_PENDING = 200
-#: The legacy side is read this long after the message: the slowest legacy
-#: actor (the scam-banner handler, a model call and a fire queue) settles
-#: well inside it.
-LEGACY_SETTLE_SECONDS = 150.0
+#: The legacy side is read this long after the message: past the comparison
+#: window below, so nothing that window counts can still be on its way.
+LEGACY_SETTLE_SECONDS = 240.0
 SWEEP_SECONDS = 60.0
+#: Bounds on the ring's history read (see BotReads).
+WINDOW_READ_SECONDS = 5.0
+AUTHOR_FACTS_SECONDS = 600.0
+MAX_CACHED_AUTHORS = 2000
 SWEEP_BATCH = 500
 #: Operations on the message's incident count when made from just before the
 #: revision to this long after it.
@@ -147,10 +152,40 @@ def facts_from_message(
 
 
 class BotReads:
-    """The coordinator's reads, from the bot's cache, REST and the database."""
+    """The coordinator's reads, from the bot's cache, REST and the database.
 
-    def __init__(self, bot: Any) -> None:
+    The ring's history read shares hikari's rate limits with the legacy
+    actors' deletes and timeouts, so it is bounded by
+    :data:`WINDOW_READ_SECONDS` and each author's facts are kept for
+    :data:`AUTHOR_FACTS_SECONDS`: a raid does not look the same accounts up
+    once per message.
+    """
+
+    def __init__(self, bot: Any, *, clock=time.monotonic) -> None:
         self.bot = bot
+        self._clock = clock
+        self._authors: dict[tuple[str, str], tuple[float, Any]] = {}
+
+    async def _author(self, guild_id: str, user, extra_role_ids) -> Any:
+        from smarter_dev.bot.spam_ring import _resolve_author
+
+        key = (guild_id, str(user.id))
+        now = self._clock()
+        cached = self._authors.get(key)
+        if cached is not None and now - cached[0] < AUTHOR_FACTS_SECONDS:
+            return cached[1]
+        facts = await _resolve_author(self.bot, int(guild_id), user, extra_role_ids)
+        if len(self._authors) >= MAX_CACHED_AUTHORS:
+            for stale in [
+                k
+                for k, (at, _) in self._authors.items()
+                if now - at >= AUTHOR_FACTS_SECONDS
+            ]:
+                del self._authors[stale]
+            if len(self._authors) >= MAX_CACHED_AUTHORS:
+                self._authors.clear()
+        self._authors[key] = (now, facts)
+        return facts
 
     async def staff_refusal(
         self,
@@ -206,26 +241,26 @@ class BotReads:
         limit: int,
         extra_role_ids: tuple[str, ...] = (),
     ):
-        from smarter_dev.bot.spam_ring import _resolve_author
         from smarter_dev.bot.spam_ring import _to_transcript_message
 
         try:
-            raw = []
-            async for message in self.bot.rest.fetch_messages(int(channel_id)).limit(
-                limit
-            ):
-                if message.created_at < since:
-                    break
-                raw.append(message)
-            raw.reverse()
-            authors = {}
-            for message in raw:
-                author_id = str(message.author.id)
-                if author_id in authors or getattr(message, "webhook_id", None):
-                    continue
-                authors[author_id] = await _resolve_author(
-                    self.bot, int(guild_id), message.author, extra_role_ids
-                )
+            async with asyncio.timeout(WINDOW_READ_SECONDS):
+                raw = []
+                async for message in self.bot.rest.fetch_messages(
+                    int(channel_id)
+                ).limit(limit):
+                    if message.created_at < since:
+                        break
+                    raw.append(message)
+                raw.reverse()
+                authors = {}
+                for message in raw:
+                    author_id = str(message.author.id)
+                    if author_id in authors or getattr(message, "webhook_id", None):
+                        continue
+                    authors[author_id] = await self._author(
+                        guild_id, message.author, extra_role_ids
+                    )
             return [_to_transcript_message(message) for message in raw], authors
         except Exception:  # noqa: BLE001 — judged on the ad alone
             log_exception(
@@ -346,6 +381,20 @@ class ShadowRecorder:
 APPLIED = (gw.CONFIRMED, gw.COVERED)
 
 
+def _is_provisional_hold(op: ModerationOperation) -> bool:
+    """A hold while something was judged, not a sanction.
+
+    scam-banner's 5-minute review hold is one; its 24-hour repeat hold
+    (``hold_member(..., "repeat:" + key, DAY)``) is the sanction it decided,
+    and counts as a timeout.
+    """
+    requested = op.requested or {}
+    return (
+        bool(requested.get("provisional"))
+        and int(requested.get("duration_seconds") or 0) <= PROVISIONAL_SECONDS
+    )
+
+
 def summarize_legacy(
     operations: Iterable[ModerationOperation], message_id: str
 ) -> dict:
@@ -374,7 +423,7 @@ def summarize_legacy(
             unknown += 1
             target["unknown"].append(op.kind)
         if op.kind in gw.SANCTION_RANK and op.state in APPLIED:
-            if (op.requested or {}).get("provisional"):
+            if _is_provisional_hold(op):
                 target["provisional"] = True
                 continue
             current = target["sanction"]
@@ -477,6 +526,15 @@ class LegacyComparer:
         return len(rows)
 
     async def _operations(self, session, row: ModerationShadowDecision):
+        """The automated actors' operations that answer this revision.
+
+        The gateway folds an author's copies (and a message's edits) into one
+        incident, so the incident alone over-attributes: the mute a fifth
+        duplicate earned would show up on the third. An operation counts for
+        this revision when it is on an incident linked to the message and was
+        made from just before the revision until the author's next judged
+        revision in that incident (or :data:`LEGACY_WINDOW_SECONDS`).
+        """
         incident_ids = list(
             (
                 await session.execute(
@@ -489,14 +547,38 @@ class LegacyComparer:
         )
         if not incident_ids:
             return []
-        start = _utc(row.message_at) - timedelta(seconds=5)
-        end = _utc(row.message_at) + timedelta(seconds=LEGACY_WINDOW_SECONDS)
+        linked = [
+            key.removeprefix("msg:")
+            for key in (
+                await session.execute(
+                    select(ModerationIncidentLink.link_key).where(
+                        ModerationIncidentLink.incident_id.in_(incident_ids),
+                        ModerationIncidentLink.link_key.like("msg:%"),
+                    )
+                )
+            ).scalars()
+        ]
+        at = _utc(row.message_at)
+        later = (
+            await session.execute(
+                select(func.min(ModerationShadowDecision.message_at)).where(
+                    ModerationShadowDecision.guild_id == row.guild_id,
+                    ModerationShadowDecision.author_id == row.author_id,
+                    ModerationShadowDecision.message_id.in_(linked),
+                    ModerationShadowDecision.message_at > row.message_at,
+                )
+            )
+        ).scalar()
+        start = at - timedelta(seconds=5)
+        end = at + timedelta(seconds=LEGACY_WINDOW_SECONDS)
+        if later is not None:
+            end = min(end, _utc(later))
         operations = (
             await session.execute(
                 select(ModerationOperation).where(
                     ModerationOperation.incident_id.in_(incident_ids),
                     ModerationOperation.created_at >= start,
-                    ModerationOperation.created_at <= end,
+                    ModerationOperation.created_at < end,
                 )
             )
         ).scalars()

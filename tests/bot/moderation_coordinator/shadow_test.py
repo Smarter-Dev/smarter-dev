@@ -246,8 +246,11 @@ def test_shadow_guilds_come_from_the_environment(monkeypatch):
 # -- the legacy side -----------------------------------------------------------
 
 
-async def _shadow_row(message_id: str, author: str, strongest, targets, *, at=None):
+async def _shadow_row(
+    message_id: str, author: str, strongest, targets, *, at=None, **extra
+):
     row = ModerationShadowDecision(
+        **extra,
         guild_id=GUILD,
         channel_id=str(CHANNEL),
         message_id=message_id,
@@ -295,7 +298,7 @@ async def test_the_comparison_reads_what_the_legacy_actors_did():
 
     # Not yet: the legacy side is read once it has had time to settle.
     assert await LegacyComparer().sweep() == 0
-    later = LegacyComparer(clock=lambda: time.time() + 200)
+    later = LegacyComparer(clock=lambda: time.time() + 300)
     assert await later.sweep() == 3
 
     by_message = {row.message_id: row for row in await rows()}
@@ -307,6 +310,62 @@ async def test_the_comparison_reads_what_the_legacy_actors_did():
     assert by_message["778"].agreement == "both_none"
     assert by_message["779"].agreement == "shadow_stronger"
     assert await later.sweep() == 0  # each row is compared once
+
+
+async def test_each_revision_gets_only_the_legacy_effects_it_earned():
+    """The gateway folds an author's copies into one incident: the mute the
+    later copy earned is not the earlier copy's."""
+    port = FakeModerationDiscord(guild_id=GUILD)
+    port.add_member("42")
+    gateway = ModerationGateway(port)
+    text = "buy followers cheap at my shop, best prices here"
+    start = datetime.now(UTC)
+
+    def trigger(message_id):
+        return Trigger(
+            guild_id=GUILD,
+            actor="spam_engine",
+            reason="repeating the same message",
+            channel_id=str(CHANNEL),
+            message_id=message_id,
+            author_id="42",
+            content=text,
+        )
+
+    await gateway.act(trigger("801"), [])  # the first copy: nothing yet
+    await _shadow_row("801", "42", None, [], at=start - timedelta(seconds=2))
+    await gateway.act(
+        trigger("802"),
+        [Proposal(kind=gw.TIMEOUT, target_user_id="42", duration_seconds=86400)],
+    )
+    await _shadow_row("802", "42", gw.TIMEOUT, ["42"], at=start)
+
+    await LegacyComparer(clock=lambda: time.time() + 300).sweep()
+    by_message = {row.message_id: row for row in await rows()}
+    assert by_message["801"].legacy_strongest_action is None
+    assert by_message["801"].agreement == "both_none"
+    assert by_message["802"].legacy_strongest_action == gw.TIMEOUT
+    assert by_message["802"].agreement == "agree"
+
+
+def test_a_repeat_hold_is_a_sanction_and_a_review_hold_is_not():
+    from smarter_dev.bot.moderation_coordinator.shadow import summarize_legacy
+    from smarter_dev.web.models import ModerationOperation
+
+    def hold(seconds):
+        return ModerationOperation(
+            target_user_id="42",
+            kind=gw.TIMEOUT,
+            state=gw.CONFIRMED,
+            actor="handler:scam-banner",
+            requested={"duration_seconds": seconds, "provisional": True},
+        )
+
+    review = summarize_legacy([hold(300)], "1")
+    assert review["strongest"] is None
+    assert review["targets"]["42"]["provisional"] is True
+    repeat = summarize_legacy([hold(86400)], "1")
+    assert repeat["strongest"] == gw.TIMEOUT
 
 
 async def test_the_comparison_ignores_moderators_and_other_messages():
@@ -325,7 +384,7 @@ async def test_the_comparison_ignores_moderators_and_other_messages():
         [Proposal(kind=gw.TIMEOUT, target_user_id="42", duration_seconds=600)],
     )
     await _shadow_row("900", "42", None, [])
-    await LegacyComparer(clock=lambda: time.time() + 200).sweep()
+    await LegacyComparer(clock=lambda: time.time() + 300).sweep()
     [row] = await rows()
     assert row.legacy_strongest_action is None
     assert row.agreement == "both_none"
@@ -428,8 +487,33 @@ async def test_a_deletion_request_removes_the_persons_shadow_rows():
     await _shadow_row("1", "42", gw.BAN, ["42"])
     await _shadow_row("2", "50", gw.TIMEOUT, ["50", "42"])
     await _shadow_row("3", "50", gw.TIMEOUT, ["50", "4200"])
+    # Only asked about, never acted on: named in a label and a review line.
+    await _shadow_row(
+        "4",
+        "50",
+        None,
+        [],
+        labels={"participant:42": {"outcome": "low_confidence"}},
+        decision={
+            "targets": {},
+            "review": ["Ring participant check unknown for <@42>"],
+        },
+    )
     async with sessions() as session:
         deleted = await delete_member_moderation_content(session, "42")
         await session.commit()
-    assert deleted.shadow == 2
+    assert deleted.shadow == 3
     assert [row.message_id for row in await rows()] == ["3"]
+
+
+async def test_a_raid_does_not_look_the_same_authors_up_per_message():
+    discord = FakeDiscord()
+    user_id, _ = _scammer(discord)
+    _event(discord, user_id, "hi")
+    reads = BotReads(discord)
+    since = datetime.now(UTC) - timedelta(hours=1)
+    await reads.channel_window(GUILD, str(CHANNEL), since, 100)
+    before = discord.reads.count("fetch_member")
+    discord.cached = False  # make a second lookup go to REST
+    await reads.channel_window(GUILD, str(CHANNEL), since, 100)
+    assert discord.reads.count("fetch_member") == before

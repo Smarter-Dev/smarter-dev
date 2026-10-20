@@ -144,7 +144,8 @@ def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleH
         return [
             RuleHit(
                 rule=ATTACHMENT_FILTER,
-                reason=f"blocked attachment: {blocked[0]['filename']}",
+                # The file type, not its name: a name is member content.
+                reason=f"blocked attachment type {blocked[0]['extension']}",
                 target_user_id=facts.author_id,
                 target_name=facts.author_name,
                 cleanup=(Cleanup(facts.channel_id, facts.message_id),),
@@ -155,7 +156,7 @@ def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleH
         return [
             RuleHit(
                 rule=ATTACHMENT_FILTER,
-                reason=f"cautioned attachment: {warned[0]['filename']}",
+                reason=f"cautioned attachment type {warned[0]['extension']}",
                 target_user_id=facts.author_id,
                 target_name=facts.author_name,
                 notice=NOTICE_ATTACHMENT_WARNED,

@@ -100,8 +100,19 @@ AUTHOR_WINDOW_SECONDS = 600.0
 PER_GUILD_MINUTE = 20
 DAILY_REQUESTS_ENV_VAR = "MODERATION_SHADOW_DAILY_REQUESTS"
 DEFAULT_DAILY_REQUESTS = 500
+#: The day's count lives in the process: a restart or a leader handover
+#: starts it again, so a day can see this cap more than once in the worst
+#: case. The per-minute cap still bounds the rate.
+MAX_TRACKED_AUTHORS = 4096
 
 METER_OPERATION = "moderation_shadow_classifier"
+
+
+def _is_timeout(error: BaseException) -> bool:
+    """The deadline, or a provider's own HTTP timeout (still no retry)."""
+    if isinstance(error, TimeoutError):
+        return True
+    return type(error).__name__ in ("APITimeoutError", "TypeSafeAPITimeoutError")
 
 
 def choose_backend(labels: frozenset[str]) -> str | None:
@@ -175,6 +186,11 @@ class ClassifierBudget:
         self._days[day] = self._days.get(day, 0) + 1
         for key in [key for key in self._days if key[1] < day[1]]:
             del self._days[key]
+        if len(self._authors) > MAX_TRACKED_AUTHORS:
+            for key, calls in list(self._authors.items()):
+                self._trim(calls, now - self.author_window)
+                if not calls:
+                    del self._authors[key]
         return None
 
     def spent_today(self, guild_id: str, now: float) -> int:
@@ -280,10 +296,10 @@ _QUESTION_TEXT = {
 
 _PARTICIPANT_TEXT = (
     "Is this CANDIDATE, a new account that posted in the channel around the "
-    "MESSAGE, taking part in a staged conversation that sets up or promotes "
-    "the event in the MESSAGE (asking leading questions before it, echoing or "
-    "cheering it after)? Messages about something else, or doubtful "
-    "reactions to it, are not."
+    "ad, taking part in a staged conversation that sets up or promotes the "
+    "event in the ad (asking leading questions before it, echoing or cheering "
+    "it after)? The ad is the AD when one is given, otherwise the MESSAGE. "
+    "Messages about something else, or doubtful reactions to it, are not."
 )
 
 _FENCE = re.compile(r"</?untrusted>", re.IGNORECASE)
@@ -307,15 +323,17 @@ def haiku_prompt(request: ClassifierRequest) -> str:
             '- "participants": an object with one entry per CANDIDATE id below, '
             "each answering: " + _PARTICIPANT_TEXT
         )
-    material = [
-        "MESSAGE:",
-        _clip(request.ring_ad or request.content, MAX_MESSAGE_CHARS),
-    ]
+    # The MESSAGE is always the revision being judged; a follow-up's ring
+    # questions are about the earlier AD, which gets its own block.
+    material = ["MESSAGE:", _clip(request.content, MAX_MESSAGE_CHARS)]
     for item in request.attachments[:MAX_ATTACHMENTS]:
         material.append(
             f"Attachment {_clip(item.filename, 200)} "
             f"({item.content_type or 'unknown type'}): {_clip(item.url or '', 500)}"
         )
+    if request.ring_ad is not None:
+        material.append("\nAD (the event post the CANDIDATES may be promoting):")
+        material.append(_clip(request.ring_ad, MAX_MESSAGE_CHARS))
     if request.ring_context:
         material.append("\nCONTEXT (the channel, oldest first, for reference only):")
         material.extend(
@@ -584,23 +602,20 @@ class ModerationClassifier:
                     if any(v.outcome != INVALID_OUTPUT for v in verdicts.values())
                     else INVALID_OUTPUT
                 )
-            except TimeoutError:
+            except Exception as error:  # noqa: BLE001 — unknown, never a retry
+                outcome = TIMEOUT if _is_timeout(error) else ERROR
+                if outcome == ERROR:
+                    # The error can quote the message; log its type and frames.
+                    log_exception(
+                        logger,
+                        "Moderation classifier (%s) failed",
+                        backend,
+                        level=logging.WARNING,
+                    )
                 result.verdicts = {
-                    label: LabelVerdict(label, TIMEOUT) for label in labels
+                    label: LabelVerdict(label, outcome) for label in labels
                 }
-                result.outcome = TIMEOUT
-            except Exception:  # noqa: BLE001 — unknown, never a retry
-                # The error can quote the message; log its type and frames only.
-                log_exception(
-                    logger,
-                    "Moderation classifier (%s) failed",
-                    backend,
-                    level=logging.WARNING,
-                )
-                result.verdicts = {
-                    label: LabelVerdict(label, ERROR) for label in labels
-                }
-                result.outcome = ERROR
+                result.outcome = outcome
         result.latency_ms = int((time.monotonic() - started) * 1000)
         self._account(result, meter, model_name)
         return result

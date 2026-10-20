@@ -80,6 +80,9 @@ class GuildPolicy:
     #: there is no live script to compare.
     scam_banner_matches_reference: bool | None = None
     edit_ping: bool = False
+    #: The live handlers' scopes; empty means every channel, as for handlers.
+    scam_gate_channel_ids: frozenset[str] = frozenset()
+    edit_ping_channel_ids: frozenset[str] = frozenset()
     bump_channel_ids: frozenset[str] = frozenset()
     staff_exempt_role_ids: tuple[str, ...] = ()
     loaded_at: float = field(default=0.0, compare=False)
@@ -164,6 +167,8 @@ async def load_policy(guild_id: str) -> GuildPolicy:
             else None
         ),
         edit_ping=bool(edit and edit.enabled),
+        scam_gate_channel_ids=_scope(scam),
+        edit_ping_channel_ids=_scope(edit),
         bump_channel_ids=frozenset(
             str(channel_id) for channel_id in (bump.channel_ids or [])
         )
@@ -172,6 +177,22 @@ async def load_policy(guild_id: str) -> GuildPolicy:
         staff_exempt_role_ids=staff_roles,
         loaded_at=time.time(),
     )
+
+
+def _scope(handler) -> frozenset[str]:
+    if handler is None:
+        return frozenset()
+    return frozenset(str(channel_id) for channel_id in (handler.channel_ids or []))
+
+
+def in_scope(channel_ids: frozenset[str], channel_id: str) -> bool:
+    """A handler's scope test: no channels listed means every channel.
+
+    The handler dispatch scopes a thread's message by its parent channel; the
+    shadow sees the thread's own id, so a scoped handler's threads read as out
+    of scope here. Both live handlers are guild-wide.
+    """
+    return not channel_ids or channel_id in channel_ids
 
 
 class PolicyCache:
