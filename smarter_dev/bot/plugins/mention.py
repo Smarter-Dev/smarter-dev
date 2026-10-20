@@ -23,6 +23,8 @@ import hikari
 import lightbulb
 from redis.exceptions import RedisError
 
+from smarter_dev.bot.forum_posts import effective_settings
+from smarter_dev.bot.forum_posts import forum_parents
 from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
 from smarter_dev.bot.services.chat_memory import get_chat_memory
@@ -251,14 +253,15 @@ async def _proactive_channel(bot: Any, event: hikari.MessageCreateEvent) -> bool
     A proactive-enabled channel belongs entirely to the proactive plugin: no
     mention, reply, auto-respond or observe path here may run. Fail-soft the
     other way from auto-respond: a lookup failure means "not proactive", so
-    an API blip never silences the classic chat bot.
+    an API blip never silences the classic chat bot. A post in a forum the
+    proactive agent runs for whole counts too, unless the post is off.
     """
     service = _proactive_service(bot)
     if service is None:
         return False
     try:
-        settings = await service.get_settings(
-            str(event.guild_id), str(event.channel_id)
+        settings = await effective_settings(
+            service, forum_parents(bot), str(event.guild_id), str(event.channel_id)
         )
     except Exception:
         log_exception(

@@ -560,7 +560,7 @@ async def test_external_guild_envelopes_never_carry_blocked_content(
     published = []
     queue = SimpleNamespace(
         set_execution_owner=AsyncMock(),
-        publish=AsyncMock(side_effect=lambda envelope: published.append(envelope)),
+        publish=AsyncMock(side_effect=lambda envelope, **_: published.append(envelope)),
         publish_shadow=AsyncMock(),
     )
     run.redis_notification_queue = lambda: queue
@@ -638,7 +638,7 @@ async def test_external_guild_publishes_nothing_for_blocked_reply_or_reaction(
     published = []
     run.redis_notification_queue = lambda: SimpleNamespace(
         set_execution_owner=AsyncMock(),
-        publish=AsyncMock(side_effect=published.append),
+        publish=AsyncMock(side_effect=lambda envelope, **_: published.append(envelope)),
         publish_shadow=AsyncMock(side_effect=published.append),
     )
     bot_message = _channel_messages()[3]
@@ -696,7 +696,7 @@ async def test_watcher_summary_envelope_carries_no_blocked_content(
     published = []
     run.redis_notification_queue = lambda: SimpleNamespace(
         set_execution_owner=AsyncMock(),
-        publish=AsyncMock(side_effect=published.append),
+        publish=AsyncMock(side_effect=lambda envelope, **_: published.append(envelope)),
         publish_shadow=AsyncMock(side_effect=published.append),
     )
 

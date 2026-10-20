@@ -80,7 +80,8 @@ async def test_list_enabled_channels_hits_guild_path(service, mock_api_client):
 
     channels = await service.list_enabled_channels(GUILD)
 
-    mock_api_client.get.assert_awaited_once_with(LIST_PATH)
+    # The bot runs whole forums' posts, so it asks for their rows (#248).
+    mock_api_client.get.assert_awaited_once_with(LIST_PATH, params={"forums": "true"})
     assert [(channel.channel_id, channel.watch_addendum) for channel in channels] == [
         (CHANNEL, "watch for benchmarks"),
         ("333", "watch deployments"),
@@ -174,3 +175,41 @@ async def test_record_wake_usage_posts_split_ledger_payload(
             "entries": entries,
         },
     )
+
+
+async def test_list_enabled_channels_reads_the_forum_mark(service, mock_api_client):
+    mock_api_client.get.return_value = create_mock_response(
+        200,
+        [
+            {"channel_id": CHANNEL, "watch_addendum": ""},
+            {"channel_id": "333", "watch_addendum": "", "is_forum": True},
+        ],
+    )
+
+    channels = await service.list_enabled_channels(GUILD)
+
+    assert [(c.channel_id, c.is_forum) for c in channels] == [
+        (CHANNEL, False),
+        ("333", True),
+    ]
+
+
+async def test_set_enabled_marks_a_whole_forum(service, mock_api_client):
+    mock_api_client.get.return_value = create_mock_response(
+        200,
+        {"guild_id": GUILD, "channel_id": CHANNEL, "enabled": False,
+         "watch_addendum": "keep me"},
+    )
+    mock_api_client.put.return_value = create_mock_response(
+        200,
+        {"guild_id": GUILD, "channel_id": CHANNEL, "enabled": True,
+         "watch_addendum": "keep me", "is_forum": True},
+    )
+
+    settings = await service.set_enabled(GUILD, CHANNEL, True, is_forum=True)
+
+    mock_api_client.put.assert_awaited_once_with(
+        PATH,
+        json_data={"enabled": True, "watch_addendum": "keep me", "is_forum": True},
+    )
+    assert settings.is_forum is True

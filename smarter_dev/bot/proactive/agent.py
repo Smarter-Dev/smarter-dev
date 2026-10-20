@@ -112,7 +112,9 @@ class AgentDeps:
     request_mode: Callable[[str, str, int], str] | None = None
     # Drains the channel's notification queue mid-run (rendered text, marks
     # the covered messages consumed); None means nothing queues mid-run.
-    drain_notifications: Callable[[], str] | None = None
+    # The guild consumer's is async: it reads a forum post's own settings
+    # before letting the agent act there (#248).
+    drain_notifications: Callable[[], str | Awaitable[str]] | None = None
     # Environments already resolved from a callable provider this wake; in
     # production the provider hits Discord REST, so each channel is fetched
     # at most once no matter how many tools read it.
@@ -576,7 +578,10 @@ def build_kimi_agent(
         never spends your tool budget. Check before you finish a wake."""
         if ctx.deps.drain_notifications is None:
             return "No new notifications."
-        return ctx.deps.drain_notifications()
+        drained = ctx.deps.drain_notifications()
+        if isawaitable(drained):
+            drained = await drained
+        return drained
 
     @agent.tool
     @tool_errors_returned

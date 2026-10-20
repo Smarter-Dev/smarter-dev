@@ -6496,6 +6496,11 @@ class ProactiveChannelSettings(Base):
     watch_addendum: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
     )
+    # The row switches on a whole forum (#248): its posts are the channels.
+    # Only a consumer that asks for forum rows is shown it.
+    is_forum: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
 
 class ProactiveAgentHistory(Base):

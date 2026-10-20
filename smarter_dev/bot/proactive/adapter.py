@@ -359,8 +359,10 @@ class AgentConsumer:
                 "tool_calls": deps.budget.used,
                 "note": str(note)[:300],
             },
+            # A forum's posts share its store: each store counted once.
             "watch_instruction_updates": sum(
-                store.updates for store in instruction_stores.values()
+                store.updates
+                for store in {id(s): s for s in instruction_stores.values()}.values()
             ),
         }
 

@@ -200,3 +200,85 @@ async def test_a_stalled_redis_cannot_hold_the_page(db_session, monkeypatch):
     assert turned_on is False
     assert elapsed < 1.0
     assert (await _row(db_session)).enabled is True, "committed before the wake"
+
+
+# --- a whole forum's row (#248) ---------------------------------------------------
+
+
+@pytest.mark.parametrize("seeded", [None, False, True])
+async def test_switching_a_forum_on_marks_its_row_and_wakes_nobody(
+    db_session, seeded
+):
+    if seeded is not None:
+        await _seed(db_session, enabled=seeded)
+    redis = fakeredis.aioredis.FakeRedis()
+
+    assert (
+        await proactive_channels.set_proactive_channel_enabled(
+            db_session,
+            redis,
+            guild_id=GUILD,
+            channel_id=CHANNEL,
+            enabled=True,
+            is_forum=True,
+        )
+        is False
+    )
+
+    row = await _row(db_session)
+    assert (row.enabled, row.is_forum) == (True, True)
+    assert await _requests(redis) == []
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_a_switch_without_a_mark_keeps_the_rows_mark(db_session, enabled):
+    await _seed(db_session, enabled=not enabled)
+    await set_proactive_channel_enabled_flag(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True, is_forum=True
+    )
+    await set_proactive_channel_enabled_flag(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=enabled
+    )
+
+    assert (await _row(db_session)).is_forum is True
+
+
+async def test_the_list_leaves_out_forums_for_a_consumer_that_did_not_ask(
+    db_session,
+):
+    from smarter_dev.web.crud import list_enabled_proactive_channel_settings
+
+    other = "644299524151443488"
+    await set_proactive_channel_enabled_flag(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True, is_forum=True
+    )
+    await set_proactive_channel_enabled_flag(
+        db_session, guild_id=GUILD, channel_id=other, enabled=True
+    )
+    await db_session.commit()
+
+    everything = await list_enabled_proactive_channel_settings(db_session, GUILD)
+    plain = await list_enabled_proactive_channel_settings(
+        db_session, GUILD, include_forums=False
+    )
+
+    assert [row.channel_id for row in everything] == [CHANNEL, other]
+    assert [row.channel_id for row in plain] == [other]
+
+
+async def test_the_addendum_upsert_keeps_the_forum_mark(db_session):
+    from smarter_dev.web.crud import upsert_proactive_channel_settings
+
+    await set_proactive_channel_enabled_flag(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True, is_forum=True
+    )
+    # The worker's PUT of the forum's watch instructions sends no mark.
+    await upsert_proactive_channel_settings(
+        db_session,
+        guild_id=GUILD,
+        channel_id=CHANNEL,
+        enabled=True,
+        watch_addendum='[{"id": "w1"}]',
+    )
+
+    assert (await _row(db_session)).is_forum is True

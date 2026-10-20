@@ -22,6 +22,8 @@
         <p class="sk-text-muted" style="font-size:0.85rem;">
             To switch on a channel that isn't listed, or to change its model and budgets, run
             <code>/proactive on</code> or <code>/configure bot</code> in that channel.
+            A forum can be switched on here as a whole: each of its posts is its own channel,
+            and a post switched off with <code>/proactive off</code> stays off.
         </p>
 
         {% for section in sections %}
@@ -47,15 +49,24 @@
                     <tbody>
                         {% for channel in section.channels %}
                         <tr>
-                            <td>{% if channel.name %}<strong>#{{ channel.name }}</strong>{% elif section.names_unavailable %}<span class="sk-text-muted">&mdash;</span>{% else %}<span class="sk-text-muted">thread or deleted channel</span>{% endif %}</td>
+                            <td>{% if channel.name %}<strong>#{{ channel.name }}</strong>{% elif section.names_unavailable %}<span class="sk-text-muted">&mdash;</span>{% else %}<span class="sk-text-muted">thread or deleted channel</span>{% endif %}{% if channel.is_forum %} <span class="sk-badge">Forum</span> <span class="sk-text-muted" style="font-size:0.85rem;">every post</span>{% endif %}</td>
                             <td><code>{{ channel.channel_id }}</code></td>
-                            <td>{% if channel.enabled %}<span class="sk-badge">On</span>{% else %}<span class="sk-text-muted">Off</span>{% endif %}</td>
+                            <td>{% if channel.enabled %}<span class="sk-badge">On</span>{% elif not channel.configured %}<span class="sk-text-muted">Never on</span>{% else %}<span class="sk-text-muted">Off</span>{% endif %}</td>
                             <td>
+                                {% if channel.configured %}
                                 <form method="post" action="/admin/bot/proactive-channels/{{ section.guild_id }}/{{ channel.channel_id }}" style="margin:0;">
                                     {{ csrf_field() }}
                                     <input type="hidden" name="enabled" value="{{ 'off' if channel.enabled else 'on' }}">
                                     <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Turn off' if channel.enabled else 'Turn on' }}</button>
                                 </form>
+                                {% else %}
+                                <form method="post" action="/admin/bot/proactive-channels/forums" style="margin:0;">
+                                    {{ csrf_field() }}
+                                    <input type="hidden" name="guild_id" value="{{ section.guild_id }}">
+                                    <input type="hidden" name="channel_id" value="{{ channel.channel_id }}">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">Turn on forum</button>
+                                </form>
+                                {% endif %}
                             </td>
                         </tr>
                         {% endfor %}
@@ -70,6 +81,18 @@
             </div>
         </div>
         {% endfor %}
+
+        <div class="sk-panel" style="margin-top:1.5rem;">
+            <div class="sk-panel-head">Switch on a whole forum by ID</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/proactive-channels/forums" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end; margin:0;">
+                    {{ csrf_field() }}
+                    <label>Server ID <input type="text" name="guild_id" inputmode="numeric" pattern="[0-9]{15,22}" required></label>
+                    <label>Forum channel ID <input type="text" name="channel_id" inputmode="numeric" pattern="[0-9]{15,22}" required></label>
+                    <button type="submit" class="sk-btn-outline sk-btn-small">Turn on forum</button>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

@@ -31,6 +31,7 @@ def _record(**overrides) -> SimpleNamespace:
         "channel_id": _CHANNEL,
         "enabled": True,
         "watch_addendum": "wake me when alice posts benchmarks",
+        "is_forum": False,
         "created_at": datetime(2026, 8, 17, 12, 0, tzinfo=timezone.utc),
         "updated_at": datetime(2026, 8, 17, 13, 0, tzinfo=timezone.utc),
     }
@@ -84,15 +85,43 @@ class TestListEnabledProactiveSettings:
             {
                 "channel_id": _CHANNEL,
                 "watch_addendum": "wake me when alice posts benchmarks",
+                "is_forum": False,
             },
             {
                 "channel_id": "666000111222333444",
                 "watch_addendum": "wake me for deployment failures",
+                "is_forum": False,
             },
         ]
         proactive_settings_crud_mock.list_enabled.assert_awaited_once()
         args = proactive_settings_crud_mock.list_enabled.await_args.args
         assert args[1] == _GUILD
+
+    def test_leaves_forum_rows_out_for_a_consumer_that_does_not_ask(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        # A proactive-agent worker from before forums (#248) never asks.
+        proactive_settings_crud_mock.list_enabled.return_value = []
+
+        proactive_settings_client.get(_list_url())
+
+        kwargs = proactive_settings_crud_mock.list_enabled.await_args.kwargs
+        assert kwargs["include_forums"] is False
+
+    def test_lists_and_marks_forum_rows_for_a_consumer_that_asks(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.list_enabled.return_value = [
+            _record(is_forum=True, watch_addendum="")
+        ]
+
+        response = proactive_settings_client.get(_list_url() + "?forums=true")
+
+        kwargs = proactive_settings_crud_mock.list_enabled.await_args.kwargs
+        assert kwargs["include_forums"] is True
+        assert response.json() == [
+            {"channel_id": _CHANNEL, "watch_addendum": "", "is_forum": True}
+        ]
 
     def test_returns_empty_list_when_no_channels_are_enabled(
         self, proactive_settings_client: TestClient, proactive_settings_crud_mock
@@ -122,6 +151,20 @@ class TestPutProactiveSettings:
         assert kwargs["watch_addendum"] == ""
         assert kwargs["guild_id"] == _GUILD
         assert kwargs["channel_id"] == _CHANNEL
+        # Omitted: the stored forum mark is kept (the worker's addendum PUT).
+        assert kwargs["is_forum"] is None
+
+    def test_marks_a_whole_forums_row(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.upsert.return_value = _record(is_forum=True)
+
+        response = proactive_settings_client.put(
+            _url(), json={"enabled": True, "watch_addendum": "", "is_forum": True}
+        )
+
+        assert response.json()["is_forum"] is True
+        assert proactive_settings_crud_mock.upsert.await_args.kwargs["is_forum"] is True
 
     def test_missing_enabled_is_422(
         self, proactive_settings_client: TestClient, proactive_settings_crud_mock

@@ -6011,16 +6011,21 @@ async def get_proactive_channel_settings(
 
 
 async def list_enabled_proactive_channel_settings(
-    session: AsyncSession, guild_id: str
+    session: AsyncSession, guild_id: str, *, include_forums: bool = True
 ) -> list[ProactiveChannelSettings]:
-    """Return enabled proactive channel settings for ``guild_id``."""
+    """Return enabled proactive channel settings for ``guild_id``.
+
+    ``include_forums=False`` leaves out whole-forum rows, for a consumer
+    that would take a forum for a channel (#248).
+    """
+    statement = select(ProactiveChannelSettings).where(
+        ProactiveChannelSettings.guild_id == guild_id,
+        ProactiveChannelSettings.enabled.is_(True),
+    )
+    if not include_forums:
+        statement = statement.where(ProactiveChannelSettings.is_forum.is_(False))
     result = await session.execute(
-        select(ProactiveChannelSettings)
-        .where(
-            ProactiveChannelSettings.guild_id == guild_id,
-            ProactiveChannelSettings.enabled.is_(True),
-        )
-        .order_by(ProactiveChannelSettings.channel_id)
+        statement.order_by(ProactiveChannelSettings.channel_id)
     )
     return list(result.scalars().all())
 
@@ -6043,8 +6048,12 @@ async def upsert_proactive_channel_settings(
     channel_id: str,
     enabled: bool,
     watch_addendum: str,
+    is_forum: bool | None = None,
 ) -> ProactiveChannelSettings:
-    """Insert or update the single proactive-settings row for ``channel_id``."""
+    """Insert or update the single proactive-settings row for ``channel_id``.
+
+    ``is_forum=None`` keeps the row's forum mark (false for a new row).
+    """
     record = await get_proactive_channel_settings(session, guild_id, channel_id)
     if record is None:
         record = ProactiveChannelSettings(
@@ -6052,19 +6061,27 @@ async def upsert_proactive_channel_settings(
             channel_id=channel_id,
             enabled=enabled,
             watch_addendum=watch_addendum,
+            is_forum=bool(is_forum),
         )
         session.add(record)
     else:
         record.guild_id = guild_id
         record.enabled = enabled
         record.watch_addendum = watch_addendum
+        if is_forum is not None:
+            record.is_forum = is_forum
     await session.flush()
     await session.refresh(record)
     return record
 
 
 async def set_proactive_channel_enabled_flag(
-    session: AsyncSession, *, guild_id: str, channel_id: str, enabled: bool
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    channel_id: str,
+    enabled: bool,
+    is_forum: bool | None = None,
 ) -> bool:
     """Write only ``enabled`` for ``channel_id``; True when this call turned it on.
 
@@ -6073,20 +6090,32 @@ async def set_proactive_channel_enabled_flag(
     off, and a missing row is inserted with ``ON CONFLICT DO NOTHING``. Of two
     concurrent enables, the second waits on the first's row lock (or its
     insert) and then matches nothing, so exactly one caller sees True.
-    ``watch_addendum`` is never written.
+    ``watch_addendum`` is never written. ``is_forum`` marks (or unmarks) a
+    whole-forum row; None leaves the mark as it is.
     """
     table = ProactiveChannelSettings.__table__
     insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
+    marked = {} if is_forum is None else {"is_forum": is_forum}
     statement = insert(ProactiveChannelSettings).values(
-        id=uuid4(), guild_id=guild_id, channel_id=channel_id, enabled=enabled
+        id=uuid4(),
+        guild_id=guild_id,
+        channel_id=channel_id,
+        enabled=enabled,
+        **marked,
     )
     if not enabled:
         await session.execute(
             statement.on_conflict_do_update(
-                index_elements=["channel_id"], set_={"enabled": False}
+                index_elements=["channel_id"], set_={"enabled": False, **marked}
             )
         )
         return False
+    if marked:
+        # The mark is written whether or not this call is the one that
+        # turns the row on; only the off-to-on flip below decides the wake.
+        await session.execute(
+            update(table).where(table.c.channel_id == channel_id).values(**marked)
+        )
     flipped = await session.execute(
         update(table)
         .where(table.c.channel_id == channel_id, table.c.enabled.is_not(True))

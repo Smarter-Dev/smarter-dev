@@ -4,7 +4,8 @@ Mirrors the model-override controller's shape (one row per channel, PUT
 upserts) for the two-pass proactive bot:
 
 - ``GET    /api/guilds/{guild_id}/channels/{channel_id}/proactive-settings`` → row or 404.
-- ``GET    /api/guilds/{guild_id}/proactive-settings`` → enabled channel summaries.
+- ``GET    /api/guilds/{guild_id}/proactive-settings`` → enabled channel summaries
+  (whole-forum rows only with ``?forums=true``).
 - ``PUT    /api/guilds/{guild_id}/channels/{channel_id}/proactive-settings`` → upsert, 200.
 - ``POST   /api/guilds/{guild_id}/channels/{channel_id}/proactive-settings/usage``
   → append one wake's per-model spend to the usage ledger, 200.
@@ -89,10 +90,17 @@ class ProactiveGuildSettingsController(Controller):
         self,
         db_session: AsyncSession,
         guild_id: str,
+        forums: bool = False,
     ) -> list[EnabledProactiveChannelRead]:
-        """Return every channel where proactive watching is enabled."""
+        """Return every channel where proactive watching is enabled.
+
+        A whole forum's row (#248) is listed only for a consumer that says
+        it runs forum posts (``forums=true``); one that does not, like a
+        proactive-agent worker from before forums, would take the forum for
+        a channel and its posts for none.
+        """
         records = await list_enabled_proactive_channel_settings(
-            db_session, guild_id
+            db_session, guild_id, include_forums=forums
         )
         return [
             EnabledProactiveChannelRead.model_validate(record)
@@ -177,6 +185,7 @@ class ProactiveChannelSettingsController(Controller):
             channel_id=channel_id,
             enabled=data.enabled,
             watch_addendum=data.watch_addendum,
+            is_forum=data.is_forum,
         )
         # Serialize before commit (Skrift-injected session; see model_overrides).
         response = ProactiveChannelSettingsRead.model_validate(record)
