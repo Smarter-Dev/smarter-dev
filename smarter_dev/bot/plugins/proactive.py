@@ -31,6 +31,7 @@ import logging
 import os
 import socket
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -176,6 +177,9 @@ CONTROL_STREAMS = (CONTROL_STREAM_KEY, CHANNEL_ENABLED_STREAM)
 # while it is set: an older worker would take the forum for a channel.
 FORUM_POSTS_CAPABILITY_KEY = "proactive:v1:capability:forum-posts"
 FORUM_POSTS_CAPABILITY_CACHE_SECONDS = 30.0
+# Channels whose publication route (#248) is remembered; well beyond the
+# channels one bot sees active between two of a channel's notifications.
+ROUTE_CACHE_MAX_ENTRIES = 10_000
 
 
 class ChannelTypeUnknownError(RuntimeError):
@@ -542,6 +546,7 @@ async def _effective_settings(
     effective = await effective_settings(
         service, forum_parents(run.bot), str(guild_id), str(channel_id)
     )
+    run.remember_route(str(channel_id), effective.forum_id)
     if (
         effective.forum_id is None
         or not effective.enabled
@@ -614,6 +619,16 @@ class ProactiveRuntime:
         self.start_consumers = start_consumers
         # (checked at, whether a worker said it runs forum posts)
         self._forum_posts_capability: tuple[float, bool] | None = None
+        # Channel id -> the forum whose settings it ran on when last
+        # admitted (None: its own row, or not a forum post). Publication
+        # routes by it, so it never looks the parent up again (#248).
+        self._routes: OrderedDict[str, str | None] = OrderedDict()
+
+    def remember_route(self, channel_id: str, forum_id: str | None) -> None:
+        self._routes[channel_id] = forum_id
+        self._routes.move_to_end(channel_id)
+        while len(self._routes) > ROUTE_CACHE_MAX_ENTRIES:
+            self._routes.popitem(last=False)
 
     def execution_mode_for(self, guild_id: str) -> str:
         """Resolve ownership per guild so rollout can be canaried safely."""
@@ -786,29 +801,46 @@ class ProactiveRuntime:
     async def _inherits_from_forum(self, guild_id: str, channel_id: str) -> bool:
         """Whether a notification is a forum post's running on its forum's
         settings (#248): those go where only a worker that runs forum posts
-        reads. A post with its own row goes where it always has. Its arrival
-        looked both up, so this is the caches almost always."""
+        reads. Anything with its own row goes where it always has.
+
+        The decision made when the channel was admitted stands. Without one
+        (a restart since, say), its own row is read first; then a post with
+        none whose forum Discord cannot name is taken as inherited, since
+        nothing else could have switched it on, and the forum keys are the
+        ones an older worker cannot take it from.
+        """
+        channel_id = str(channel_id or "")
         if not channel_id:
             return False
-        parents = forum_parents(self.bot)
-        if await parents.forum_for(channel_id) is None:
-            return False
+        if channel_id in self._routes:
+            return self._routes[channel_id] is not None
         service = self.settings_service()
-        if service is None:
-            return True
+        if service is not None:
+            try:
+                own = await service.get_settings(str(guild_id), channel_id)
+            except Exception:  # noqa: BLE001 — unknown: decided by its parent
+                log_exception(
+                    logger,
+                    "proactive routing settings lookup failed channel=%s",
+                    channel_id,
+                    level=logging.WARNING,
+                )
+            else:
+                if own.enabled or getattr(own, "exists", True):
+                    return False
         try:
-            effective = await effective_settings(
-                service, parents, str(guild_id), str(channel_id)
+            forum_id = await forum_parents(self.bot).forum_for(
+                channel_id, strict=True
             )
-        except Exception:  # noqa: BLE001 — unknown: kept from older workers
+        except Exception:  # noqa: BLE001 — unknown parent: kept from older workers
             log_exception(
                 logger,
-                "proactive forum post routing lookup failed channel=%s",
+                "proactive routing parent lookup failed channel=%s",
                 channel_id,
                 level=logging.WARNING,
             )
             return True
-        return effective.forum_id is not None
+        return forum_id is not None
 
     def state_for(self, guild_id: int, channel_id: int) -> ChannelProducerState:
         state = self.channel_states.get(channel_id)

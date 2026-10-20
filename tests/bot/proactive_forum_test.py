@@ -1230,6 +1230,89 @@ async def test_an_external_guilds_post_goes_where_only_a_forum_worker_reads(
     assert await redis.xlen(redis_queue.READY_STREAM_KEY) == 1
 
 
+async def _published_channels(redis, stream) -> list[str]:
+    return [
+        json.loads(fields[b"payload"])["channel_id"]
+        for _id, fields in await redis.xrange(stream)
+    ]
+
+
+async def test_an_inherited_post_stays_on_the_forum_keys_when_its_parent_is_lost(
+    forum_setup, monkeypatch
+):
+    """Astra's snapshot-5 regression: the parent cache evicts the post and
+    Discord then fails, between admission and publication."""
+    import fakeredis.aioredis
+
+    from smarter_dev.bot.proactive import redis_queue
+
+    setup = forum_setup({FORUM: True}, cache_posts=False)
+    redis = fakeredis.aioredis.FakeRedis()
+    await redis.set(proactive.FORUM_POSTS_CAPABILITY_KEY, "1")
+    _external(setup, monkeypatch, redis)
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    parents = forum_posts.forum_parents(setup.bot)
+    original_enqueue = setup.run.enqueue_notification
+
+    async def enqueue_after_eviction(*args, **kwargs):
+        assert parents.known_forum_for(str(POST)) == str(FORUM)
+        for index in range(forum_posts.FORUM_PARENT_CACHE_MAX_ENTRIES):
+            forum_posts._remember(parents._parents, str(100000 + index), None)
+        assert str(POST) not in parents._parents
+        setup.bot.rest.fetch_channel.side_effect = TimeoutError("Discord unavailable")
+        setup.bot.rest.fetch_channel.reset_mock()
+        await original_enqueue(*args, **kwargs)
+
+    monkeypatch.setattr(setup.run, "enqueue_notification", enqueue_after_eviction)
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    # Routed by the decision made at admission, with no second lookup.
+    setup.bot.rest.fetch_channel.assert_not_awaited()
+    guild = str(GUILD)
+    assert await _published_channels(redis, redis_queue.wake_stream_key(guild)) == []
+    assert await _published_channels(
+        redis, redis_queue.forum_wake_stream_key(guild)
+    ) == [str(POST)]
+
+
+@pytest.mark.parametrize(
+    ("rows", "stream"),
+    [
+        # Its own row: where it always went, whatever its parent.
+        ({FORUM: True, POST: True}, "wake_stream_key"),
+        # No row of its own: only its forum could have switched it on.
+        ({FORUM: True}, "forum_wake_stream_key"),
+    ],
+)
+async def test_a_post_whose_parent_is_unknown_with_no_admission_on_record(
+    forum_setup, monkeypatch, rows, stream
+):
+    """A notification with no admission decision on record (one made before
+    a restart, say) and a parent Discord cannot name."""
+    import fakeredis.aioredis
+
+    from smarter_dev.bot.proactive import redis_queue
+
+    setup = forum_setup(rows, cache_posts=False)
+    redis = fakeredis.aioredis.FakeRedis()
+    _external(setup, monkeypatch, redis)
+    setup.bot.rest.fetch_channel.side_effect = TimeoutError("Discord unavailable")
+
+    await setup.run.enqueue_notification(
+        str(GUILD),
+        mention_notification(
+            proactive.channel_message_from_hikari(_message(500)),
+            channel_id=str(POST),
+            channel_name="How do I sort a dict?",
+        ),
+    )
+
+    published = await _published_channels(
+        redis, getattr(redis_queue, stream)(str(GUILD))
+    )
+    assert published == [str(POST)]
+
+
 async def test_an_unreadable_capability_counts_as_no_forum_worker(
     forum_setup, monkeypatch
 ):

@@ -116,7 +116,10 @@ class ForumParents:
         """The forum already looked up for this channel; never calls Discord."""
         return self._parents.get(str(channel_id))
 
-    async def forum_for(self, channel_id: str) -> str | None:
+    async def forum_for(self, channel_id: str, *, strict: bool = False) -> str | None:
+        """The post's forum, or None when it is not a forum post. A lookup
+        Discord could not answer is None too, unless ``strict``: then it
+        raises, for a caller that must tell "unknown" from "not a post"."""
         channel_id = str(channel_id)
         if channel_id in self._parents:
             self._parents.move_to_end(channel_id)
@@ -126,6 +129,8 @@ class ForumParents:
         except hikari.NotFoundError:
             forum_id = None
         except Exception:  # noqa: BLE001 — unknown means "not a forum post"
+            if strict:
+                raise
             log_exception(
                 logger,
                 "forum parent lookup failed channel=%s",

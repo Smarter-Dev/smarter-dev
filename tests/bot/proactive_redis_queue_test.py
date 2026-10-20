@@ -426,8 +426,19 @@ def test_contract_rejects_cross_guild_or_unknown_data():
 async def test_external_runtime_publishes_without_creating_embedded_agent(
     redis_client,
 ):
+    async def get_settings(_guild_id, _channel_id):
+        # The channel's own row: published on the shared keys (#248).
+        return SimpleNamespace(enabled=True, exists=True)
+
     runtime = proactive.ProactiveRuntime(
-        SimpleNamespace(d={"chat_memory_redis": redis_client}),
+        SimpleNamespace(
+            d={
+                "chat_memory_redis": redis_client,
+                "proactive_settings_service": SimpleNamespace(
+                    get_settings=get_settings
+                ),
+            }
+        ),
         execution_mode=proactive.EXTERNAL_EXECUTION_MODE,
     )
 
