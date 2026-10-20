@@ -81,12 +81,8 @@ def upgrade() -> None:
             name="uq_moderation_shadow_decisions_revision",
         ),
     )
-    op.create_index(
-        "ix_moderation_shadow_decisions_created_at", TABLE, ["created_at"]
-    )
-    op.create_index(
-        "ix_moderation_shadow_decisions_author_id", TABLE, ["author_id"]
-    )
+    op.create_index("ix_moderation_shadow_decisions_created_at", TABLE, ["created_at"])
+    op.create_index("ix_moderation_shadow_decisions_author_id", TABLE, ["author_id"])
     op.create_index(
         "ix_moderation_shadow_decisions_unchecked",
         TABLE,
