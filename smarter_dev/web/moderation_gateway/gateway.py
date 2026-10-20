@@ -880,8 +880,11 @@ class ModerationGateway:
                 and op.expires_at is not None
                 and op.expires_at >= desired - EXTEND_MIN_SECONDS
             ):
-                # Reconciled as never applied: the one retry it allows.
-                return _Decision(until=op.expires_at, key=op.idempotency_key)
+                # Reconciled as never applied: the one retry it allows. It
+                # runs from now; the first request's expiry may have passed.
+                return _Decision(
+                    until=max(op.expires_at, desired), key=op.idempotency_key
+                )
         key = f"{prefix}{len(earlier)}"
         current = state.until if state.until and state.until > now else None
         if current is not None:
@@ -1112,6 +1115,8 @@ class ModerationGateway:
                 twin.actor = op.actor
                 twin.reason = op.reason
                 twin.detail = None
+                twin.requested = op.requested
+                twin.expires_at = op.expires_at
                 await session.commit()
                 return twin.id, None
             await session.commit()

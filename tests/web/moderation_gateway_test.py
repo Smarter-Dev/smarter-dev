@@ -582,6 +582,33 @@ async def test_a_repeated_timeout_is_the_same_request_across_a_second_boundary(
     assert await count(db, ModerationAction) == 1
 
 
+async def test_a_retried_short_timeout_runs_from_the_retry_not_the_first_request(
+    discord, db, clock
+):
+    # #249's delta review: a 30 s timeout repeated at +45 s was sent with the
+    # first request's expiry, 15 s in the past, and recorded as confirmed.
+    gateway = make_gateway(discord, db, clock)
+    proposal = Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=30)
+    discord.fail["set_timeout"] = ConnectionError("never arrived")
+    first = await gateway.act(spam_trigger(), [proposal])
+    assert first.outcomes[0].state == t.UNKNOWN
+    clock.now += 10
+    await gateway.reconcile_pending()
+    clock.now += 35
+
+    retry = await gateway.act(spam_trigger(), [proposal])
+
+    assert retry.outcomes[0].state == t.CONFIRMED
+    assert [call[2] for call in discord.calls if call[0] == "timeout"] == [
+        clock.now + 30
+    ]
+    (op,) = await rows(db, ModerationOperation)
+    assert op.expires_at == clock.now + 30
+    assert op.requested["until"] == clock.now + 30
+    assert retry.outcomes[0].expires_at.timestamp() == clock.now + 30
+    assert await count(db, ModerationAction) == 1
+
+
 @pytest.mark.parametrize("gap", [0.0, 1.0, 4.0])
 async def test_an_unknown_timeout_is_not_resent_inside_the_grace_and_gets_one_row(
     discord, db, clock, gap
@@ -1076,6 +1103,71 @@ def test_trimming_keeps_failures_and_alerts_and_drops_the_least_important_first(
     # Quotes and the long assessment went before any failure did.
     assert "join our hackathon" not in text
     assert "the classifier said" not in text
+
+
+def test_failures_and_alerts_that_overflow_alone_are_counted_not_cut():
+    # #249's delta review: 40 failed timeouts cut the alert and the tail of
+    # the failed lines, with no count.
+    from uuid import uuid4
+
+    from smarter_dev.web.moderation_gateway.report import ReportEntry
+    from smarter_dev.web.moderation_gateway.report import ReportFacts
+    from smarter_dev.web.moderation_gateway.report import ReportOperation
+    from smarter_dev.web.moderation_gateway.report import render_report
+
+    def alert(text):
+        return ReportEntry(
+            kind=t.ENTRY_ALERT,
+            source="spam_ring",
+            rule=text,
+            content=None,
+            target_user_id=None,
+            channel_id=None,
+            message_id=None,
+        )
+
+    users = [str(9000 + i) for i in range(40)]
+    facts = ReportFacts(
+        incident_id=uuid4(),
+        guild_id=GUILD,
+        subject_user_id=users[0],
+        channel_id=CHANNEL,
+        trigger_message_id=MESSAGE,
+        opened_at=1_790_000_000.0,
+        ping_role_id=None,
+        entries=tuple(
+            alert(f"**Sweep {i} failed**, " + "so some accounts were missed. " * 4)
+            for i in range(12)
+        ),
+        operations=tuple(
+            ReportOperation(
+                kind=t.TIMEOUT,
+                state=t.FAILED,
+                actor="spam_ring",
+                target_user_id=user,
+                target_username=f"member{user}",
+                detail="missing permission",
+                channel_id=CHANNEL,
+                message_ids=(),
+                deleted=(),
+                duration_seconds=604800,
+                expires_at=None,
+            )
+            for user in users
+        ),
+    )
+
+    text = render_report(facts)
+
+    assert len(text) <= 2000
+    assert text.rstrip().endswith("edited as it develops")
+    assert "…" not in text.replace("…and", "")
+    shown = sum(f"<@{user}> member{user}: timeout" in text for user in users)
+    assert shown < 40
+    assert f"- …and {40 - shown} more (**{40 - shown} failed or unresolved**)" in text
+    assert "Sweep 11 failed" in text
+    shown_alerts = sum(f"Sweep {i} failed" in text for i in range(12))
+    assert f"…and {12 - shown_alerts} earlier alert(s)" in text
 
 
 async def test_the_spam_engines_ping_goes_out_when_it_joins_a_posted_report(

@@ -1015,7 +1015,17 @@ class HandlerExecution:
                 if await gateway.claim_member_message(
                     incident_id, kind=MESSAGE_NOTICE, target_user_id=target_user
                 ):
-                    message_id = await post_notice()
+                    try:
+                        message_id = await post_notice()
+                    finally:
+                        # Not posted (a cap, a 4xx, a gone channel): the next
+                        # warn may still post it.
+                        if not message_id:
+                            await gateway.release_member_message(
+                                incident_id,
+                                kind=MESSAGE_NOTICE,
+                                target_user_id=target_user,
+                            )
             else:
                 message_id = await post_notice()
                 # Recorded on leaving this block, BEFORE the DM: the notice is

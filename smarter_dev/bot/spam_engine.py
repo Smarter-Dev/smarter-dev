@@ -1162,6 +1162,7 @@ async def _warn_author(
                 target_user_id=str(event.author.id),
             ):
                 return
+        posted = False
         try:
             await bot.rest.create_message(
                 event.channel_id,
@@ -1170,6 +1171,7 @@ async def _warn_author(
                 user_mentions=[event.author.id],
                 role_mentions=False,
             )
+            posted = True
         except hikari.ForbiddenError:
             logger.warning(
                 "Cannot post spam warning in channel %s (missing permissions)",
@@ -1178,6 +1180,15 @@ async def _warn_author(
             if slot.go:
                 slot.fail("missing permission to post the warning")
             return
+        finally:
+            # A notice that never went out gives its claim back, so a later
+            # warning in the incident may still post it.
+            if not posted and not slot.go:
+                await gateway.release_member_message(
+                    slot.incident_id,
+                    kind=gw.MESSAGE_NOTICE,
+                    target_user_id=str(event.author.id),
+                )
         if slot.go:
             slot.confirm()
 

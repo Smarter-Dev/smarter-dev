@@ -397,6 +397,40 @@ async def test_a_compromised_account_still_gets_its_secure_your_account_dm(world
     assert "warn" not in [row.action_type for row in await world.rows()]
 
 
+@pytest.mark.parametrize("failure", ["raises", "answers_false"])
+async def test_a_warn_notice_that_failed_to_post_is_posted_by_the_next_warn(
+    world, failure
+):
+    """#249's delta review: a failed notice kept its claim, so it never went out.
+
+    The send raises (a 4xx in the home channel) or answers False (a gone
+    explicit channel). Either way the next warn in the incident posts it.
+    """
+    emitter = world.handler_messages
+    post = emitter.create_message
+    failures = []
+
+    async def failing_once(channel_id, content, ping_role_id=None, **kwargs):
+        if "has been warned" in content and not failures:
+            failures.append(content)
+            if failure == "answers_false":
+                return False
+            raise RuntimeError("403 Forbidden")
+        return await post(channel_id, content, ping_role_id, **kwargs)
+
+    emitter.create_message = failing_once
+    await _spam_engine(world, _LocalLocks())
+    await _scam_banner(world, _LocalLocks(), account_days=400)
+    assert failures and not _warn_notices(world)
+
+    world.redis = fakeredis_aioredis.FakeRedis()
+    again = await _scam_banner(world, _LocalLocks(), account_days=400)
+
+    assert again.outcome == "ok", again.error
+    assert len(_warn_notices(world)) == 1
+    assert "warn" not in [row.action_type for row in await world.rows()]
+
+
 # -- the audit log's echoes ---------------------------------------------------------
 
 

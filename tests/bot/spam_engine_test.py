@@ -1792,3 +1792,46 @@ async def test_a_warning_after_a_timeout_in_the_incident_still_posts_its_notice_
     ]
     assert len(notices) == 1
     assert [row.action_type for row in await engine_harness.rows()] == ["timeout"]
+
+
+async def test_a_warning_notice_that_failed_to_post_is_posted_by_the_next_warning(
+    engine_harness,
+):
+    """#249's delta review: a failed notice kept its claim, so it never went out."""
+    from smarter_dev.bot.moderation_port import bot_gateway
+    from smarter_dev.web.moderation_gateway import Proposal
+    from smarter_dev.web.moderation_gateway import Trigger
+
+    gateway = bot_gateway(engine_harness.bot)
+    trigger = Trigger(
+        guild_id=str(GUILD_ID),
+        actor=spam_engine.GATEWAY_ACTOR,
+        reason="message rate",
+        channel_id=str(CHANNEL_ID),
+        message_id=str(MESSAGE_ID),
+        author_id=str(AUTHOR_ID),
+    )
+    await gateway.act(
+        trigger,
+        [Proposal(kind="timeout", target_user_id=str(AUTHOR_ID), duration_seconds=600)],
+    )
+    decision = spam_engine.SpamDecision(
+        action=spam_engine.SPAM_ACTION_WARN,
+        reasons=(spam_engine.SPAM_REASON_MESSAGE_RATE,),
+        should_delete_message=False,
+    )
+    event = _event("hi")
+    engine_harness.rest.create_message_raises = hikari.ForbiddenError(
+        url="url", headers={}, raw_body=b"", message="missing SEND_MESSAGES"
+    )
+    await spam_engine._warn_author(engine_harness.bot, gateway, trigger, event, decision)
+    engine_harness.rest.create_message_raises = None
+
+    await spam_engine._warn_author(engine_harness.bot, gateway, trigger, event, decision)
+    await spam_engine._warn_author(engine_harness.bot, gateway, trigger, event, decision)
+
+    notices = [
+        m for m in engine_harness.rest.created_messages if m["channel"] == str(CHANNEL_ID)
+    ]
+    assert len(notices) == 1
+    assert [row.action_type for row in await engine_harness.rows()] == ["timeout"]
