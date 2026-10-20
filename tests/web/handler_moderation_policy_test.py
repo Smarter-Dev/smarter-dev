@@ -8,6 +8,7 @@ import pytest
 
 from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_REFERENCE_SHA256
 from smarter_dev.web.handler_moderation_policy import moderation_refusal
+from smarter_dev.web.handler_moderation_policy import rename_refusal
 from smarter_dev.web.handler_moderation_policy import sanction_calls
 from smarter_dev.web.handler_moderation_policy import script_sha256
 
@@ -106,3 +107,35 @@ def test_scam_banner_may_be_put_back_to_its_reference_copy_only():
     assert moderation_refusal(
         REFERENCE + "\n", existing_script=LIVE, handler_name="scam-banner"
     )
+
+
+def test_a_handler_without_a_sanction_may_not_take_up_the_reference_copy():
+    # #255: rename a harmless handler to scam-banner, then put the reference
+    # script on it: a second scam-banner, not the original's frozen copy.
+    harmless = 'await send_message("hi", "C1")\n'
+    reason = moderation_refusal(
+        REFERENCE, existing_script=harmless, handler_name="scam-banner"
+    )
+    assert reason is not None and "can no longer punish" in reason
+    # An existing script nothing can read vouches for no sanction either.
+    assert moderation_refusal(
+        REFERENCE, existing_script="ban_user(\n", handler_name="scam-banner"
+    )
+
+
+def test_adding_a_sanction_to_a_harmless_handler_reads_as_a_new_punisher():
+    # #255: "this handler punishes members" was wrong for one that did not.
+    reason = moderation_refusal(LIVE, existing_script='await send_message("hi")\n')
+    assert reason is not None
+    assert "can no longer punish members (ban_user)" in reason
+    assert "moderation system" in reason
+    assert "this handler punishes members" not in reason
+
+
+def test_a_live_punisher_keeps_its_name():
+    reason = rename_refusal(LIVE, name="keyword-watch", new_name="scam-banner")
+    assert reason is not None and "can no longer be renamed" in reason
+    assert rename_refusal(LIVE, name="keyword-watch", new_name="keyword-watch") is None
+    # Disarmed, it is an ordinary handler again.
+    disarmed = 'await send_message("scam?", "MODS")\n'
+    assert rename_refusal(disarmed, name="keyword-watch", new_name="other") is None

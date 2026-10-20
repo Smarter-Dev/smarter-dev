@@ -53,6 +53,13 @@ _recurring_chain = RECURRING_CHAINS["admin"]
 _CREATED_BY_EXTENSION = "extension"
 _TIME_TRIGGERS = ("schedule", "timer")
 
+#: Refusal for reconfiguring or updating an install of a template that moved
+#: into the moderation system; it can still be disabled or uninstalled.
+RETIRED_CONFIG_REFUSAL = (
+    "This extension has moved into the moderation system, so its config can "
+    "no longer be changed. You can still disable or uninstall it."
+)
+
 
 class ExtensionInstallError(Exception):
     """A domain failure of an extension operation; ``str(exc)`` is flash-ready."""
@@ -226,6 +233,10 @@ async def _apply(
     cleaned: dict,
 ) -> ExtensionInstall:
     """Render + reconcile rows for a new config, then advance the install."""
+    if loaded.manifest.moved_to_moderation:
+        # Re-rendering would rewrite a frozen punisher (new keywords, a
+        # harsher allowed action) past the handler API's freeze.
+        raise ExtensionInstallError(RETIRED_CONFIG_REFUSAL)
     rendered = _render(loaded.manifest, cleaned, loaded.scripts)
     try:
         await _sync_handler_rows(session, install, loaded, rendered)

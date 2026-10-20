@@ -408,6 +408,83 @@ async def test_a_live_punishing_script_is_frozen_but_scam_banner_can_be_reapplie
     assert disarmed.status_code == 200
 
 
+def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
+    """#255: rename a handler with no sanction to scam-banner, then put the
+    reference script on it. Only the original row may take that copy."""
+    harmless = _body(name="notes")["script"]
+    handler_id = client.post("/api/admin/handlers", json=_body(name="notes")).json()[
+        "handler_id"
+    ]
+    renamed = client.put(
+        f"/api/admin/handlers/{handler_id}",
+        json={
+            "name": "scam-banner",
+            "description": "d",
+            "script": harmless,
+            "settings": {},
+            "channel_ids": [],
+        },
+    )
+    reference = (
+        Path(__file__).resolve().parents[3]
+        / "scripts/handler_scripts/scam-banner.monty"
+    ).read_text()
+    reapplied = client.put(
+        f"/api/admin/handlers/{handler_id}/script",
+        json={"script": reference, "expected_script": harmless},
+    )
+
+    assert renamed.status_code == 200
+    assert reapplied.status_code == 422
+    assert "can no longer punish members" in reapplied.text
+    assert _script_of(client, handler_id)["script"] == harmless
+
+
+async def test_a_live_punisher_cannot_be_renamed(db_session, submitted, no_guards):
+    """#255: renaming is how another punisher would take up scam-banner's
+    reference copy, so a handler that keeps a sanction keeps its name."""
+    record = AdminHandler(
+        guild_id="G1",
+        name="keyword-watch",
+        trigger_type="message",
+        settings={},
+        channel_ids=[],
+        description="bans keywords",
+        script=BANNING,
+        created_by_admin="A1",
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+
+    async with _async_client(db_session) as client:
+        renamed = await client.put(
+            f"/api/admin/handlers/{handler_id}",
+            json={
+                "name": "scam-banner",
+                "description": "d",
+                "script": BANNING,
+                "settings": {},
+                "channel_ids": [],
+            },
+        )
+        disarmed_and_renamed = await client.put(
+            f"/api/admin/handlers/{handler_id}",
+            json={
+                "name": "keyword-notes",
+                "description": "d",
+                "script": "x = 1\n",
+                "settings": {},
+                "channel_ids": [],
+            },
+        )
+
+    assert renamed.status_code == 422
+    assert "can no longer be renamed" in renamed.text
+    assert disarmed_and_renamed.status_code == 200
+    assert disarmed_and_renamed.json()["name"] == "keyword-notes"
+
+
 def test_the_full_update_locks_the_row_it_checks(client, db_session, monkeypatch):
     """#255: the sanction check reads the live script, so the full update
     loads it FOR UPDATE; a concurrent write cannot land between the check

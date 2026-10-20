@@ -455,9 +455,7 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
     )
     assert recorded
     # The daily cap's read-back (#255), on Postgres's JSON operators.
-    assert await ShadowRecorder().requests_today([GUILD], now.timestamp()) == {
-        GUILD: 1
-    }
+    assert await ShadowRecorder().requests_today([GUILD], now.timestamp()) == {GUILD: 1}
     async with db() as session:
         session.add(
             MemberActivity(

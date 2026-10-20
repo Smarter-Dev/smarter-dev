@@ -62,8 +62,10 @@
                                 {% elif not install %}
                                 <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/install" class="sk-btn">Install</a>
                                 {% else %}
+                                {% if not manifest.moved_to_moderation %}
                                 <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/configure" class="sk-btn-outline sk-btn-small">Configure</a>
-                                {% if manifest.version > install.installed_version %}
+                                {% endif %}
+                                {% if manifest.version > install.installed_version and not manifest.moved_to_moderation %}
                                 <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/update" style="display:inline;">
                                     <button type="submit" class="sk-btn sk-btn-small">Update</button>
                                 </form>

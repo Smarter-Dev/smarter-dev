@@ -270,6 +270,57 @@ async def test_a_template_moved_into_moderation_is_not_installed(
     assert await _count_handlers(db_session, GUILD) == 0
 
 
+async def test_an_install_of_a_moved_template_cannot_be_reconfigured(
+    db_session, worker_stub, monkeypatch
+):
+    """#255: re-rendering an existing Keyword Watch install with keywords
+    "hello" and allowed_actions "ban" would make a new punisher past the
+    handler API's freeze. Config edits and updates are refused; disabling
+    and uninstalling still work."""
+    from smarter_dev.extensions.registry import get_registry
+
+    retired = get_registry().get("keyword-watch")
+    before = _loaded(
+        retired.manifest.model_copy(update={"moved_to_moderation": None}),
+        retired.scripts,
+    )
+    _use_registry(monkeypatch, before)
+    install = await install_extension(
+        db_session,
+        guild_id=GUILD,
+        slug="keyword-watch",
+        raw_config=dict(retired.manifest.example_config),
+        installed_by="admin",
+    )
+    scripts = {row.id: row.script for row in await _owned(db_session, install.id)}
+    _use_registry(monkeypatch, retired)
+
+    with pytest.raises(ExtensionInstallError, match="moderation system"):
+        await edit_extension_config(
+            db_session,
+            guild_id=GUILD,
+            slug="keyword-watch",
+            raw_config={
+                **retired.manifest.example_config,
+                "keywords": "hello",
+                "allowed_actions": "ban",
+            },
+        )
+    with pytest.raises(ExtensionInstallError, match="moderation system"):
+        await update_extension(db_session, guild_id=GUILD, slug="keyword-watch")
+    owned = await _owned(db_session, install.id)
+    assert {row.id: row.script for row in owned} == scripts
+    stored = await get_install(db_session, GUILD, "keyword-watch")
+    assert stored.config == install.config
+
+    disabled = await set_extension_enabled(
+        db_session, guild_id=GUILD, slug="keyword-watch", enabled=False
+    )
+    assert disabled.enabled is False
+    await uninstall_extension(db_session, guild_id=GUILD, slug="keyword-watch")
+    assert await get_install(db_session, GUILD, "keyword-watch") is None
+
+
 # -- config edit ---------------------------------------------------------------
 
 
