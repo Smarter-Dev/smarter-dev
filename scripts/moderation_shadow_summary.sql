@@ -86,11 +86,12 @@ SELECT count(*) AS revisions_reusing_a_verdict
  WHERE created_at >= :since
    AND jsonb_array_length(coalesce(classifier::jsonb -> 'reused_labels', '[]'::jsonb)) > 0;
 
--- 9. Provisional timeouts (high-signal scams) and what became of them
+-- 9. Provisional timeouts (high-signal scams) and what became of them. A row
+-- without one stores JSON null, not SQL NULL (the JSON column type).
 SELECT provisional ->> 'resolution' AS resolution, count(*),
        percentile_disc(0.5) WITHIN GROUP (ORDER BY (provisional ->> 'after_ms')::int) AS p50_ms_to_hold
   FROM moderation_shadow_decisions
- WHERE created_at >= :since AND provisional IS NOT NULL
+ WHERE created_at >= :since AND provisional::text <> 'null'
  GROUP BY 1;
 
 -- 10. Staff the rules would have acted on, and the decision latency
