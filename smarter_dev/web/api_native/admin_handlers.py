@@ -54,6 +54,7 @@ from smarter_dev.web.api_native.errors import parse_uuid_path
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_moderation_policy import moderation_refusal
+from smarter_dev.web.handler_moderation_policy import rename_refusal
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
@@ -290,6 +291,9 @@ class AdminHandlerController(Controller):
 
         if data.name is not None:
             name = _normalized_name(data.name)
+            reason = rename_refusal(data.script, name=record.name, new_name=name)
+            if reason is not None:
+                raise plain_error(422, reason)
             if await _name_taken(
                 db_session, record.guild_id, name, exclude_id=record.id
             ):

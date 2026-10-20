@@ -15,8 +15,10 @@ works (an edit of the handler's other fields), and so does removing every
 sanction from it, but any other change is refused. Keeping only the sanction
 call sites would not be enough: the condition around a ``ban_user`` call is
 the punisher, and rewriting it ("ban anyone who says hello") keeps the call.
-The one exception is scam-banner, which may be put back to its reference copy
-(:data:`SCAM_BANNER_REFERENCE_SHA256`) until the cutover retires it.
+Nor can it be renamed. The one exception is scam-banner, which may be put back
+to its reference copy (:data:`SCAM_BANNER_REFERENCE_SHA256`) until the cutover
+retires it; a handler without a sanction cannot take that copy up, so the only
+row it applies to is the original.
 
 A script Python cannot parse is refused outright: the runtime (Monty) accepts
 syntax Python 3.13 rejects, so any other reading of such a script could miss a
@@ -28,7 +30,8 @@ real quote and could swallow the code after it.
 Removing messages, roles and threads stay available for upkeep (the role rule
 refuses staff roles separately, ``staff_protection.role_refusal``). The
 catalog's moderation templates are retired the same way
-(``ExtensionManifest.moved_to_moderation``).
+(``ExtensionManifest.moved_to_moderation``): their installs cannot be
+reconfigured, only disabled or uninstalled (``extension_installs``).
 """
 
 from __future__ import annotations
@@ -70,6 +73,12 @@ FROZEN_REFUSAL = (
     "this handler punishes members ({calls}), so it can no longer be changed: "
     "bans, kicks, timeouts, holds and warnings are moving to the server's "
     "moderation system. Save it unchanged, or remove every sanction from it"
+)
+
+FROZEN_RENAME_REFUSAL = (
+    "this handler punishes members ({calls}), so it can no longer be renamed: "
+    "bans, kicks, timeouts, holds and warnings are moving to the server's "
+    "moderation system. Keep its name, or remove every sanction from it"
 )
 
 UNPARSEABLE_REFUSAL = "the script is not valid Python ({error})"
@@ -132,7 +141,10 @@ def moderation_refusal(
         return UNPARSEABLE_REFUSAL.format(error=_parse_error(error))
     if not calls:
         return None
-    if existing_script is None:
+    if not _uses_sanctions(existing_script):
+        # Nothing frozen to keep: a new punisher, whatever the name says. The
+        # reference copy below is the original scam-banner row's own script,
+        # never one a renamed handler takes up.
         return REFUSAL.format(calls=", ".join(sorted(calls)))
     if script == existing_script:
         return None
@@ -142,6 +154,26 @@ def moderation_refusal(
     ):
         return None
     return FROZEN_REFUSAL.format(calls=", ".join(sorted(calls)))
+
+
+def rename_refusal(script: str | None, *, name: str, new_name: str) -> str | None:
+    """Why a handler saving ``script`` may not be renamed, or None.
+
+    A handler that keeps a sanction keeps its name too, so the one named
+    scam-banner is the original row and no other can take up the name (and
+    with it the reference copy). Call after :func:`moderation_refusal` passed.
+    """
+    if new_name == name or not _uses_sanctions(script):
+        return None
+    return FROZEN_RENAME_REFUSAL.format(calls=", ".join(sorted(sanction_calls(script))))
+
+
+def _uses_sanctions(script: str | None) -> bool:
+    """Whether ``script`` uses a sanction; an unparseable one counts as not."""
+    try:
+        return bool(sanction_calls(script))
+    except (SyntaxError, ValueError):
+        return False
 
 
 def _parse_error(error: SyntaxError | ValueError) -> str:

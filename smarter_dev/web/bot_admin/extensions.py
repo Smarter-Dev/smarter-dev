@@ -52,6 +52,7 @@ from smarter_dev.extensions.schema import ExtensionManifest
 from smarter_dev.web.bot_admin.campaigns import fetch_guild_or_error
 from smarter_dev.web.discord_admin_client import DiscordAdminError
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
+from smarter_dev.web.extension_installs import RETIRED_CONFIG_REFUSAL
 from smarter_dev.web.extension_installs import ExtensionConfigOutdatedError
 from smarter_dev.web.extension_installs import ExtensionInstall
 from smarter_dev.web.extension_installs import ExtensionInstallError
@@ -313,6 +314,10 @@ class ExtensionsAdminController(Controller):
         install = await _find_install(db_session, guild_id, slug)
         if install is None:
             return await _redirect_not_installed(request, guild_id)
+        if loaded.manifest.moved_to_moderation:
+            # Retired: config edits are refused, so the form is not offered.
+            flash_error(request, RETIRED_CONFIG_REFUSAL)
+            return _redirect_list(guild_id)
 
         return await _render_config_form(
             request, db_session, guild, guild_id, loaded, "configure",
