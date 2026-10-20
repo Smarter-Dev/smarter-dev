@@ -1170,7 +1170,19 @@ async def _warn_author(
                 user_mentions=[event.author.id],
                 role_mentions=False,
             )
-        except hikari.ForbiddenError:
+        except hikari.ClientHTTPResponseError as error:
+            # A 4xx: Discord refused it, so the claim goes back and a later
+            # warning in the incident may post it. A 5xx, a timeout or a
+            # cancellation may have posted it and keeps the claim: a missed
+            # notice beats a second one.
+            if not slot.go:
+                await gateway.release_member_message(
+                    slot.incident_id,
+                    kind=gw.MESSAGE_NOTICE,
+                    target_user_id=str(event.author.id),
+                )
+            if not isinstance(error, hikari.ForbiddenError):
+                raise
             logger.warning(
                 "Cannot post spam warning in channel %s (missing permissions)",
                 event.channel_id,

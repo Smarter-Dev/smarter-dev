@@ -246,14 +246,14 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         tail.append("To undo a ban: Server Settings → Bans.")
     tail.append(f"-# {marker(facts.incident_id)} · edited as it develops")
 
-    def render(reason_lines, effect_lines, quote_lines, note_lines) -> str:
+    def render(reason_lines, effect_lines, quote_lines, alert_lines, note_lines) -> str:
         parts = list(head)
         if reason_lines:
             parts += ["**Why:**", *reason_lines]
         parts += ["**Actions:**", *(effect_lines or ["- none"])]
         parts += quote_lines
-        if alerts or note_lines:
-            parts += ["**Notes:**", *alerts, *note_lines]
+        if alert_lines or note_lines:
+            parts += ["**Notes:**", *alert_lines, *note_lines]
         parts += tail
         return "\n".join(parts)
 
@@ -262,8 +262,11 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         dropped = [effects[i][0] for i in range(len(effects)) if i not in kept]
         if dropped:
             counts = []
+            pinned = dropped.count(_PINNED)
             done = dropped.count(_DONE)
             idle = dropped.count(_IDLE)
+            if pinned:
+                counts.append(f"**{pinned} failed or unresolved**")
             if done:
                 counts.append(f"{done} confirmed")
             if idle:
@@ -277,7 +280,14 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             shown = [*shown, f"- …and {len(reasons) - count} more reason(s)"]
         return shown
 
+    def alert_lines(count: int) -> list[str]:
+        shown = alerts[len(alerts) - count :] if count else []
+        if len(alerts) > count:
+            shown = [f"- ⚠️ …and {len(alerts) - count} earlier alert(s)", *shown]
+        return shown
+
     kept_reasons = min(len(reasons), REASON_LIMIT)
+    kept_alerts = len(alerts)
     kept_quotes = list(quotes)
     kept_notes = list(notes)
     kept_effects = list(range(len(effects)))
@@ -287,21 +297,27 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             reason_lines(kept_reasons),
             effect_lines(kept_effects),
             kept_quotes,
+            alert_lines(kept_alerts),
             kept_notes,
         )
 
-    def drop_oldest(rank: int) -> bool:
+    def drop_oldest(rank: int, *, keep_newest_of_rank: bool = False) -> bool:
         """Drop the oldest kept effect of ``rank``, never the newest effect."""
-        for i in kept_effects[:-1]:
-            if effects[i][0] == rank:
-                kept_effects.remove(i)
-                return True
-        return False
+        candidates = [i for i in kept_effects[:-1] if effects[i][0] == rank]
+        if keep_newest_of_rank:
+            ranked = [i for i in kept_effects if effects[i][0] == rank]
+            candidates = [i for i in candidates if i != ranked[-1]]
+        if not candidates:
+            return False
+        kept_effects.remove(candidates[0])
+        return True
 
     # Too long: the least important goes first. Quotes, then effects that did
     # nothing, then notes and assessments (oldest first), then confirmed
     # effects (oldest first), then reasons. Failed, unknown and in-progress
-    # effects, alerts, the newest effect and the marker line always stay.
+    # effects and alerts go only when they alone overflow, oldest first and
+    # counted: failures down to the newest, alerts down to the newest, then
+    # that last failure. The newest effect and the marker line always stay.
     content = current()
     while len(content) > limit and kept_quotes:
         kept_quotes.pop()
@@ -315,6 +331,13 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         content = current()
     while len(content) > limit and kept_reasons > 1:
         kept_reasons -= 1
+        content = current()
+    while len(content) > limit and drop_oldest(_PINNED, keep_newest_of_rank=True):
+        content = current()
+    while len(content) > limit and kept_alerts > 1:
+        kept_alerts -= 1
+        content = current()
+    while len(content) > limit and drop_oldest(_PINNED):
         content = current()
     if len(content) > limit:
         # Whatever is left over comes out of the middle, never the marker.

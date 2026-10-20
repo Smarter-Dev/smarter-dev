@@ -8,7 +8,9 @@ rather than sleep-dependent.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
+import http
 import logging
 from types import SimpleNamespace
 
@@ -1791,4 +1793,86 @@ async def test_a_warning_after_a_timeout_in_the_incident_still_posts_its_notice_
         m for m in engine_harness.rest.created_messages if m["channel"] == str(CHANNEL_ID)
     ]
     assert len(notices) == 1
+    assert [row.action_type for row in await engine_harness.rows()] == ["timeout"]
+
+
+def _forbidden() -> hikari.ForbiddenError:
+    return hikari.ForbiddenError(
+        url="url", headers={}, raw_body=b"", message="missing SEND_MESSAGES"
+    )
+
+
+def _bad_request() -> hikari.BadRequestError:
+    return hikari.BadRequestError(url="url", headers={}, raw_body=b"", message="bad")
+
+
+def _unavailable() -> hikari.InternalServerError:
+    return hikari.InternalServerError(
+        url="url", status=http.HTTPStatus.SERVICE_UNAVAILABLE, headers={}, raw_body=b""
+    )
+
+
+@pytest.mark.parametrize(
+    ("error", "posted_later"),
+    [
+        # A 4xx: Discord refused it, so the next warning posts it.
+        (_forbidden, True),
+        (_bad_request, True),
+        # May have been posted: the claim stays, so it is never posted twice.
+        (_unavailable, False),
+        (asyncio.TimeoutError, False),
+        (asyncio.CancelledError, False),
+    ],
+)
+async def test_a_failed_warning_notice_is_posted_later_only_if_surely_unsent(
+    engine_harness, error, posted_later
+):
+    """#249's delta review: a failed notice kept its claim, so it never went out.
+
+    #254's review: but a send that may have landed must keep it, since a
+    missed notice beats a second public one.
+    """
+    from smarter_dev.bot.moderation_port import bot_gateway
+    from smarter_dev.web.moderation_gateway import Proposal
+    from smarter_dev.web.moderation_gateway import Trigger
+
+    gateway = bot_gateway(engine_harness.bot)
+    trigger = Trigger(
+        guild_id=str(GUILD_ID),
+        actor=spam_engine.GATEWAY_ACTOR,
+        reason="message rate",
+        channel_id=str(CHANNEL_ID),
+        message_id=str(MESSAGE_ID),
+        author_id=str(AUTHOR_ID),
+    )
+    await gateway.act(
+        trigger,
+        [Proposal(kind="timeout", target_user_id=str(AUTHOR_ID), duration_seconds=600)],
+    )
+    decision = spam_engine.SpamDecision(
+        action=spam_engine.SPAM_ACTION_WARN,
+        reasons=(spam_engine.SPAM_REASON_MESSAGE_RATE,),
+        should_delete_message=False,
+    )
+    event = _event("hi")
+    engine_harness.rest.create_message_raises = error()
+    with contextlib.suppress(BaseException):
+        await spam_engine._warn_author(
+            engine_harness.bot, gateway, trigger, event, decision
+        )
+    engine_harness.rest.create_message_raises = None
+
+    await spam_engine._warn_author(
+        engine_harness.bot, gateway, trigger, event, decision
+    )
+    await spam_engine._warn_author(
+        engine_harness.bot, gateway, trigger, event, decision
+    )
+
+    notices = [
+        message
+        for message in engine_harness.rest.created_messages
+        if message["channel"] == str(CHANNEL_ID)
+    ]
+    assert len(notices) == (1 if posted_later else 0)
     assert [row.action_type for row in await engine_harness.rows()] == ["timeout"]

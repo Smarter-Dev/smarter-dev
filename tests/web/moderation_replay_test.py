@@ -26,6 +26,7 @@ from types import SimpleNamespace
 
 import fakeredis.aioredis as fakeredis_aioredis
 import hikari
+import httpx
 import pytest
 from sqlalchemy import select
 
@@ -33,9 +34,11 @@ from smarter_dev.bot import audit_logger
 from smarter_dev.bot import spam_engine
 from smarter_dev.web.admin_actions import AdminActor
 from smarter_dev.web.admin_actions import HandlerFireFacts
+from smarter_dev.web.handler_budget import CapExceeded
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import claim_handler_key
 from smarter_dev.web.handler_caps import handler_key_claimed
+from smarter_dev.web.handler_emitter import DiscordEmitError
 from smarter_dev.web.handler_holds import MemberHolds
 from smarter_dev.web.handler_recent_messages import content_hash
 from smarter_dev.web.handler_runtime import run_handler_script
@@ -394,6 +397,64 @@ async def test_a_compromised_account_still_gets_its_secure_your_account_dm(world
     assert "Please secure your account" in dm
     [notice] = _warn_notices(world)
     assert "Please secure your account" in notice
+    assert "warn" not in [row.action_type for row in await world.rows()]
+
+
+def _emit_error(status: int) -> DiscordEmitError:
+    error = DiscordEmitError(f"POST /channels/{CHANNEL}/messages -> {status}")
+    error.status_code = status
+    return error
+
+
+@pytest.mark.parametrize(
+    ("failure", "posted_later"),
+    [
+        # Surely not posted: the claim goes back and the next warn posts it.
+        ("cap", True),
+        ("4xx", True),
+        ("answers_false", True),
+        # May have been posted: the claim stays, so it is never posted twice.
+        ("5xx", False),
+        ("read_timeout", False),
+    ],
+)
+async def test_a_failed_warn_notice_is_posted_by_the_next_warn_only_if_surely_unsent(
+    world, failure, posted_later
+):
+    """#249's delta review: a failed notice kept its claim, so it never went out.
+
+    #254's review: but a send that may have landed must keep it, since a
+    missed notice beats a second public one.
+    """
+    emitter = world.handler_messages
+    post = emitter.create_message
+    failures = []
+
+    async def failing_once(channel_id, content, ping_role_id=None, **kwargs):
+        if "has been warned" in content and not failures:
+            failures.append(content)
+            if failure == "cap":
+                # As _send_message's caps raise, before any POST.
+                raise CapExceeded("channel_messages_per_min", "cap hit")
+            if failure == "4xx":
+                raise _emit_error(403)
+            if failure == "answers_false":
+                return False
+            if failure == "5xx":
+                raise _emit_error(503)
+            raise httpx.ReadTimeout("read timed out")
+        return await post(channel_id, content, ping_role_id, **kwargs)
+
+    emitter.create_message = failing_once
+    await _spam_engine(world, _LocalLocks())
+    await _scam_banner(world, _LocalLocks(), account_days=400)
+    assert failures and not _warn_notices(world)
+
+    world.redis = fakeredis_aioredis.FakeRedis()
+    again = await _scam_banner(world, _LocalLocks(), account_days=400)
+
+    assert again.outcome == "ok", again.error
+    assert len(_warn_notices(world)) == (1 if posted_later else 0)
     assert "warn" not in [row.action_type for row in await world.rows()]
 
 
