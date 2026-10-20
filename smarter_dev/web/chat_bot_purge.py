@@ -1556,6 +1556,7 @@ def receipt_summary(request: ChatBotPurgeRequest) -> dict:
         "operational": len(report.get("operational") or []),
         "information": len(report.get("information") or []),
         "tombstoned": len(report.get("tombstoned") or []),
+        "admin_written": len(report.get("admin_written") or []),
     }
 
 

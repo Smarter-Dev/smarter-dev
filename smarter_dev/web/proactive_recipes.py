@@ -61,10 +61,16 @@ class RecipeForm:
 
 
 def read_recipe_form(form) -> RecipeForm:
-    """The submitted recipe fields, trimmed; line endings normalised."""
+    """The submitted recipe fields, trimmed; line endings normalised.
+
+    The instructions lose ASCII whitespace only, as the preview does, so
+    what is saved previews as the form showed it.
+    """
     return RecipeForm(
         name=" ".join(str(form.get("name") or "").split()),
-        instructions=str(form.get("instructions") or "").replace("\r\n", "\n").strip(),
+        instructions=str(form.get("instructions") or "")
+        .replace("\r\n", "\n")
+        .strip(_SPACE),
         enabled=form.get("enabled") == "on",
     )
 
@@ -77,6 +83,13 @@ def recipe_form_errors(data: RecipeForm) -> list[str]:
         errors.append(
             f"The name is {len(data.name)} characters; the limit is "
             f"{PROACTIVE_RECIPE_NAME_MAX}."
+        )
+    elif len(key := recipe_name_key(data.name)) > PROACTIVE_RECIPE_NAME_MAX:
+        # Casefolding can lengthen a name (ß is matched as ss), and the
+        # matching form has the same limit.
+        errors.append(
+            f"The name is {len(key)} characters as names are matched "
+            f"(ß counts as ss); the limit is {PROACTIVE_RECIPE_NAME_MAX}."
         )
     if not data.instructions:
         errors.append("Write the recipe's instructions.")

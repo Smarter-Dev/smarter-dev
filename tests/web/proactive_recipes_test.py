@@ -25,11 +25,13 @@ from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import AsyncTestClient
 from litestar.testing import create_async_test_client
 
+from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.web.api_native import proactive_recipes as api_module
 from smarter_dev.web.api_native.proactive_recipes import ProactiveRecipesController
 from smarter_dev.web.bot_admin.proactive_recipes import ProactiveRecipesAdminController
 from smarter_dev.web.chat_bot_purge import hit_counts
+from smarter_dev.web.chat_bot_purge import receipt_summary
 from smarter_dev.web.chat_bot_purge import scan_stores
 from smarter_dev.web.crud import ConflictError
 from smarter_dev.web.crud import create_proactive_recipe
@@ -39,6 +41,7 @@ from smarter_dev.web.crud import list_proactive_recipes
 from smarter_dev.web.crud import set_proactive_recipe_preview_chars
 from smarter_dev.web.crud import update_proactive_recipe
 from smarter_dev.web.discord_admin_client import DiscordGuildDetail
+from smarter_dev.web.discord_admin_client import GuildNotFoundError
 from smarter_dev.web.models import PROACTIVE_RECIPE_PREVIEW_DEFAULT
 from smarter_dev.web.proactive_recipes import RecipeForm
 from smarter_dev.web.proactive_recipes import parse_preview_chars
@@ -561,3 +564,100 @@ def test_the_purge_page_lists_recipe_hits_with_a_link_to_edit():
     source = admin_template_source("admin/bot/privacy_purges/view.html")
     assert "report.admin_written" in source
     assert "/proactive-recipes/{{ hit.recipe_id }}/edit" in source
+
+
+# -- Review #276 -------------------------------------------------------------------
+
+
+def test_a_name_too_long_once_folded_for_matching_is_refused():
+    # 80 characters as typed, 160 once ß folds to ss: over the name_key column.
+    data = RecipeForm(name="ß" * 80, instructions="Do it.", enabled=True)
+    (error,) = recipe_form_errors(data)
+    assert "160" in error and "80" in error
+    assert recipe_form_errors(RecipeForm("ß" * 40, "Do it.", True)) == []
+
+
+async def test_the_form_refuses_a_name_too_long_once_folded(db_session):
+    response = await _call(
+        ProactiveRecipesAdminController.recipe_create,
+        db_session,
+        form={"name": "ß" * 80, "instructions": "Do it.", "action": "save"},
+    )
+    assert response.status_code == 400
+    assert await list_proactive_recipes(db_session, GUILD) == []
+
+
+async def test_two_edits_from_the_same_revision_both_count(db_session, test_engine):
+    recipe = await add_recipe(db_session)
+    other_session = async_sessionmaker(test_engine, expire_on_commit=False)()
+    try:
+        stale = await get_proactive_recipe(other_session, GUILD, recipe.id)
+        assert stale.revision == 1
+        await update_proactive_recipe(
+            db_session,
+            recipe,
+            name="Welcome",
+            name_key="welcome",
+            instructions=WELCOME + "\n3. Wave.",
+            enabled=True,
+        )
+        await db_session.commit()
+        assert recipe.revision == 2
+        # The other admin's page loaded revision 1; their save still counts.
+        await update_proactive_recipe(
+            other_session,
+            stale,
+            name="Welcome",
+            name_key="welcome",
+            instructions=WELCOME + "\n3. Smile.",
+            enabled=True,
+        )
+        await other_session.commit()
+        assert stale.revision == 3
+    finally:
+        await other_session.close()
+    await db_session.refresh(recipe)
+    assert recipe.revision == 3
+
+
+async def test_the_preview_length_needs_a_guild_the_bot_is_in(db_session):
+    patches = _admin_patches()
+    for item in patches:
+        item.start()
+    try:
+        with patch(
+            f"{_CAMPAIGNS_MODULE}.get_admin_discord_client",
+            return_value=SimpleNamespace(
+                get_guild=AsyncMock(side_effect=GuildNotFoundError("gone"))
+            ),
+        ):
+            response = await ProactiveRecipesAdminController.recipes_settings.fn(
+                None,
+                request=_Request({"preview_chars": "60"}),
+                db_session=db_session,
+                guild_id="999999999999999999",
+            )
+    finally:
+        for item in reversed(patches):
+            item.stop()
+    assert response.status_code == 404
+    assert (
+        await get_proactive_recipe_preview_chars(db_session, "999999999999999999")
+        == 300
+    )
+
+
+def test_the_form_trims_ascii_whitespace_only_as_the_preview_does():
+    text = " Say hi. \n"
+    data = read_recipe_form({"name": "Hi", "instructions": f"  {text}\r\n"})
+    assert data.instructions == " Say hi. "
+    assert recipe_preview(data.instructions, 300) == " Say hi. "
+
+
+def test_the_closed_receipt_counts_recipe_hits():
+    request = SimpleNamespace(
+        steps={"guild_ids": [GUILD]},
+        status="complete",
+        check_report={"admin_written": [{"store": "proactive_recipes"}]},
+    )
+    assert receipt_summary(request)["admin_written"] == 1

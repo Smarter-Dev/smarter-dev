@@ -105,8 +105,11 @@ class ProactiveRecipesAdminController(Controller):
     @post("/guilds/{guild_id:str}/proactive-recipes/settings", guards=_GUARDS)
     async def recipes_settings(
         self, request: Request, db_session: AsyncSession, guild_id: str
-    ) -> Redirect:
+    ) -> Response:
         """Set the guild's preview length."""
+        _guild, error = await fetch_guild_or_error(request, db_session, guild_id)
+        if error is not None:
+            return error
         back = _list_path(guild_id)
         if not await verify_csrf(request):
             flash_error(request, _EXPIRED)

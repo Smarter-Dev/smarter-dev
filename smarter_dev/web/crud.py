@@ -6295,8 +6295,11 @@ async def update_proactive_recipe(
     recipe.instructions = instructions
     recipe.enabled = enabled
     if changed:
-        recipe.revision = recipe.revision + 1
+        # In SQL, so two admins saving the same loaded revision both count.
+        recipe.revision = ProactiveRecipe.revision + 1
     await session.flush()
+    if changed:
+        await session.refresh(recipe, attribute_names=["revision"])
     return changed
 
 
