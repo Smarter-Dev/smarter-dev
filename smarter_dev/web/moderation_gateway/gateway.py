@@ -877,11 +877,13 @@ class ModerationGateway:
             if (
                 op.state == t.FAILED
                 and (op.result or {}).get("reconciled")
+                and not (op.requested or {}).get("retried")
                 and op.expires_at is not None
                 and op.expires_at >= desired - EXTEND_MIN_SECONDS
             ):
-                # Reconciled as never applied: the one retry it allows. It
-                # runs from now; the first request's expiry may have passed.
+                # Reconciled as never applied: the one retry it allows (a
+                # later repeat is a new request). It runs from now; the first
+                # request's expiry may have passed.
                 return _Decision(
                     until=max(op.expires_at, desired), key=op.idempotency_key
                 )
@@ -1115,7 +1117,8 @@ class ModerationGateway:
                 twin.actor = op.actor
                 twin.reason = op.reason
                 twin.detail = None
-                twin.requested = op.requested
+                # The retry's own request, marked so it is the only one.
+                twin.requested = {**(op.requested or {}), "retried": True}
                 twin.expires_at = op.expires_at
                 await session.commit()
                 return twin.id, None

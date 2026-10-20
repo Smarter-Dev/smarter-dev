@@ -301,19 +301,23 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             kept_notes,
         )
 
-    def drop_oldest(rank: int) -> bool:
+    def drop_oldest(rank: int, *, keep_newest_of_rank: bool = False) -> bool:
         """Drop the oldest kept effect of ``rank``, never the newest effect."""
-        for i in kept_effects[:-1]:
-            if effects[i][0] == rank:
-                kept_effects.remove(i)
-                return True
-        return False
+        candidates = [i for i in kept_effects[:-1] if effects[i][0] == rank]
+        if keep_newest_of_rank:
+            ranked = [i for i in kept_effects if effects[i][0] == rank]
+            candidates = [i for i in candidates if i != ranked[-1]]
+        if not candidates:
+            return False
+        kept_effects.remove(candidates[0])
+        return True
 
     # Too long: the least important goes first. Quotes, then effects that did
     # nothing, then notes and assessments (oldest first), then confirmed
     # effects (oldest first), then reasons. Failed, unknown and in-progress
     # effects and alerts go only when they alone overflow, oldest first and
-    # counted. The newest effect and the marker line always stay.
+    # counted: failures down to the newest, alerts down to the newest, then
+    # that last failure. The newest effect and the marker line always stay.
     content = current()
     while len(content) > limit and kept_quotes:
         kept_quotes.pop()
@@ -328,10 +332,12 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     while len(content) > limit and kept_reasons > 1:
         kept_reasons -= 1
         content = current()
-    while len(content) > limit and drop_oldest(_PINNED):
+    while len(content) > limit and drop_oldest(_PINNED, keep_newest_of_rank=True):
         content = current()
     while len(content) > limit and kept_alerts > 1:
         kept_alerts -= 1
+        content = current()
+    while len(content) > limit and drop_oldest(_PINNED):
         content = current()
     if len(content) > limit:
         # Whatever is left over comes out of the middle, never the marker.

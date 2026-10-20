@@ -149,6 +149,7 @@ import pydantic_monty as monty
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import exception_type_name
+from smarter_dev.web.discord_rest import DiscordRestError
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
@@ -188,6 +189,16 @@ from smarter_dev.web.moderation_gateway.types import MESSAGE_DM
 from smarter_dev.web.moderation_gateway.types import MESSAGE_NOTICE
 
 logger = logging.getLogger(__name__)
+
+
+def _surely_not_sent(error: BaseException) -> bool:
+    """Whether a failed send is known not to have posted: a cap or a 4xx."""
+    if isinstance(error, CapExceeded):
+        return True
+    if not isinstance(error, DiscordRestError) or error.status_code is None:
+        return False
+    return 400 <= error.status_code < 500
+
 
 # Hard sandbox limits, independent of the per-fire budget's wall-clock. Memory
 # and recursion bound a runaway script; max_duration_secs is a backstop a few
@@ -1017,15 +1028,24 @@ class HandlerExecution:
                 ):
                     try:
                         message_id = await post_notice()
-                    finally:
-                        # Not posted (a cap, a 4xx, a gone channel): the next
-                        # warn may still post it.
-                        if not message_id:
+                    except BaseException as error:
+                        # Given back only if surely not posted, so the next
+                        # warn may post it. A 5xx, a timeout or a cancellation
+                        # may have posted it: a missed notice beats two.
+                        if _surely_not_sent(error):
                             await gateway.release_member_message(
                                 incident_id,
                                 kind=MESSAGE_NOTICE,
                                 target_user_id=target_user,
                             )
+                        raise
+                    if not message_id:
+                        # A gone explicit channel: Discord refused it.
+                        await gateway.release_member_message(
+                            incident_id,
+                            kind=MESSAGE_NOTICE,
+                            target_user_id=target_user,
+                        )
             else:
                 message_id = await post_notice()
                 # Recorded on leaving this block, BEFORE the DM: the notice is
