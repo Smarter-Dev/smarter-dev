@@ -18,6 +18,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import hikari
+import httpx
 import pytest
 
 from smarter_dev.bot import forum_posts
@@ -28,8 +29,10 @@ from smarter_dev.bot.proactive.notifications import mention_notification
 from smarter_dev.bot.proactive.notifications import watcher_summary_notification
 from smarter_dev.bot.proactive.types import ActivationResult
 from smarter_dev.bot.proactive.types import ProposedResponse
+from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import EnabledProactiveChannel
 from smarter_dev.bot.services.proactive_settings_service import ProactiveChannelSettings
+from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
 from smarter_dev.shared.proactive_channel_wake import ChannelEnabledRequest
 
 GUILD = 2
@@ -67,7 +70,7 @@ class _Settings:
         self.set_calls: list[tuple[str, str, bool]] = []
         self.saved_addenda: list[tuple[str, str]] = []
 
-    async def get_settings(self, guild_id, channel_id):
+    async def get_settings(self, guild_id, channel_id, *, fresh=False):
         self.lookups.append(str(channel_id))
         if str(channel_id) not in self.rows:
             return ProactiveChannelSettings.default(str(guild_id), str(channel_id))
@@ -241,9 +244,11 @@ class _Consumer:
             budget=ToolBudget(),
         )
         self.at_start = dict(self.deps.enabled_channels)
-        self.kwargs["notification_queue"].drain()
+        self.drained = self.kwargs["notification_queue"].drain()[0]
+        # Arrivals go to the guild's live queue, as enqueue_notification's do.
+        live_queue = proactive._runtime().guild_state_for(GUILD).queue
         for notification in self.midrun:
-            self.kwargs["notification_queue"].push(notification)
+            live_queue.push(notification)
         if self.midrun:
             await self.deps.drain_notifications()
         stores = self.kwargs["instruction_stores"]
@@ -911,10 +916,10 @@ async def test_a_post_whose_own_settings_cannot_be_read_is_not_admitted(forum_se
     await proactive._run_producer(setup.run.channel_states[POST])
     listed = setup.service.get_settings
 
-    async def failing(guild_id, channel_id):
+    async def failing(guild_id, channel_id, **kwargs):
         if str(channel_id) == str(POST):
             raise RuntimeError("api down")
-        return await listed(guild_id, channel_id)
+        return await listed(guild_id, channel_id, **kwargs)
 
     setup.service.get_settings = failing
     await _wake(setup)
@@ -944,6 +949,118 @@ async def test_a_post_admitted_mid_wake_has_its_forums_watch_instructions(
     store.set_instruction("watch async follow-ups", ttl_seconds=3600)
     # Saved on the forum, the only row.
     assert [channel for channel, _ in setup.service.saved_addenda] == [str(FORUM)]
+
+
+def _real_settings_service(setup) -> ProactiveSettingsService:
+    """The bot's real settings service, with its cache, over an API that
+    reads the fake's rows as they are at each call."""
+    rows = setup.service
+
+    async def get(path, **_kwargs):
+        if "/channels/" not in path:
+            return httpx.Response(
+                200,
+                json=[
+                    {"channel_id": cid, "watch_addendum": "", "is_forum": cid in rows.forums}
+                    for cid, on in rows.rows.items()
+                    if on
+                ],
+            )
+        cid = path.split("/channels/")[1].split("/")[0]
+        if cid not in rows.rows:
+            raise APIError("no row", status_code=404)
+        return httpx.Response(
+            200,
+            json={
+                "guild_id": str(GUILD),
+                "channel_id": cid,
+                "enabled": rows.rows[cid],
+                "watch_addendum": "",
+                "is_forum": cid in rows.forums,
+            },
+        )
+
+    service = ProactiveSettingsService(SimpleNamespace(get=AsyncMock(side_effect=get)))
+    service.record_wake_usage = AsyncMock()
+    service.set_watch_addendum = AsyncMock()
+    setup.bot.d["proactive_settings_service"] = service
+    return service
+
+
+async def test_a_post_switched_off_on_the_web_after_it_queued_gets_no_reply(
+    forum_setup,
+):
+    setup = forum_setup({FORUM: True}, respond_in=(POST,))
+    setup.service.forums.add(str(FORUM))
+    _real_settings_service(setup)
+    # The gate looked the post up and cached that it has no row.
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    # The web form, another process, writes the post's own row.
+    setup.service.rows[str(POST)] = False
+    await _wake(setup)
+
+    setup.bot.rest.create_message.assert_not_awaited()
+
+
+async def test_a_post_switched_off_on_the_web_is_not_admitted_mid_wake(
+    forum_setup,
+):
+    setup = forum_setup(
+        {FORUM: True}, respond_in=(OTHER_POST,), midrun=(_later_mention(OTHER_POST),)
+    )
+    setup.service.forums.add(str(FORUM))
+    service = _real_settings_service(setup)
+    await forum_posts.forum_parents(setup.bot).forum_for(str(OTHER_POST))
+    assert not (await service.get_settings(str(GUILD), str(OTHER_POST))).exists
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    setup.service.rows[str(OTHER_POST)] = False
+    await _wake(setup)
+
+    (consumer,) = setup.consumers
+    assert str(OTHER_POST) not in consumer.deps.enabled_channels
+    setup.bot.rest.create_message.assert_not_awaited()
+
+
+async def test_a_post_arriving_during_admission_waits_for_a_drain_that_admits_it(
+    forum_setup,
+):
+    setup = forum_setup({FORUM: True}, respond_in=(OTHER_POST,))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+    listed = setup.service.get_settings
+    arrived = False
+
+    async def get_settings(guild_id, channel_id, **kwargs):
+        nonlocal arrived
+        if str(channel_id) == str(POST) and not arrived:
+            arrived = True
+            # A second post's message while admission awaits the API.
+            await proactive.on_guild_message(_event(OTHER_POST, _message(501)))
+            await proactive._run_producer(setup.run.channel_states[OTHER_POST])
+        return await listed(guild_id, channel_id, **kwargs)
+
+    setup.service.get_settings = get_settings
+    await _wake(setup)
+
+    # This wake had only the batch it admitted; the reply to the other
+    # post, not admitted, was not sent, and its message is still queued.
+    first = setup.consumers[0]
+    assert {item.channel_id for item in first.drained} == {str(POST)}
+    assert str(OTHER_POST) not in first.at_start
+    setup.bot.rest.create_message.assert_not_awaited()
+    queue = setup.run.guild_state_for(GUILD).queue
+    assert {item.channel_id for item in queue.items} == {str(OTHER_POST)}
+
+    # The next wake admits it and answers it.
+    await _wake(setup)
+
+    assert str(OTHER_POST) in setup.consumers[1].at_start
+    assert setup.bot.rest.create_message.await_args.args[0] == OTHER_POST
+    assert queue.items == []
 
 
 # --- a channel Discord cannot type is not acted on ---------------------------------
@@ -1082,6 +1199,35 @@ async def test_an_external_guilds_post_runs_once_a_worker_says_it_can(
     assert proactive.FORUM_POSTS_CAPABILITY_KEY == (
         "proactive:v1:capability:forum-posts"
     )
+
+
+async def test_an_external_guilds_post_goes_where_only_a_forum_worker_reads(
+    forum_setup, monkeypatch
+):
+    import fakeredis.aioredis
+
+    from smarter_dev.bot.proactive import redis_queue
+
+    setup = forum_setup({FORUM: True, TEXT: True})
+    redis = fakeredis.aioredis.FakeRedis()
+    await redis.set(proactive.FORUM_POSTS_CAPABILITY_KEY, b"1")
+    _external(setup, monkeypatch, redis)
+
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+    await proactive.on_guild_message(_event(TEXT, _message(501)))
+    await proactive._run_producer(setup.run.channel_states[TEXT])
+
+    async def channels(stream):
+        return [
+            json.loads(fields[b"payload"])["channel_id"]
+            for _id, fields in await redis.xrange(stream)
+        ]
+
+    assert await channels(redis_queue.forum_wake_stream_key(str(GUILD))) == [str(POST)]
+    assert await channels(redis_queue.wake_stream_key(str(GUILD))) == [str(TEXT)]
+    assert await redis.xlen(redis_queue.FORUM_READY_STREAM_KEY) == 1
+    assert await redis.xlen(redis_queue.READY_STREAM_KEY) == 1
 
 
 async def test_an_unreadable_capability_counts_as_no_forum_worker(

@@ -776,7 +776,14 @@ class ProactiveRuntime:
         if destination == SHADOW_EXECUTION_MODE:
             await redis_queue.publish_shadow(envelope)
             return
-        await redis_queue.publish(envelope)
+        # A forum post's notifications go where only a worker that runs
+        # forum posts reads (#248). Its arrival looked its forum up, so this
+        # is the cache almost always.
+        forum_post = bool(notification.channel_id) and (
+            await forum_parents(self.bot).forum_for(notification.channel_id)
+            is not None
+        )
+        await redis_queue.publish(envelope, forum_post=forum_post)
 
     def state_for(self, guild_id: int, channel_id: int) -> ChannelProducerState:
         state = self.channel_states.get(channel_id)
@@ -1269,12 +1276,13 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     async def admit_post(channel_id: str, *, describe: bool = False) -> None:
         """Let the agent act in a post of an enabled forum, as its own
         channel. Its arrival cached its forum; its own row is read again
-        here, since /proactive off in the post may have come since."""
+        here, past the settings cache, since /proactive off in the post
+        or the web form may have come since."""
         forum_id = parents.known_forum_for(channel_id)
         if channel_id in enabled_channels or forum_id not in forum_names:
             return
         try:
-            own = await service.get_settings(state.guild_id, channel_id)
+            own = await service.get_settings(state.guild_id, channel_id, fresh=True)
         except Exception:  # noqa: BLE001 — unknown: not admitted this wake
             log_exception(
                 logger,
@@ -1295,12 +1303,16 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         enabled_channels[channel_id] = forum_post_label(info, forum_names[forum_id])
         instruction_stores[channel_id] = instruction_stores[forum_id]
 
-    for channel_id in dict.fromkeys(item.channel_id for item in state.queue.items):
+    # This wake's batch is taken now and admitted whole; anything queued
+    # while it is admitted and set up stays queued for the agent's own
+    # drain, which admits what it takes.
+    wake_items, wake_dropped = state.queue.drain()
+    for channel_id in dict.fromkeys(item.channel_id for item in wake_items):
         await admit_post(channel_id, describe=True)
     if not enabled_channels:
         # Only forums are on and nothing queued is from one of their posts.
-        state.queue.drain()
         return
+    wake_queue = NotificationQueue(items=wake_items, dropped=wake_dropped)
 
     runner = run.agent_runner_for(state)
     history_store = run.history_store()
@@ -1406,7 +1418,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         agent_runner=runner,
         skim=run.skim(),
         agent_model_id=run.agent_model_id,
-        notification_queue=state.queue,
+        notification_queue=wake_queue,
         watcher_model_id=run.watcher_model_id,
         skim_model_id=run.skim_model_id,
         deps_factory=deps_factory,

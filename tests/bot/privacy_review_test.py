@@ -98,7 +98,7 @@ async def test_buffered_message_of_newly_blocked_author_never_reaches_watcher(
     published = []
     run.redis_notification_queue = lambda: SimpleNamespace(
         set_execution_owner=AsyncMock(),
-        publish=AsyncMock(side_effect=published.append),
+        publish=AsyncMock(side_effect=lambda envelope, **_: published.append(envelope)),
         publish_shadow=AsyncMock(side_effect=published.append),
     )
     captured = {}

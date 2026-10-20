@@ -2,13 +2,13 @@
 
 Envelopes carry verbatim Discord message text, so the keys that hold them are
 bounded by the retention window (``CONTENT_RETENTION_WINDOW``) where a bound is
-possible. The wake and shadow streams hold no entry written more than the
-window ago: each is trimmed exactly at the cutoff (approximate trimming skips a
-quiet stream whose entries all sit in the open macro node) on every publish and
-again by ``trim_expired_envelopes`` on the bot's passive tick. A claimed batch
+possible. The wake streams (a guild's forum-post one too) and the shadow
+stream hold no entry written more than the window ago: each is trimmed
+exactly at the cutoff (approximate trimming skips a quiet stream whose
+entries all sit in the open macro node) on every publish and again by ``trim_expired_envelopes`` on the bot's passive tick. A claimed batch
 is deleted when its wake is acknowledged; its expiry is only the backstop, set
 at the claim to ``IN_FLIGHT_MAX`` after its oldest envelope was written, so no
-envelope in it outlives the in-flight bound. The pending list is trimmed by
+envelope in it outlives the in-flight bound. Each pending list is trimmed by
 entry age on the same tick, and each envelope it drops is counted in
 ``pending-dropped`` so the agent is told; see ``trim_expired_envelopes``.
 """
@@ -35,6 +35,10 @@ logger = logging.getLogger(__name__)
 KEY_PREFIX = "proactive:v1"
 READY_GUILDS_KEY = f"{KEY_PREFIX}:guilds-with-wakes"
 READY_STREAM_KEY = f"{KEY_PREFIX}:ready"
+# A forum post's notifications (#248) travel apart from the rest, on keys a
+# worker from before forum support never reads: one of those would take a
+# post's wake off the shared keys and drop it, since it cannot answer posts.
+FORUM_READY_STREAM_KEY = f"{KEY_PREFIX}:forum-ready"
 SHADOW_STREAM_KEY = f"{KEY_PREFIX}:shadow"
 PENDING_LIMIT = 20
 SHADOW_STREAM_MAX_ENTRIES = 10_000
@@ -124,6 +128,18 @@ def pending_dropped_key(guild_id: str) -> str:
     return f"{KEY_PREFIX}:{_guild_tag(guild_id)}:pending-dropped"
 
 
+def forum_wake_stream_key(guild_id: str) -> str:
+    return f"{KEY_PREFIX}:{_guild_tag(guild_id)}:forum-wake"
+
+
+def forum_pending_key(guild_id: str) -> str:
+    return f"{KEY_PREFIX}:{_guild_tag(guild_id)}:forum-pending"
+
+
+def forum_pending_dropped_key(guild_id: str) -> str:
+    return f"{KEY_PREFIX}:{_guild_tag(guild_id)}:forum-pending-dropped"
+
+
 def ownership_key(guild_id: str) -> str:
     return f"{KEY_PREFIX}:{_guild_tag(guild_id)}:owner"
 
@@ -156,8 +172,13 @@ class RedisNotificationQueue:
         owner = "external" if mode == "external" else "embedded"
         await self._redis.set(ownership_key(guild_id), owner)
 
-    async def publish(self, envelope: NotificationEnvelope) -> str | None:
+    async def publish(
+        self, envelope: NotificationEnvelope, *, forum_post: bool = False
+    ) -> str | None:
         """Queue a non-waking envelope, or wake the guild with a bounded stream.
+
+        ``forum_post`` puts a forum post's envelope on the forum keys, which
+        only a worker that runs forum posts reads, under the same guild.
 
         The pending list a non-waking envelope enters is capped at
         ``pending_limit`` envelopes. ``trim_expired_envelopes`` drops each
@@ -168,12 +189,23 @@ class RedisNotificationQueue:
         expires one window after its first count.
         """
         payload = envelope.model_dump_json()
+        guild_id = envelope.guild_id
+        if forum_post:
+            pending = forum_pending_key(guild_id)
+            dropped = forum_pending_dropped_key(guild_id)
+            wake_stream = forum_wake_stream_key(guild_id)
+            ready_stream = FORUM_READY_STREAM_KEY
+        else:
+            pending = pending_key(guild_id)
+            dropped = pending_dropped_key(guild_id)
+            wake_stream = wake_stream_key(guild_id)
+            ready_stream = READY_STREAM_KEY
         if not envelope.wakes:
             await self._redis.eval(
                 _PUSH_PENDING_LUA,
                 2,
-                pending_key(envelope.guild_id),
-                pending_dropped_key(envelope.guild_id),
+                pending,
+                dropped,
                 payload,
                 self._pending_limit,
                 CONTENT_RETENTION_MILLISECONDS + PENDING_EXPIRY_SLACK_MILLISECONDS,
@@ -183,15 +215,12 @@ class RedisNotificationQueue:
 
         async with self._redis.pipeline(transaction=True) as pipeline:
             pipeline.xadd(
-                wake_stream_key(envelope.guild_id),
+                wake_stream,
                 {WAKE_PAYLOAD_FIELD: payload},
                 **_exact_retention_age_bound(),
             )
-            pipeline.sadd(READY_GUILDS_KEY, envelope.guild_id)
-            pipeline.xadd(
-                READY_STREAM_KEY,
-                {"guild_id": envelope.guild_id},
-            )
+            pipeline.sadd(READY_GUILDS_KEY, guild_id)
+            pipeline.xadd(ready_stream, {"guild_id": guild_id})
             stream_id, _, _ = await pipeline.execute()
         return _decode(stream_id)
 
@@ -236,11 +265,13 @@ class RedisNotificationQueue:
         async with self._redis.pipeline(transaction=False) as pipeline:
             for guild_id in stream_guild_ids:
                 pipeline.xtrim(wake_stream_key(guild_id), **age_bound)
+                pipeline.xtrim(forum_wake_stream_key(guild_id), **age_bound)
             pipeline.xtrim(SHADOW_STREAM_KEY, **age_bound)
             dropped = sum(await pipeline.execute())
         for guild_id in stream_guild_ids:
             try:
                 dropped += await self.trim_expired_pending(guild_id)
+                dropped += await self.trim_expired_pending(guild_id, forum=True)
             except RedisError:
                 raise
             except Exception:
@@ -248,8 +279,12 @@ class RedisNotificationQueue:
                 log_exception(logger, "pending trim failed guild=%s", guild_id)
         return dropped
 
-    async def trim_expired_pending(self, guild_id: str, *, now: datetime | None = None) -> int:
+    async def trim_expired_pending(
+        self, guild_id: str, *, now: datetime | None = None, forum: bool = False
+    ) -> int:
         """Drop and count the pending envelopes older than the retention window.
+
+        ``forum`` trims the guild's forum-post pending list instead.
 
         An envelope's age is its ``created_at``; one that does not parse is
         dropped too, so is one carrying a field this version does not know.
@@ -258,10 +293,16 @@ class RedisNotificationQueue:
         newest remaining envelope's window. Returns the number dropped.
         """
         now = now or datetime.now(UTC)
+        pending = forum_pending_key(guild_id) if forum else pending_key(guild_id)
+        dropped_key = (
+            forum_pending_dropped_key(guild_id)
+            if forum
+            else pending_dropped_key(guild_id)
+        )
         cutoff = now - timedelta(milliseconds=CONTENT_RETENTION_MILLISECONDS)
         expired: list[str] = []
         newest: datetime | None = None
-        for raw in await self._redis.lrange(pending_key(guild_id), 0, -1):
+        for raw in await self._redis.lrange(pending, 0, -1):
             value = _decode(raw)
             try:
                 created_at = NotificationEnvelope.model_validate_json(value).created_at
@@ -284,8 +325,8 @@ class RedisNotificationQueue:
         removed = await self._redis.eval(
             _TRIM_PENDING_LUA,
             2,
-            pending_key(guild_id),
-            pending_dropped_key(guild_id),
+            pending,
+            dropped_key,
             expire_at,
             CONTENT_RETENTION_MILLISECONDS,
             *expired,

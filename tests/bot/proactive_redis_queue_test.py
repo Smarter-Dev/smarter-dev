@@ -318,7 +318,9 @@ async def test_one_guilds_failed_pending_trim_does_not_stop_the_rest(
     queue = RedisNotificationQueue(redis_client)
     trimmed: list[str] = []
 
-    async def trim(guild_id, *, now=None):
+    async def trim(guild_id, *, now=None, forum=False):
+        if forum:
+            return 0
         if guild_id == "111":
             raise ValueError("a bad list")
         trimmed.append(guild_id)
@@ -690,6 +692,53 @@ async def test_ready_stream_of_guild_ids_carries_no_age_bound(redis_client):
 
 
 @pytest.mark.asyncio
+async def test_a_forum_posts_envelopes_go_to_the_forum_keys(redis_client):
+    queue = RedisNotificationQueue(redis_client)
+
+    await queue.publish(_envelope(body="context"), forum_post=True)
+    await queue.publish(_envelope(body="question", wakes=True), forum_post=True)
+
+    assert await redis_client.llen(redis_queue.forum_pending_key("111")) == 1
+    assert await redis_client.xlen(redis_queue.forum_wake_stream_key("111")) == 1
+    assert await redis_client.xlen(redis_queue.FORUM_READY_STREAM_KEY) == 1
+    # Nothing on the keys a worker from before forum support reads.
+    assert await redis_client.exists(pending_key("111")) == 0
+    assert await redis_client.exists(wake_stream_key("111")) == 0
+    assert await redis_client.exists(READY_STREAM_KEY) == 0
+    assert await redis_client.smembers(READY_GUILDS_KEY) == {b"111"}
+
+
+def test_the_forum_keys_are_the_workers():
+    """Must match services/proactive-agent's keys.py."""
+    assert redis_queue.FORUM_READY_STREAM_KEY == "proactive:v1:forum-ready"
+    assert redis_queue.forum_wake_stream_key("111") == (
+        "proactive:v1:{guild:111}:forum-wake"
+    )
+    assert redis_queue.forum_pending_key("111") == (
+        "proactive:v1:{guild:111}:forum-pending"
+    )
+    assert redis_queue.forum_pending_dropped_key("111") == (
+        "proactive:v1:{guild:111}:forum-pending-dropped"
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_tick_trims_a_forum_posts_stream_and_list(redis_client):
+    queue = RedisNotificationQueue(redis_client)
+    await redis_client.xadd(
+        redis_queue.forum_wake_stream_key("111"),
+        {"payload": b"aged-7"},
+        id=_stream_id_for_age(7),
+    )
+    await queue.publish(_aged("old", 2 * _WINDOW), forum_post=True)
+
+    assert await queue.trim_expired_envelopes(["111"]) == 2
+    assert await redis_client.xlen(redis_queue.forum_wake_stream_key("111")) == 0
+    assert await redis_client.exists(redis_queue.forum_pending_key("111")) == 0
+    assert await redis_client.get(redis_queue.forum_pending_dropped_key("111")) == b"1"
+
+
+@pytest.mark.asyncio
 async def test_publish_without_a_wake_issues_no_stream_trim(redis_client):
     recording = _RecordingRedis(redis_client)
     queue = RedisNotificationQueue(recording)
@@ -787,7 +836,9 @@ async def test_trim_expired_envelopes_bounds_every_stream_once_at_the_exact_cuto
 
     assert [write.key for write in recording.stream_writes] == [
         wake_stream_key("111"),
+        redis_queue.forum_wake_stream_key("111"),
         wake_stream_key("222"),
+        redis_queue.forum_wake_stream_key("222"),
         SHADOW_STREAM_KEY,
     ]
     for write in recording.stream_writes:

@@ -685,7 +685,8 @@ async def test_cross_channel_wake_dispatches_each_action_to_its_channel(wake_set
     briefs = []
 
     async def consume_both_channels(context):
-        items, dropped = guild_state.queue.drain()
+        # The wake's batch, as AgentConsumer drains it.
+        items, dropped = wake_setup.captured_kwargs[-1]["notification_queue"].drain()
         briefs.append(proactive.render_notifications(items, dropped))
         deps = wake_setup.captured_kwargs[-1]["deps_factory"](
             env=None,

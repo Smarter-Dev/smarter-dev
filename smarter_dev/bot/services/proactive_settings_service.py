@@ -103,11 +103,15 @@ class ProactiveSettingsService(BaseService):
         ]
 
     async def get_settings(
-        self, guild_id: str, channel_id: str
+        self, guild_id: str, channel_id: str, *, fresh: bool = False
     ) -> ProactiveChannelSettings:
-        """The channel's settings; 404 means the default (disabled)."""
+        """The channel's settings; 404 means the default (disabled).
+
+        ``fresh`` asks the application even when a cached answer is still
+        good (and caches the new one), for a check that must see a change
+        made elsewhere, such as the web form, moments ago."""
         cache_key = (guild_id, channel_id)
-        cached = self._settings_cache.get(cache_key)
+        cached = None if fresh else self._settings_cache.get(cache_key)
         if cached is not None and cached[0] > time.monotonic():
             return cached[1]
 
