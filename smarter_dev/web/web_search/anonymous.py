@@ -158,11 +158,19 @@ async def wait_seconds(redis, key: str, limit: int, window_seconds: int) -> int:
     return int(await redis.eval(_COUNT, 1, key, limit, window_seconds))
 
 
+def owner_link(owner_user_id: UUID | str) -> str:
+    """The daily count of an owner whose search link lives only on the site
+    (next.smarter.dev keeps links in D1): one per owner, as Python's
+    ``WebSearchLink`` is, and never equal to a Python link's id."""
+    return f"owner:{owner_user_id}"
+
+
 async def admit(redis, *, visitor: str, link_id: UUID | str) -> Refusal | None:
     """Count one search against its visitor's minute and its link's day.
 
-    None when both allow it. A visitor refused for the minute isn't counted
-    against the link."""
+    *link_id* is the Python link's id, or ``owner_link(owner)`` for a link
+    Python has no row for. None when both allow it. A visitor refused for the
+    minute isn't counted against the link."""
     wait = await wait_seconds(
         redis, f"web_search:anonymous:visitor:{visitor}", PER_MINUTE_LIMIT, 60
     )

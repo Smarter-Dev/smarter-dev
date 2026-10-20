@@ -204,12 +204,12 @@ async def test_the_request_and_visitor_are_bounded(env):
     )
 
 
-async def test_an_owner_the_link_page_would_refuse_is_refused(env):
+async def test_an_unknown_or_inactive_owner_is_refused(env):
     inactive = await _owner(env.session, active=False)
-    linkless = await _owner(env.session, link=False)
+    inactive_linkless = await _owner(env.session, active=False, link=False)
 
     assert _start(env.tc, "not-a-uuid").json() == {"detail": "Invalid account ID"}
-    for owner_id in (uuid4(), inactive.id, linkless.id):
+    for owner_id in (uuid4(), inactive.id, inactive_linkless.id):
         response = _start(env.tc, owner_id)
         assert response.status_code == 404
         assert response.json() == {"detail": NOT_FOUND}
@@ -229,6 +229,7 @@ async def test_a_third_search_in_a_minute_waits_like_the_link_page(env):
     body = limited.json()
     assert body["detail"] == "Searches without logging in are limited to 2 a minute."
     assert 0 < body["wait"] <= 60
+    assert body["per_link"] is False
     assert limited.headers["Retry-After"] == str(body["wait"])
     assert limited.headers["Cache-Control"] == "private, no-store"
     assert len(env.submitted) == anonymous.PER_MINUTE_LIMIT
@@ -258,7 +259,38 @@ async def test_a_link_runs_a_hundred_a_day_across_both_sites(env):
         "This search link has run all its searches without logging in for today."
     )
     assert 0 < body["wait"] <= 86_400
+    assert body["per_link"] is True
+    assert limited.headers["Retry-After"] == str(body["wait"])
+    assert limited.headers["Cache-Control"] == "private, no-store"
     assert int(await env.redis.get(key)) == anonymous.LINK_PER_DAY_LIMIT
+    # Nothing was counted under the owner's own key.
+    assert await env.redis.get(f"web_search:anonymous:link:owner:{owner.id}") is None
+
+
+async def test_an_owner_whose_link_only_the_site_has_runs_under_its_own_day(env):
+    # next.smarter.dev keeps search links in D1; Python has no row for them.
+    owner = await _owner(env.session, link=False)
+    other = await _owner(env.session, link=False)
+
+    started = _start(env.tc, owner.id)
+
+    assert started.status_code == 201
+    assert started.json()["search"]["status"] == "queued"
+    [submitted] = env.submitted
+    entry = await anonymous.load(env.redis, submitted["search_id"])
+    assert entry["owner_user_id"] == str(owner.id)
+    key = f"web_search:anonymous:link:owner:{owner.id}"
+    assert int(await env.redis.get(key)) == 1
+    assert 0 < await env.redis.ttl(key) <= 86_400
+
+    await env.redis.set(key, anonymous.LINK_PER_DAY_LIMIT, ex=86_400)
+    limited = _start(env.tc, owner.id, visitor="d" * 32)
+    assert limited.status_code == 429
+    assert limited.json()["per_link"] is True
+    assert limited.json()["detail"] == anonymous.LINK_LIMITED
+    # Another owner's day is their own.
+    assert _start(env.tc, other.id, visitor="e" * 32).status_code == 201
+    assert int(await env.redis.get(f"web_search:anonymous:link:owner:{other.id}")) == 1
 
 
 async def test_unknown_expired_and_link_page_searches_are_not_found(env):
