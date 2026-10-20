@@ -47,7 +47,7 @@ from tests.bot.moderation_coordinator.replay_cases import snowflake_at
 from tests.moderation_fakes import FakeModerationDiscord
 
 GUILD = str(GUILD_ID)
-CHANNEL = 702178352395583498
+CHANNEL = 702178352395580001
 
 
 def sessions():
@@ -405,6 +405,12 @@ async def test_a_guild_with_nothing_configured_runs_only_the_ring():
 
 
 # -- retention and privacy ----------------------------------------------------
+
+
+def test_the_hourly_sweep_prunes_shadow_rows():
+    from smarter_dev.web.retention import SCRUBBERS
+
+    assert SCRUBBERS["moderation_shadow_decisions"] is prune_moderation_shadow_decisions
 
 
 async def test_rows_are_deleted_after_thirty_days():

@@ -98,3 +98,43 @@ async def test_attachments_are_only_sent_with_the_scam_question():
     )
     result = await replay(case)
     assert "https://cdn.example/3.png" in result.calls.haiku[0]
+
+
+async def test_a_ring_message_arriving_mid_sweep_waits_and_is_a_followup():
+    """As the spam ring's channel lock does: the cheer that lands while the ad
+    is being judged is judged after it, as a follow-up, not as a new ad."""
+    import asyncio
+
+    from smarter_dev.bot.moderation_coordinator.classifier import ClassifierBudget
+    from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
+    from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
+    from smarter_dev.bot.moderation_coordinator.replay import ModelCalls
+    from smarter_dev.bot.moderation_coordinator.replay import scripted_jev
+    from tests.bot.moderation_coordinator.replay_cases import ALICE
+    from tests.bot.moderation_coordinator.replay_cases import staged_ring
+
+    case, m = staged_ring()
+    calls = ModelCalls()
+    jev = scripted_jev(case.answers, calls, case.answers_by_text)
+    answer = jev.function
+
+    async def slow(messages, info):
+        await asyncio.sleep(0.05)
+        return answer(messages, info)
+
+    jev.function = slow
+    coordinator = Coordinator(
+        case.reads,
+        ModerationClassifier(budget=ClassifierBudget(per_guild_day=100), jev_model=jev),
+    )
+    case.reads.now = m["cheer"].posted_at
+    cheer = say(ALICE, "so hyped", NOW + timedelta(seconds=1))
+    ad, follow = await asyncio.gather(
+        coordinator.evaluate(m["ad"], case.policy),
+        coordinator.evaluate(cheer, case.policy),
+    )
+
+    assert ad.decision.targets[ALICE.id].sanction.kind == gw.TIMEOUT
+    assert follow.decision.targets[ALICE.id].sanction.kind == gw.TIMEOUT
+    assert follow.classifier.requests == 0  # a known participant: no model
+    assert len(calls.jev) == 1

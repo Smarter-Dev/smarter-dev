@@ -25,6 +25,7 @@ Order, and why:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from collections.abc import Mapping
@@ -148,6 +149,12 @@ class Coordinator:
         self.verdict_cache = verdicts or VerdictCache()
 
     async def evaluate(self, facts: MessageFacts, policy: GuildPolicy) -> Evaluation:
+        async with contextlib.AsyncExitStack() as stack:
+            return await self._evaluate(facts, policy, stack)
+
+    async def _evaluate(
+        self, facts: MessageFacts, policy: GuildPolicy, stack: contextlib.AsyncExitStack
+    ) -> Evaluation:
         started = time.monotonic()
         now = facts.posted_at
         now_dt = datetime.fromtimestamp(now, UTC)
@@ -226,7 +233,23 @@ class Coordinator:
 
         ring_pending = None
         ring = policy.ring
-        if ring is not None and not facts.is_edit and not facts.author_is_bot:
+        if (
+            ring is not None
+            and not facts.is_edit
+            and not facts.author_is_bot
+            and (
+                self.rings.busy(facts.guild_id, facts.channel_id)
+                or self.rings.active(facts.guild_id, facts.channel_id, now) is not None
+                or rules.ring_may_start(
+                    facts, new_member_window=ring.new_member_window, now=now_dt
+                )
+            )
+        ):
+            # Held to the end: the ad's sweep finishes (and opens its
+            # incident) before a ring message behind it is judged.
+            await stack.enter_async_context(
+                self.rings.channel(facts.guild_id, facts.channel_id)
+            )
             incident = self.rings.active(facts.guild_id, facts.channel_id, now)
             if incident is not None and rules.ring_followup_applies(
                 facts, incident, new_member_window=ring.new_member_window, now=now_dt

@@ -12,8 +12,10 @@ follow-up window, the verdict cache by :data:`VERDICT_TTL_SECONDS`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 from collections import deque
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 from smarter_dev.bot.moderation_coordinator.model import LabelVerdict
@@ -161,10 +163,37 @@ class RecentPosts:
 
 
 class RingRegistry:
-    """The rings the coordinator found, per channel, for their follow-ups."""
+    """The rings the coordinator found, per channel, for their follow-ups.
+
+    :meth:`channel` serialises the ring's work in one channel, as the spam
+    ring's own channel lock does: a ring message that arrives while the ad is
+    being judged waits, and is then judged as a follow-up.
+    """
 
     def __init__(self) -> None:
         self._incidents: dict[tuple[str, str], RingIncident] = {}
+        #: (guild, channel) -> (lock, turns holding or waiting on it).
+        self._locks: dict[tuple[str, str], tuple[asyncio.Lock, int]] = {}
+
+    @contextlib.asynccontextmanager
+    async def channel(self, guild_id: str, channel_id: str) -> AsyncIterator[None]:
+        key = (guild_id, channel_id)
+        lock, users = self._locks.get(key, (None, 0))
+        if lock is None:
+            lock = asyncio.Lock()
+        self._locks[key] = (lock, users + 1)
+        try:
+            async with lock:
+                yield
+        finally:
+            lock, users = self._locks[key]
+            if users <= 1:
+                del self._locks[key]
+            else:
+                self._locks[key] = (lock, users - 1)
+
+    def busy(self, guild_id: str, channel_id: str) -> bool:
+        return (guild_id, channel_id) in self._locks
 
     def active(self, guild_id: str, channel_id: str, now: float) -> RingIncident | None:
         self.prune(now)

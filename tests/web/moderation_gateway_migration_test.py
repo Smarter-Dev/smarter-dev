@@ -72,6 +72,10 @@ SPAM_RING_MIGRATION = (
     REPO_ROOT
     / "alembic/main/versions/20261019_230000_0a337101a0e8_spam_ring_incidents_updated_at.py"
 )
+SHADOW_MIGRATION = (
+    REPO_ROOT
+    / "alembic/main/versions/20261020_010000_b7d2e5a8c3f4_moderation_shadow_decisions.py"
+)
 CREATED = (
     "moderation_incidents",
     "moderation_incident_links",
@@ -145,8 +149,19 @@ def test_the_migration_creates_every_column_the_models_have():
         assert model_actions.get(name) == nullable, name
 
 
+def test_the_shadow_migration_creates_every_column_the_model_has():
+    recorded = _run(SHADOW_MIGRATION)
+    table = "moderation_shadow_decisions"
+    assert set(recorded.created) == {table}
+    assert _shape(recorded.created[table].values()) == _shape(
+        Base.metadata.tables[table].columns
+    )
+
+
 @pytest.mark.parametrize("step", ["upgrade", "downgrade"])
-@pytest.mark.parametrize("path", [MIGRATION, SPAM_RING_MIGRATION], ids=lambda p: p.stem)
+@pytest.mark.parametrize(
+    "path", [MIGRATION, SPAM_RING_MIGRATION, SHADOW_MIGRATION], ids=lambda p: p.stem
+)
 def test_lock_waits_are_bounded_before_any_change(path, step):
     calls = _run(path, step, dialect="postgresql").calls
     assert calls[0] == ("execute", ("SET LOCAL lock_timeout = '5s'",))
@@ -394,3 +409,74 @@ async def test_the_gateway_runs_on_the_migrated_postgres_schema(migrated):
         assert (
             await session.execute(select(func.count()).select_from(ModerationOperation))
         ).scalar_one() >= 3
+
+
+@needs_postgres
+async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
+    migrated, monkeypatch
+):
+    """#239: the shadow's row, its legacy comparison, the author history it
+    reads, and the deletion request and retention over its table, on Postgres."""
+    from datetime import timedelta
+
+    from smarter_dev.bot.moderation_coordinator.shadow import BotReads
+    from smarter_dev.bot.moderation_coordinator.shadow import LegacyComparer
+    from smarter_dev.bot.moderation_coordinator.shadow import ShadowRecorder
+    from smarter_dev.web.models import MemberActivity
+    from smarter_dev.web.models import ModerationShadowDecision
+    from smarter_dev.web.moderation_gateway import gateway as gateway_module
+    from smarter_dev.web.retention import prune_moderation_shadow_decisions
+
+    db = async_sessionmaker(migrated, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", db)
+    discord = FakeModerationDiscord()
+    discord.add_member(SCAMMER)
+    discord.post(CHANNEL, MESSAGE, SCAMMER, "free nitro https://scam.example")
+    await ModerationGateway(discord, session_factory=db).act(
+        _trigger("spam_engine"),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=86400)],
+    )
+    now = datetime.now(UTC)
+    recorded = await ShadowRecorder().record(
+        ModerationShadowDecision(
+            guild_id=GUILD,
+            channel_id=CHANNEL,
+            message_id=MESSAGE,
+            revision="create",
+            is_edit=False,
+            author_id=SCAMMER,
+            message_at=now,
+            strongest_action="ban",
+            target_ids=[SCAMMER],
+            staff_excluded={},
+            labels={"scam": {"outcome": "answered", "answer": True, "confidence": 0.9}},
+        )
+    )
+    assert recorded
+    async with db() as session:
+        session.add(
+            MemberActivity(
+                guild_id=GUILD,
+                user_id=SCAMMER,
+                first_message_at=now - timedelta(days=40),
+                last_message_at=now - timedelta(days=31),
+            )
+        )
+        await session.commit()
+
+    history = await BotReads(None).author_history(GUILD, SCAMMER, now)
+    assert (history.is_first_message, history.days_since_last_message) == (False, 31)
+    assert [a.action_type for a in history.actions] == ["timeout"]
+
+    later = datetime.now(UTC).timestamp() + 200
+    assert await LegacyComparer(clock=lambda: later).sweep() == 1
+    async with db() as session:
+        row = (await session.execute(select(ModerationShadowDecision))).scalar_one()
+        assert row.legacy_strongest_action == "timeout"
+        assert row.agreement == "shadow_stronger"
+
+        deleted = await delete_member_moderation_content(session, SCAMMER)
+        assert deleted.shadow == 1
+        far = now + timedelta(days=31)
+        assert await prune_moderation_shadow_decisions(session, far, far) == 0
+        await session.commit()

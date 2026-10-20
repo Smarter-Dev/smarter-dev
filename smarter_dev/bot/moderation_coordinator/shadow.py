@@ -36,6 +36,7 @@ import hikari
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
@@ -628,8 +629,6 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
     guild_ids = shadow_guild_ids()
     if not guild_ids:
         return None
-    from smarter_dev.bot import leadership
-
     shadow = ModerationShadow(
         Coordinator(BotReads(bot), ModerationClassifier()), guild_ids=guild_ids
     )
