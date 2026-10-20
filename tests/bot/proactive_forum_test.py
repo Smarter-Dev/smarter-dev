@@ -1237,11 +1237,14 @@ async def _published_channels(redis, stream) -> list[str]:
     ]
 
 
+@pytest.mark.parametrize("later_arrival", [False, True])
 async def test_an_inherited_post_stays_on_the_forum_keys_when_its_parent_is_lost(
-    forum_setup, monkeypatch
+    forum_setup, monkeypatch, later_arrival
 ):
-    """Astra's snapshot-5 regression: the parent cache evicts the post and
-    Discord then fails, between admission and publication."""
+    """Astra's snapshot-5 and -6 regressions: the parent cache evicts the
+    post and Discord then fails, between admission and publication; and a
+    second message, checked then and turned away, must not undo the first's
+    route."""
     import fakeredis.aioredis
 
     from smarter_dev.bot.proactive import redis_queue
@@ -1260,6 +1263,8 @@ async def test_an_inherited_post_stays_on_the_forum_keys_when_its_parent_is_lost
             forum_posts._remember(parents._parents, str(100000 + index), None)
         assert str(POST) not in parents._parents
         setup.bot.rest.fetch_channel.side_effect = TimeoutError("Discord unavailable")
+        if later_arrival:
+            await proactive.on_guild_message(_event(POST, _message(501)))
         setup.bot.rest.fetch_channel.reset_mock()
         await original_enqueue(*args, **kwargs)
 

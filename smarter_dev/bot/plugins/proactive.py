@@ -546,7 +546,12 @@ async def _effective_settings(
     effective = await effective_settings(
         service, forum_parents(run.bot), str(guild_id), str(channel_id)
     )
-    run.remember_route(str(channel_id), effective.forum_id)
+    # Only positive evidence decides a route: the forum it inherits, or a
+    # row of its own. No row and no forum named (Discord could not say, or
+    # not a forum post) leaves any decision already made standing.
+    own_row = getattr(effective.settings, "exists", True)
+    if effective.forum_id is not None or own_row:
+        run.remember_route(str(channel_id), effective.forum_id)
     if (
         effective.forum_id is None
         or not effective.enabled
@@ -619,9 +624,9 @@ class ProactiveRuntime:
         self.start_consumers = start_consumers
         # (checked at, whether a worker said it runs forum posts)
         self._forum_posts_capability: tuple[float, bool] | None = None
-        # Channel id -> the forum whose settings it ran on when last
-        # admitted (None: its own row, or not a forum post). Publication
-        # routes by it, so it never looks the parent up again (#248).
+        # Channel id -> the forum whose settings it last ran on (None: its
+        # own row). Publication routes by it, so it never looks the parent
+        # up again (#248).
         self._routes: OrderedDict[str, str | None] = OrderedDict()
 
     def remember_route(self, channel_id: str, forum_id: str | None) -> None:
