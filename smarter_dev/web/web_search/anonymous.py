@@ -21,6 +21,7 @@ import json
 import logging
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import NamedTuple
 from uuid import UUID
 from uuid import uuid4
@@ -43,6 +44,24 @@ VISITOR_LIMITED = (
 )
 LINK_LIMITED = "This search link has run all its searches without logging in for today."
 START_FAILED = "Couldn't start the search. Try again."
+
+
+# Count one search unless the window is full; 0, or the seconds until the
+# window ends. One script, so a refusal has nothing to roll back.
+_COUNT = """
+local count = tonumber(redis.call('GET', KEYS[1]) or '0')
+if count < tonumber(ARGV[1]) then
+  redis.call('INCR', KEYS[1])
+  redis.call('EXPIRE', KEYS[1], ARGV[2], 'NX')
+  return 0
+end
+redis.call('EXPIRE', KEYS[1], ARGV[2], 'NX')
+return math.max(1, redis.call('TTL', KEYS[1]))
+"""
+
+
+class Expired(Exception):
+    """The search's 30 minutes ran out while it was still running."""
 
 
 class Refusal(NamedTuple):
@@ -108,26 +127,31 @@ async def _store(redis, *, owner_user_id: UUID, nid: str | None, request: str) -
 
 async def load(redis, search_id: UUID | str) -> dict | None:
     raw = await redis.get(_key(search_id))
-    return json.loads(raw) if raw else None
+    if not raw:
+        return None
+    entry = json.loads(raw)
+    # The key's TTL is the usual clock; this holds even for a key without one.
+    started = datetime.fromisoformat(entry["search"]["created_at"])
+    if datetime.now(UTC) - started >= timedelta(seconds=TTL_SECONDS):
+        return None
+    return entry
 
 
-async def save(redis, entry: dict) -> None:
-    # KEEPTTL: the search expires on the clock it started with.
-    await redis.set(_key(entry["search"]["id"]), json.dumps(entry), keepttl=True)
+async def save(redis, entry: dict) -> bool:
+    """Write the entry back; False when it has already expired.
+
+    KEEPTTL: the search expires on the clock it started with. XX: a late
+    write never brings back an expired search, which would never expire."""
+    saved = await redis.set(
+        _key(entry["search"]["id"]), json.dumps(entry), xx=True, keepttl=True
+    )
+    return bool(saved)
 
 
 async def wait_seconds(redis, key: str, limit: int, window_seconds: int) -> int:
     """Count one search against ``key``; 0 when it is within ``limit``, else
     the seconds until the window ends. A refused search isn't counted."""
-    async with redis.pipeline(transaction=True) as pipe:
-        pipe.incr(key)
-        pipe.expire(key, window_seconds, nx=True)
-        pipe.ttl(key)
-        count, _, ttl = await pipe.execute()
-    if int(count) <= limit:
-        return 0
-    await redis.decr(key)
-    return max(1, int(ttl))
+    return int(await redis.eval(_COUNT, 1, key, limit, window_seconds))
 
 
 async def admit(redis, *, visitor: str, link_id: UUID | str) -> Refusal | None:
@@ -202,7 +226,8 @@ class UnsavedRun:
         self.entry["attempts"] = self.row.attempt_count
         if self.nid is None:
             self.entry["site"] = structured(self.row)
-        await save(self.redis, self.entry)
+        if not await save(self.redis, self.entry):
+            raise Expired(str(self.run_id))
         if self.nid is None:
             # The site reads the search back by id; there is no session to tell.
             return state

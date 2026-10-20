@@ -5,6 +5,10 @@ the link's owner, under the /s/ pages' anonymous limits.
 Redis is fakeredis; the agent worker queue and notifications are replaced."""
 
 import asyncio
+import json
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -321,3 +325,118 @@ async def test_a_site_search_runs_without_a_row_or_a_notification(
     rows = list(await session.scalars(select(UsageCostRow)))
     assert rows
     assert all(row.user_id == owner_id and row.details["anonymous"] for row in rows)
+
+
+async def test_a_late_update_never_brings_back_an_expired_search(env):
+    owner = await _owner(env.session)
+    search_id = _start(env.tc, owner.id).json()["search"]["id"]
+    key = f"web_search:anonymous:{search_id}"
+    # The worker loaded the search just before its 30 minutes ran out.
+    run = anonymous.UnsavedRun(env.redis, await anonymous.load(env.redis, search_id))
+    await env.redis.pexpire(key, 1)
+    await asyncio.sleep(0.01)
+    assert env.tc.get(f"{ROOT}/anonymous-runs/{search_id}").status_code == 404
+
+    def searching(row):
+        row.status = "searching"
+
+    try:
+        await run.update(searching)
+        stopped = False
+    except anonymous.Expired:
+        stopped = True
+
+    assert env.tc.get(f"{ROOT}/anonymous-runs/{search_id}").status_code == 404
+    assert await env.redis.exists(key) == 0
+    # The late write also ends the run, rather than carrying on unsaved.
+    assert stopped
+
+
+async def test_a_search_is_never_served_past_its_thirty_minutes(env):
+    owner = await _owner(env.session)
+    search_id = _start(env.tc, owner.id).json()["search"]["id"]
+    key = f"web_search:anonymous:{search_id}"
+    entry = await anonymous.load(env.redis, search_id)
+
+    async def started_ago(minutes):
+        # A key that lost its TTL somehow: only the start time can end it.
+        entry["search"]["created_at"] = (
+            datetime.now(UTC) - timedelta(minutes=minutes)
+        ).isoformat()
+        await env.redis.set(key, json.dumps(entry))
+        assert await env.redis.ttl(key) == -1
+
+    await started_ago(29)
+    assert env.tc.get(f"{ROOT}/anonymous-runs/{search_id}").status_code == 200
+    await started_ago(30)
+    response = env.tc.get(f"{ROOT}/anonymous-runs/{search_id}")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "This search has expired."}
+
+
+async def test_a_search_that_expires_mid_run_stops_without_a_retry(
+    search_env,  # noqa: F811 - the imported fixture
+    monkeypatch,
+):
+    from smarter_dev.web import web_search_jobs
+    from smarter_dev.web.web_search import brave
+
+    redis = fakeredis.FakeAsyncRedis()
+    monkeypatch.setattr(
+        "smarter_dev.shared.redis_client.get_redis_client", lambda: redis
+    )
+    state = await anonymous.start(
+        redis, owner_user_id=uuid4(), nid=None, request="why is it slow"
+    )
+    key = f"web_search:anonymous:{state['id']}"
+    searched: list[str] = []
+
+    async def search_then_expire(client, query):
+        # The 30 minutes run out while Brave is answering the first query.
+        searched.append(query)
+        await redis.delete(key)
+        return search_env["hits"][query]
+
+    monkeypatch.setattr(brave, "search", search_then_expire)
+
+    result = await web_search_jobs.run_anonymous_web_search_job(
+        web_search_jobs.WebSearchPayload(search_id=state["id"])
+    )
+
+    assert result == {"status": "expired"}
+    # The next write found it gone and the run stopped there.
+    assert searched == ["query 0"]
+    assert await redis.exists(key) == 0
+
+
+async def test_a_refusal_at_the_window_edge_takes_nothing_from_the_next_window():
+    redis = fakeredis.FakeAsyncRedis()
+    key = "web_search:anonymous:visitor:edge"
+    limit = anonymous.PER_MINUTE_LIMIT
+    for _ in range(limit):
+        assert await anonymous.wait_seconds(redis, key, limit, 60) == 0
+    admitted: list[bool] = []
+
+    async def roll_over():
+        # The window ends and a new visitor's search starts in the new one.
+        await redis.delete(key)
+        admitted.append(await anonymous.wait_seconds(redis, key, limit, 60) == 0)
+
+    # A refusal that rolls back in a second step would run that step here,
+    # after the window has rolled over.
+    real_decr = redis.decr
+
+    async def decr_after_rollover(name, amount=1):
+        await roll_over()
+        return await real_decr(name, amount)
+
+    redis.decr = decr_after_rollover
+    assert await anonymous.wait_seconds(redis, key, limit, 60) > 0
+    if not admitted:
+        await roll_over()
+    while await anonymous.wait_seconds(redis, key, limit, 60) == 0:
+        admitted.append(True)
+
+    assert admitted == [True] * limit
+    assert int(await redis.get(key)) == limit
+    assert 0 < await redis.ttl(key) <= 60
