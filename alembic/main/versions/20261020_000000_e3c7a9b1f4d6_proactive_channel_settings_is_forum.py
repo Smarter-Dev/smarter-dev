@@ -8,8 +8,8 @@ none. Existing rows were all switched on before forums could be, so they
 default to false.
 
 Revision ID: e3c7a9b1f4d6
-Revises: d8a3f1c6e9b2
-Create Date: 2026-10-19 23:00:00.000000
+Revises: 0a337101a0e8
+Create Date: 2026-10-20 00:00:00.000000
 
 """
 
@@ -20,7 +20,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e3c7a9b1f4d6"
-down_revision: str | None = "d8a3f1c6e9b2"
+down_revision: str | None = "0a337101a0e8"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
