@@ -7,7 +7,7 @@ Nothing reads it but the shadow comparison. A new table only, so it takes no
 lock on anything in use; each statement still waits at most 5 s for a lock.
 
 Revision ID: b7d2e5a8c3f4
-Revises: 0a337101a0e8
+Revises: e3c7a9b1f4d6
 Create Date: 2026-10-20 01:00:00.000000
 
 """
@@ -20,7 +20,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "b7d2e5a8c3f4"
-down_revision: str | None = "0a337101a0e8"
+down_revision: str | None = "e3c7a9b1f4d6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
