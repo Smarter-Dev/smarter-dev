@@ -131,10 +131,14 @@ async def load(redis, search_id: UUID | str) -> dict | None:
         return None
     entry = json.loads(raw)
     # The key's TTL is the usual clock; this holds even for a key without one.
-    started = datetime.fromisoformat(entry["search"]["created_at"])
-    if datetime.now(UTC) - started >= timedelta(seconds=TTL_SECONDS):
-        return None
-    return entry
+    # A start time that can't be read can't be trusted: treat it as expired.
+    try:
+        started = datetime.fromisoformat(entry["search"]["created_at"])
+        if datetime.now(UTC) - started < timedelta(seconds=TTL_SECONDS):
+            return entry
+    except (KeyError, TypeError, ValueError):
+        pass
+    return None
 
 
 async def save(redis, entry: dict) -> bool:

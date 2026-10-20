@@ -158,33 +158,36 @@ async def search(run) -> str:
     await run.update(searching)
 
     answered = 0
-    async with httpx.AsyncClient(timeout=20) as client:
-        for index, item in enumerate(planned):
-            await run.update(_set_query(index, status="searching"))
-            try:
-                hits = await brave.search(client, item["query"])
-            except Exception as error:  # noqa: BLE001 - one failed query is not fatal
-                logger.warning(
-                    "Web search %s: Brave failed on query %d (%s)",
-                    run_id,
-                    index,
-                    _brave_failure(error),
+    # Every answered request is billed, even when a later write stops the run
+    # (an anonymous search that runs past its 30 minutes).
+    try:
+        async with httpx.AsyncClient(timeout=20) as client:
+            for index, item in enumerate(planned):
+                await run.update(_set_query(index, status="searching"))
+                try:
+                    hits = await brave.search(client, item["query"])
+                except Exception as error:  # noqa: BLE001 - one failed query is not fatal
+                    logger.warning(
+                        "Web search %s: Brave failed on query %d (%s)",
+                        run_id,
+                        index,
+                        _brave_failure(error),
+                    )
+                    await run.update(_set_query(index, status="failed", count=0))
+                    continue
+                answered += 1
+                await run.update(
+                    _set_query(
+                        index,
+                        status="done",
+                        count=len(hits),
+                        domains=[hit["domain"] for hit in hits],
+                        hits=hits,
+                    )
                 )
-                await run.update(_set_query(index, status="failed", count=0))
-                continue
-            answered += 1
-            await run.update(
-                _set_query(
-                    index,
-                    status="done",
-                    count=len(hits),
-                    domains=[hit["domain"] for hit in hits],
-                    hits=hits,
-                )
-            )
-
-    if answered:
-        await run.record(lambda row: [metering.brave_row(row, answered)])
+    finally:
+        if answered:
+            await run.record(lambda row: [metering.brave_row(row, answered)])
 
     results = _merge((await run.read()).queries)
     if not results:

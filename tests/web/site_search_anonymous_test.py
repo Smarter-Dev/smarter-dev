@@ -407,6 +407,11 @@ async def test_a_search_that_expires_mid_run_stops_without_a_retry(
     # The next write found it gone and the run stopped there.
     assert searched == ["query 0"]
     assert await redis.exists(key) == 0
+    # What it had already spent is still billed to the owner, once.
+    assert await _billed(search_env["session"]) == {
+        "web_search_queries": [None],
+        "web_search_brave": [1],
+    }
 
 
 async def test_a_refusal_at_the_window_edge_takes_nothing_from_the_next_window():
@@ -440,3 +445,103 @@ async def test_a_refusal_at_the_window_edge_takes_nothing_from_the_next_window()
     assert admitted == [True] * limit
     assert int(await redis.get(key)) == limit
     assert 0 < await redis.ttl(key) <= 60
+
+
+async def _billed(session) -> dict[str, list]:
+    rows = list(await session.scalars(select(UsageCostRow)))
+    assert all(row.details["anonymous"] for row in rows)
+    billed: dict[str, list] = {}
+    for row in rows:
+        billed.setdefault(row.operation_type, []).append(row.details.get("requests"))
+    return billed
+
+
+@pytest.mark.parametrize(
+    ("stage", "billed"),
+    [
+        # Each paid step is billed before the write that finds the search gone.
+        ("plan", {"web_search_queries": [None]}),
+        (
+            "second query",
+            {"web_search_queries": [None], "web_search_brave": [2]},
+        ),
+        (
+            "rank",
+            {
+                "web_search_queries": [None],
+                "web_search_brave": [5],
+                "web_search_ranking": [None],
+            },
+        ),
+    ],
+)
+async def test_a_search_that_expires_at_any_paid_step_bills_what_it_spent(
+    search_env,  # noqa: F811 - the imported fixture
+    monkeypatch,
+    stage,
+    billed,
+):
+    from smarter_dev.web import web_search_jobs
+    from smarter_dev.web.web_search import brave
+    from smarter_dev.web.web_search import queries
+    from smarter_dev.web.web_search import ranking
+
+    redis = fakeredis.FakeAsyncRedis()
+    monkeypatch.setattr(
+        "smarter_dev.shared.redis_client.get_redis_client", lambda: redis
+    )
+    state = await anonymous.start(
+        redis, owner_user_id=uuid4(), nid=None, request="why is it slow"
+    )
+    key = f"web_search:anonymous:{state['id']}"
+
+    def expiring(module, name, when=lambda *args: True):
+        real = getattr(module, name)
+
+        async def call(*args, **kwargs):
+            # The 30 minutes run out while this paid call is in flight.
+            if when(*args):
+                await redis.delete(key)
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(module, name, call)
+
+    if stage == "plan":
+        expiring(queries, "plan_queries")
+    elif stage == "second query":
+        expiring(brave, "search", when=lambda client, query: query == "query 1")
+    else:
+        expiring(ranking, "rank")
+
+    result = await web_search_jobs.run_anonymous_web_search_job(
+        web_search_jobs.WebSearchPayload(search_id=state["id"])
+    )
+    again = await web_search_jobs.run_anonymous_web_search_job(
+        web_search_jobs.WebSearchPayload(search_id=state["id"])
+    )
+
+    assert result == again == {"status": "expired"}
+    assert await redis.exists(key) == 0
+    # A second delivery finds nothing to run and bills nothing more.
+    assert await _billed(search_env["session"]) == billed
+
+
+@pytest.mark.parametrize(
+    "created_at",
+    ["missing", None, 12345, "not a time", "2026-10-20T10:00:00"],
+)
+async def test_an_unreadable_start_time_reads_as_expired(env, created_at):
+    owner = await _owner(env.session)
+    search_id = _start(env.tc, owner.id).json()["search"]["id"]
+    key = f"web_search:anonymous:{search_id}"
+    entry = json.loads(await env.redis.get(key))
+    if created_at == "missing":
+        del entry["search"]["created_at"]
+    else:
+        entry["search"]["created_at"] = created_at
+    await env.redis.set(key, json.dumps(entry), keepttl=True)
+
+    assert await anonymous.load(env.redis, search_id) is None
+    response = env.tc.get(f"{ROOT}/anonymous-runs/{search_id}")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "This search has expired."}
