@@ -6,6 +6,11 @@ search here on the member's behalf and reads its progress. Runs are the same
 and grounded answer on the agent worker, the same limits and the same
 deletion rules. The member is the synced site user named in the path; the
 service key is the only authority, and a browser never reaches these routes.
+
+A signed-out visitor using a member's search link gets an anonymous search
+(``web_search.anonymous``): never saved, kept in Redis for 30 minutes, billed
+to the link's owner, under the anonymous limits. The Worker names the visitor
+by an opaque key it derives; Python never sees the visitor's address.
 """
 
 from __future__ import annotations
@@ -31,14 +36,19 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web import dashboard_controller as dashboard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
+from smarter_dev.web.api_native.errors import BotApiException
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
+from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.user_content import StillRunning
 from smarter_dev.web.user_content import delete_search
-from smarter_dev.web.web_search.snapshot import ACTIVE_STATUSES
+from smarter_dev.web.web_search import anonymous
+from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
+from smarter_dev.web.web_search.snapshot import structured as site_snapshot
 
 SITE_SEARCH_GUARDS = [*SITE_API_GUARDS, Permission("site-search")]
 
@@ -50,54 +60,12 @@ class StartSearch(BaseModel):
     key: str = Field(min_length=8, max_length=64)
 
 
-def site_snapshot(run: WebSearchRun) -> dict[str, Any]:
-    """The search as structured data. The answer is Markdown, never HTML: the
-    site renders it with its own safe renderer, citations as ``[n]``."""
-    answer = run.answer or None
-    return {
-        "id": str(run.id),
-        "request": run.request,
-        "status": run.status,
-        "active": run.status in ACTIVE_STATUSES,
-        "queries": [
-            {
-                "query": item.get("query", ""),
-                "angle": item.get("angle", ""),
-                "status": item.get("status", "pending"),
-                "count": item.get("count"),
-                "domains": item.get("domains", []),
-            }
-            for item in run.queries or []
-        ],
-        "results": [
-            {
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "domain": item.get("domain", ""),
-                "snippet": item.get("snippet", ""),
-                "favicon": item.get("favicon", ""),
-                "age": item.get("age", ""),
-                "relevant": bool(item.get("relevant")),
-                "best": bool(item.get("best")),
-                "score": item.get("score"),
-            }
-            for item in run.results or []
-        ],
-        "ranked": bool(run.ranked),
-        "needs_answer": bool(run.needs_answer),
-        "answer": (
-            {
-                "status": answer.get("status", "reading"),
-                "markdown": answer.get("markdown", ""),
-                "reads": answer.get("reads", []),
-                "error": answer.get("error"),
-            }
-            if answer
-            else None
-        ),
-        "error": run.error,
-        "version": run.version,
-    }
+class StartAnonymousSearch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request: str = Field(min_length=1, max_length=2000)
+    # The Worker's key for the visitor, rotated daily. No dots or colons, so
+    # it never shares a limit with an address from the /s/ pages.
+    visitor: str = Field(pattern=r"^[A-Za-z0-9_-]{16,128}$")
 
 
 async def _member(session: AsyncSession, user_id: str) -> User:
@@ -126,6 +94,28 @@ async def _owned(session: AsyncSession, user: User, run_id: str) -> WebSearchRun
     return run
 
 
+async def _link_of(session: AsyncSession, owner_id: str) -> WebSearchLink:
+    """The active member's search link, refused as the /s/ page refuses a link
+    that doesn't exist."""
+    try:
+        uid = UUID(owner_id)
+        if str(uid) != owner_id.lower():
+            raise ValueError
+    except ValueError:
+        raise plain_error(400, "Invalid account ID") from None
+    owner = await session.get(User, uid)
+    link = (
+        await session.scalar(
+            select(WebSearchLink).where(WebSearchLink.owner_user_id == uid)
+        )
+        if owner is not None and owner.is_active
+        else None
+    )
+    if link is None:
+        raise plain_error(404, "This search link doesn't exist.")
+    return link
+
+
 def _error_response(request: Request, exc: Exception) -> Response:
     """The API's usual error shapes, kept out of caches like the successes.
 
@@ -141,6 +131,8 @@ def _error_response(request: Request, exc: Exception) -> Response:
     )
     response = handler(request, exc)
     response.headers["Cache-Control"] = "private, no-store"
+    if isinstance(exc, BotApiException) and exc.body.get("wait"):
+        response.headers["Retry-After"] = str(exc.body["wait"])
     return response
 
 
@@ -228,3 +220,38 @@ class SiteSearchController(Controller):
                 409, "Wait for this search to finish, then delete it."
             ) from None
         return {"status": "deleted"}
+
+    @post(
+        "/users/{owner_id:str}/anonymous-runs",
+        guards=SITE_SEARCH_GUARDS,
+        status_code=HTTP_201_CREATED,
+    )
+    async def start_anonymous(
+        self, db_session: AsyncSession, owner_id: str, data: StartAnonymousSearch
+    ) -> dict[str, Any]:
+        link = await _link_of(db_session, owner_id)
+        text = " ".join(data.request.split())[:MAX_REQUEST_CHARS]
+        if not text:
+            raise plain_error(422, "Describe what you're looking for.")
+        redis = get_redis_client()
+        refused = await anonymous.admit(redis, visitor=data.visitor, link_id=link.id)
+        if refused:
+            raise BotApiException(
+                429, {"detail": refused.message, "wait": refused.wait}
+            )
+        entry = await anonymous.launch(
+            redis, owner_user_id=link.owner_user_id, nid=None, request=text
+        )
+        return {"search": entry["site"]}
+
+    @get("/anonymous-runs/{search_id:str}", guards=SITE_SEARCH_GUARDS)
+    async def read_anonymous(self, search_id: str) -> dict[str, Any]:
+        try:
+            sid = UUID(search_id)
+        except ValueError:
+            raise plain_error(404, "This search has expired.") from None
+        entry = await anonymous.load(get_redis_client(), sid)
+        # A search from the /s/ pages belongs to the browser that ran it.
+        if entry is None or entry["nid"] is not None:
+            raise plain_error(404, "This search has expired.")
+        return {"search": entry["site"]}
