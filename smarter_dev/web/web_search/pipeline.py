@@ -110,6 +110,7 @@ async def search(run) -> str:
     from smarter_dev.web.web_search.queries import QUERY_MODEL
     from smarter_dev.web.web_search.queries import plan_queries
     from smarter_dev.web.web_search.ranking import rank
+    from smarter_dev.web.web_search.ranking import spent as ranking_spent
 
     run_id = run.run_id
     request = (await run.read()).request
@@ -130,21 +131,29 @@ async def search(run) -> str:
 
     await run.update(start)
 
+    # Every paid call bills however it ends, before the next write (which can
+    # stop the run, as an anonymous search past its 30 minutes does): each
+    # response's usage is kept as it arrives, in a meter or a count, and a
+    # ``finally`` writes it.
     meter = UsageMeter()
+    query_usage: dict | None = None
+    failure = ""
     try:
         planned, needs_answer, query_usage = await plan_queries(request, meter=meter)
     except Exception as error:  # noqa: BLE001 - shown to the user as a failed search
         # Type only, here and below: error text can echo the request or the
         # Brave URL, which carries the query.
-        logger.error(
-            "Web search %s: the query model failed (%s)", run_id, type(error).__name__
-        )
+        failure = type(error).__name__
+        logger.error("Web search %s: the query model failed (%s)", run_id, failure)
+    finally:
         # The responses it got before failing were billed all the same.
-        if meter:
+        spent = query_usage
+        if spent is None and meter:
             spent = metering.failed_usage(meter, QUERY_MODEL)
+        if spent is not None:
             await run.record(lambda row: [metering.model_row(row, spent)])
-        return await _fail(run, f"Couldn't plan the searches ({type(error).__name__}).")
-    await run.record(lambda row: [metering.model_row(row, query_usage)])
+    if query_usage is None:
+        return await _fail(run, f"Couldn't plan the searches ({failure}).")
 
     def searching(row: WebSearchRun) -> None:
         row.status = "searching"
@@ -158,8 +167,6 @@ async def search(run) -> str:
     await run.update(searching)
 
     answered = 0
-    # Every answered request is billed, even when a later write stops the run
-    # (an anonymous search that runs past its 30 minutes).
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             for index, item in enumerate(planned):
@@ -199,14 +206,20 @@ async def search(run) -> str:
 
     await run.update(ranking)
 
+    meter = UsageMeter()
+    judgments: list[dict] | None = None
+    jev_usage: dict = {}
     try:
-        judgments, jev_usage = await rank(request, results)
+        judgments, jev_usage = await rank(request, results, meter=meter)
     except Exception as error:  # noqa: BLE001 - unranked results beat none
         logger.error("Web search %s: Jev failed (%s)", run_id, type(error).__name__)
-        judgments, jev_usage = None, {"error": type(error).__name__}
+        jev_usage = {"error": type(error).__name__}
+    finally:
+        spent = jev_usage if judgments is not None else ranking_spent(meter)
+        if spent is not None:
+            await run.record(lambda row: [metering.jev_row(row, spent)])
 
     if judgments is not None:
-        await run.record(lambda row: [metering.jev_row(row, jev_usage)])
         ranked = [
             {**result, **judged}
             for result, judged in zip(results, judgments, strict=True)
@@ -277,21 +290,32 @@ async def _answer(run, request: str, results: list[dict]) -> None:
         await run.update(change)
 
     meter = UsageMeter()
+    # Each page read's tokens land here as Jina answers.
+    reads: list = []
+    usage: dict | None = None
     try:
         markdown, reads, usage = await asyncio.wait_for(
-            answering.write_answer(request, results, progress, meter=meter),
+            answering.write_answer(
+                request, results, progress, meter=meter, reads=reads
+            ),
             timeout=ANSWER_TIMEOUT_SECONDS,
         )
     except Exception as error:  # noqa: BLE001 - the results still stand without it
         logger.error(
             "Web search %s: answer failed (%s)", run.run_id, type(error).__name__
         )
-        # The responses it got before failing (or timing out) were billed.
-        if meter:
-            spent = metering.failed_usage(meter, answering.ANSWER_MODEL)
-            await run.record(
-                lambda row: [metering.model_row(row, spent, step="answer")]
-            )
+    finally:
+        # The responses and pages it got before failing (or timing out, or
+        # finding the search gone) were billed.
+        spent = usage
+        if spent is None:
+            spent = {
+                **metering.failed_usage(meter, answering.ANSWER_MODEL),
+                "reader_tokens": sum(read.tokens for read in reads),
+            }
+        await run.record(lambda row: metering.answer_rows(row, spent))
+
+    if usage is None:
 
         def failed(row: WebSearchRun) -> None:
             row.status = "complete"
@@ -305,7 +329,6 @@ async def _answer(run, request: str, results: list[dict]) -> None:
         await run.update(failed)
         return
 
-    await run.record(lambda row: metering.answer_rows(row, usage))
     final = {**state(reads, markdown, "done"), "markdown": markdown}
 
     def done(row: WebSearchRun) -> None:

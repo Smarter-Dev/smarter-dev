@@ -215,12 +215,14 @@ async def write_answer(
     results: list[dict],
     on_progress: Callable[[list[Read], str], Awaitable[None]],
     meter: UsageMeter | None = None,
+    reads: list[Read] | None = None,
 ) -> tuple[str, list[Read], dict]:
     """The answer's Markdown, the pages read, and the run's usage.
 
     ``on_progress(reads, text_so_far)`` runs whenever a read starts or ends and
     as the answer text streams in. *meter* keeps each response's counts as it
-    arrives, for the caller to bill if the run raises or times out."""
+    arrives, and *reads* each page read with the tokens Jina billed for it, for
+    the caller to bill if the run raises or times out."""
     from pydantic_ai.messages import FunctionToolCallEvent
     from pydantic_ai.messages import PartDeltaEvent
     from pydantic_ai.messages import PartStartEvent
@@ -245,7 +247,11 @@ async def write_answer(
 
     async with httpx.AsyncClient() as client:
         deps = AnswerDeps(
-            request=request, results=results, client=client, on_progress=progress
+            request=request,
+            results=results,
+            client=client,
+            on_progress=progress,
+            reads=[] if reads is None else reads,
         )
         agent = build_answer_agent()
         run = await agent.run(

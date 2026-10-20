@@ -115,7 +115,9 @@ def brave_row(run: WebSearchRun, requests: int) -> UsageCostRow:
 def answer_rows(run: WebSearchRun, usage: dict) -> list[UsageCostRow | None]:
     from smarter_dev.web.web_search import answer
 
-    rows = [model_row(run, usage, step="answer")]
+    # A failed answer's model is billed only for the responses it got.
+    answered = not usage.get("failed") or usage.get("requests")
+    rows = [model_row(run, usage, step="answer")] if answered else []
     tokens = int(usage.get("reader_tokens") or 0)
     if tokens:
         rows.append(

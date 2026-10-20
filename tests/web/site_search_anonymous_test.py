@@ -9,6 +9,7 @@ import json
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -26,6 +27,7 @@ from sqlalchemy import select
 from smarter_dev.shared.database import Base
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.web import search_link_controller as links
+from smarter_dev.web import web_search_jobs
 from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native import site_search
 from smarter_dev.web.api_native.site_search import SiteSearchController
@@ -33,6 +35,7 @@ from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search import anonymous
+from smarter_dev.web.web_search import answer
 from smarter_dev.web.web_search import pipeline
 from tests.web.search_link_test import _request
 from tests.web.web_search_test import search_env  # noqa: F401 - fixture
@@ -378,7 +381,6 @@ async def test_a_search_that_expires_mid_run_stops_without_a_retry(
     search_env,  # noqa: F811 - the imported fixture
     monkeypatch,
 ):
-    from smarter_dev.web import web_search_jobs
     from smarter_dev.web.web_search import brave
 
     redis = fakeredis.FakeAsyncRedis()
@@ -481,7 +483,6 @@ async def test_a_search_that_expires_at_any_paid_step_bills_what_it_spent(
     stage,
     billed,
 ):
-    from smarter_dev.web import web_search_jobs
     from smarter_dev.web.web_search import brave
     from smarter_dev.web.web_search import queries
     from smarter_dev.web.web_search import ranking
@@ -545,3 +546,141 @@ async def test_an_unreadable_start_time_reads_as_expired(env, created_at):
     response = env.tc.get(f"{ROOT}/anonymous-runs/{search_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": "This search has expired."}
+
+
+@pytest.fixture
+def answering(search_env, monkeypatch):  # noqa: F811 - the imported fixture
+    """An anonymous search that plans an answer, written by the real answer
+    agent on a stand-in model: it reads result 1 when ``read`` is set, then
+    streams its answer. ``expire()`` ends the search's 30 minutes."""
+    from pydantic_ai.messages import ToolReturnPart
+    from pydantic_ai.models.function import DeltaToolCall
+    from pydantic_ai.models.function import FunctionModel
+
+    from smarter_dev.web.web_search import metering
+    from smarter_dev.web.web_search import queries
+
+    redis = fakeredis.FakeAsyncRedis()
+    monkeypatch.setattr(
+        "smarter_dev.shared.redis_client.get_redis_client", lambda: redis
+    )
+    stub_plan = queries.plan_queries
+
+    async def plan(request, meter=None):
+        planned, _, usage = await stub_plan(request, meter=meter)
+        return planned, True, usage
+
+    monkeypatch.setattr(queries, "plan_queries", plan)
+    env = SimpleNamespace(redis=redis, read=False, expire_on=None, spent=[])
+
+    async def expire(step):
+        if env.expire_on == step:
+            await redis.delete(env.key)
+
+    async def respond(messages, info):
+        if env.read and not any(
+            isinstance(part, ToolReturnPart)
+            for message in messages
+            for part in getattr(message, "parts", [])
+        ):
+            yield {0: DeltaToolCall(name="read_result", json_args='{"number": 1}')}
+            return
+        await expire("writing")
+        for chunk in ["The answer ", "is [1]."]:
+            yield chunk
+
+    monkeypatch.setattr(
+        queries,
+        "model_for",
+        lambda name: FunctionModel(stream_function=respond, model_name=name),
+    )
+
+    async def read_page(client, url):
+        # Jina answers and bills the page; the 30 minutes run out meanwhile.
+        await expire("reading")
+        return "The page.", 2_000_000
+
+    monkeypatch.setattr(answer, "read_page", read_page)
+    real_failed_usage = metering.failed_usage
+
+    def failed_usage(meter, model):
+        env.spent.append(real_failed_usage(meter, model))
+        return env.spent[-1]
+
+    monkeypatch.setattr(metering, "failed_usage", failed_usage)
+
+    async def run_twice():
+        state = await anonymous.start(
+            redis, owner_user_id=uuid4(), nid=None, request="why is it slow"
+        )
+        env.key = f"web_search:anonymous:{state['id']}"
+        payload = web_search_jobs.WebSearchPayload(search_id=state["id"])
+        first = await web_search_jobs.run_anonymous_web_search_job(payload)
+        again = await web_search_jobs.run_anonymous_web_search_job(payload)
+        return first, again
+
+    env.run_twice = run_twice
+    env.session = search_env["session"]
+    return env
+
+
+async def _ledger(session) -> dict[str, UsageCostRow]:
+    rows = list(await session.scalars(select(UsageCostRow)))
+    assert all(row.details["anonymous"] for row in rows)
+    ledger = {row.operation_type: row for row in rows}
+    assert len(ledger) == len(rows)
+    return ledger
+
+
+def _answer_billed(row: UsageCostRow, spent: dict) -> None:
+    assert spent["failed"] is True and spent["requests"] >= 1
+    assert (row.input_tokens, row.output_tokens) == (
+        spent["input_tokens"],
+        spent["output_tokens"],
+    )
+    assert row.output_tokens > 0
+
+
+async def test_a_page_read_the_search_outlives_is_billed_once(answering):
+    # The reviewer's probe: Jina reads and bills a page, then the write that
+    # shows the read done finds the search gone.
+    answering.read = True
+    answering.expire_on = "reading"
+
+    assert await answering.run_twice() == ({"status": "expired"},) * 2
+
+    ledger = await _ledger(answering.session)
+    assert set(ledger) == {
+        "web_search_queries",
+        "web_search_brave",
+        "web_search_ranking",
+        "web_search_answer",
+        "web_search_reader",
+    }
+    reader = ledger["web_search_reader"]
+    assert reader.provider_key == "jina" and reader.model_id == "jina-reader"
+    assert reader.output_tokens == 2_000_000
+    assert reader.cost_usd == 2 * Decimal(answer.JINA_PRICE_PER_MILLION_TOKENS_USD)
+    # The model's request for the page was billed too.
+    [spent] = answering.spent
+    assert spent["requests"] == 1
+    _answer_billed(ledger["web_search_answer"], spent)
+
+
+async def test_an_answer_the_search_outlives_bills_the_model_once(answering):
+    # The model streams its answer and the write that shows it finds the
+    # search gone: no page was read.
+    answering.expire_on = "writing"
+
+    assert await answering.run_twice() == ({"status": "expired"},) * 2
+
+    ledger = await _ledger(answering.session)
+    assert set(ledger) == {
+        "web_search_queries",
+        "web_search_brave",
+        "web_search_ranking",
+        "web_search_answer",
+    }
+    [spent] = answering.spent
+    assert spent["requests"] == 1
+    _answer_billed(ledger["web_search_answer"], spent)

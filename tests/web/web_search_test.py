@@ -136,7 +136,7 @@ def search_env(db_session, monkeypatch):
     async def search(client, query):
         return hits[query]
 
-    async def rank(request, results):
+    async def rank(request, results, meter=None):
         # Scores follow the reverse of Brave's order, so ranking must reorder.
         judgments = [
             {
@@ -212,7 +212,7 @@ async def test_duplicate_pages_merge_and_results_sort_by_score(search_env):
 
 
 async def test_the_top_pick_leads_then_the_rest_by_score(search_env, monkeypatch):
-    async def rank(request, results):
+    async def rank(request, results, meter=None):
         # Jev picks the third-best score.
         judgments = [
             {
@@ -237,7 +237,7 @@ async def test_the_top_pick_leads_then_the_rest_by_score(search_env, monkeypatch
 
 
 async def test_a_failed_ranking_still_completes_in_search_order(search_env, monkeypatch):
-    async def broken(request, results):
+    async def broken(request, results, meter=None):
         raise TimeoutError
 
     monkeypatch.setattr(ranking, "rank", broken)
@@ -338,7 +338,7 @@ async def test_failed_brave_queries_and_a_failed_ranking_cost_nothing(search_env
             raise brave.BraveError("Brave answered 500")
         return search_env["hits"][query]
 
-    async def broken(request, results):
+    async def broken(request, results, meter=None):
         raise TimeoutError
 
     monkeypatch.setattr(brave, "search", flaky)
@@ -349,6 +349,34 @@ async def test_failed_brave_queries_and_a_failed_ranking_cost_nothing(search_env
     ledger = await _ledger(search_env["session"])
     assert set(ledger) == {"web_search_queries", "web_search_brave"}
     assert ledger["web_search_brave"].details["requests"] == 4
+
+
+async def test_a_ranking_that_fails_after_jev_answered_still_bills_it(
+    search_env, monkeypatch
+):
+    # Jev answered, and billed, but its answer couldn't be used.
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    def respond(messages, info):
+        return ModelResponse(
+            parts=[TextPart("not the judgments")],
+            usage=RequestUsage(input_tokens=10_000),
+        )
+
+    monkeypatch.setattr(ranking, "rank", _REAL_RANK)
+    monkeypatch.setattr(
+        ranking, "build_model", lambda: FunctionModel(respond, model_name="jev-1.13.0")
+    )
+    run = await _new_run(search_env["session"])
+
+    assert await pipeline.run_search(run.id, search_env["notify"]) == "complete"
+    assert search_env["events"][-1]["ranked"] is False
+    row = (await _ledger(search_env["session"]))["web_search_ranking"]
+    assert (row.model_id, row.input_tokens) == ("jev-1.13.0", 10_000)
+    assert row.cost_usd == Decimal("0.00042")
 
 
 def test_requests_are_trimmed_and_bounded():
@@ -441,7 +469,7 @@ def answering_env(search_env, monkeypatch):
             "output_tokens": 100,
         }
 
-    async def write(request, results, on_progress, meter=None):
+    async def write(request, results, on_progress, meter=None, reads=None):
         reads = [answer.Read(number=1, domain=results[0]["domain"], status="done", tokens=2_000_000)]
         await on_progress(reads, "")
         await on_progress(reads, "Partly written [1]")
@@ -483,7 +511,7 @@ async def test_the_answer_follows_the_ranked_results(answering_env):
 
 
 async def test_a_failed_answer_keeps_the_results(answering_env, monkeypatch):
-    async def broken(request, results, on_progress, meter=None):
+    async def broken(request, results, on_progress, meter=None, reads=None):
         raise TimeoutError
 
     monkeypatch.setattr(answer, "write_answer", broken)
@@ -578,7 +606,7 @@ async def test_an_answer_that_times_out_still_bills_its_requests(
 ):
     from smarter_dev.shared.request_usage import RequestTokens
 
-    async def slow_write(request, results, on_progress, meter=None):
+    async def slow_write(request, results, on_progress, meter=None, reads=None):
         # A request answered and billed, then the run is cut off.
         meter.add("claude-haiku-5-5", RequestTokens(5_000, 40))
         raise TimeoutError
@@ -593,3 +621,4 @@ async def test_an_answer_that_times_out_still_bills_its_requests(
 
 
 _REAL_PLAN_QUERIES = queries.plan_queries
+_REAL_RANK = ranking.rank
