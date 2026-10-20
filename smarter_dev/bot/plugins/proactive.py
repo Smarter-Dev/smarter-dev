@@ -1745,8 +1745,8 @@ async def _persist_active_window(
 async def _persist_engaged(
     run: ProactiveRuntime, state: ChannelProducerState, message_id: str
 ) -> None:
-    """Record a message the agent was woken for, so restart recovery does
-    not replay it before the watcher's cursor has passed it."""
+    """Record a message whose wake is already published, so restart
+    recovery does not replay it before the watcher's cursor has passed it."""
     store = run.history_store()
     if store is None:
         return
@@ -1854,7 +1854,11 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
             ),
         )
         state.pending_directed_ids.add(converted.id)
-        await _persist_engaged(run, state, converted.id)
+        # Only an external wake is durable once enqueued (in the Redis
+        # stream); an embedded or shadow one lives in this process's queue
+        # until consumed, so a restart must still replay it.
+        if run.execution_mode_for(str(event.guild_id)) == EXTERNAL_EXECUTION_MODE:
+            await _persist_engaged(run, state, converted.id)
     if run.uses_jev_batching or now < state.active_until:
         _schedule_producer(state)
     # GLM passive channels leave the buffer for the 15-minute sweep.

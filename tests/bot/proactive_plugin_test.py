@@ -1597,6 +1597,9 @@ async def test_recovery_skips_a_mention_answered_before_the_restart(
 ):
     store = ProactiveHistoryStore(_FakeRedis())
     monkeypatch.setattr(listener_setup.runtime, "history_store", lambda: store)
+    # External: the wake is in the Redis stream once enqueue returns.
+    listener_setup.runtime.execution_mode = proactive.EXTERNAL_EXECUTION_MODE
+    monkeypatch.setattr(listener_setup.runtime, "enqueue_notification", AsyncMock())
     await store.write_cursor(1, guild_id="2", last_message_id="500")
     fresh = datetime.now(UTC)
     mention = _hikari_message(
@@ -1643,6 +1646,77 @@ async def test_recovery_skips_a_mention_answered_before_the_restart(
     assert "anyone around after the deploy?" in notice.body
     assert "ally (username alice, id 901" in notice.body
     assert "what's new?" not in notice.body
+
+
+@pytest.mark.parametrize(
+    "mode", [proactive.EMBEDDED_EXECUTION_MODE, proactive.SHADOW_EXECUTION_MODE]
+)
+async def test_recovery_replays_an_in_process_mention_lost_with_the_restart(
+    listener_setup, monkeypatch, mode
+):
+    store = ProactiveHistoryStore(_FakeRedis())
+    monkeypatch.setattr(listener_setup.runtime, "history_store", lambda: store)
+    listener_setup.runtime.execution_mode = mode
+    monkeypatch.setattr(listener_setup.runtime, "enqueue_notification", AsyncMock())
+    await store.write_cursor(1, guild_id="2", last_message_id="500")
+    mention = _hikari_message(
+        id=501, created_at=datetime.now(UTC), user_mentions_ids=(999,),
+        content="@smarter-bot still there?",
+    )
+    # The wake sits in this process's queue; the restart takes it along.
+    await proactive.on_guild_message(_event(mention))
+    assert ProactiveHistoryStore._engaged_key(1) not in store._redis.data
+
+    restarted = proactive.ProactiveRuntime(
+        listener_setup.runtime.bot, start_consumers=False
+    )
+    monkeypatch.setattr(restarted, "history_store", lambda: store)
+    monkeypatch.setattr(proactive, "runtime", restarted)
+    restarted.bot.rest.fetch_messages = (
+        lambda channel_id, after=None: _FakeIterator([mention])
+    )
+    replayed = []
+
+    async def fake_run_producer(state, passive=False):
+        replayed.extend(message.id for message in state.buffer)
+        state.buffer.clear()
+
+    monkeypatch.setattr(proactive, "_run_producer", fake_run_producer)
+
+    await proactive._recover_channels(restarted)
+
+    assert replayed == ["501"]
+    assert _recovery_notice(restarted).message_ids == ("501",)
+
+
+async def test_recovery_replays_everything_when_engaged_ids_are_unreadable(
+    persistence_setup, monkeypatch
+):
+    store = persistence_setup.store
+    await store.write_cursor(1, guild_id="2", last_message_id="500")
+    await store.mark_engaged(1, "501", ttl_seconds=3600)
+    monkeypatch.setattr(
+        store, "engaged_ids", AsyncMock(side_effect=RuntimeError("Redis down"))
+    )
+    fresh = datetime.now(UTC)
+    persistence_setup.bot.rest.fetch_messages = lambda channel_id, after=None: (
+        _FakeIterator([
+            _hikari_message(id=501, created_at=fresh, user_mentions_ids=(999,)),
+            _hikari_message(id=502, created_at=fresh),
+        ])
+    )
+    replayed = []
+
+    async def fake_run_producer(state, passive=False):
+        replayed.extend(message.id for message in state.buffer)
+        state.buffer.clear()
+
+    monkeypatch.setattr(proactive, "_run_producer", fake_run_producer)
+
+    await proactive._recover_channels(persistence_setup.runtime)
+
+    assert replayed == ["501", "502"]
+    assert _recovery_notice(persistence_setup.runtime).message_ids == ("501", "502")
 
 
 async def test_recovery_notice_carries_messages_sent_during_downtime(
