@@ -1,0 +1,116 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Proactive Recipes - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Proactive Recipes</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <p class="sk-text-muted">
+            Instructions the proactive agent can open when it needs them. Its prompt lists every recipe that is on,
+            by name and preview; it opens one to read the whole text. Only admins write recipes; the agent cannot
+            change them. When you edit a recipe the agent has open, it is told at its next wake to open it again.
+        </p>
+
+        <div style="margin:1rem 0;">
+            <a href="/admin/bot/guilds/{{ guild.id }}/proactive-recipes/create" class="sk-btn">Add Recipe</a>
+        </div>
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Recipes ({{ recipes|length }})</div>
+            <div class="sk-panel-body">
+                {% if recipes %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>What the agent sees</th>
+                            <th>Status</th>
+                            <th>Revision</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for recipe, preview in recipes %}
+                        <tr>
+                            <td><strong>{{ recipe.name }}</strong></td>
+                            <td>
+                                {% if recipe.enabled %}
+                                <div data-recipe-preview style="white-space:pre-wrap;">{{ preview }}</div>
+                                {% else %}
+                                <div class="sk-text-muted">Hidden: the agent cannot see or open a recipe that is off.</div>
+                                <div data-recipe-preview class="sk-text-muted" style="white-space:pre-wrap;">{{ preview }}</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if recipe.enabled %}
+                                <span class="sk-pill sk-pill-published">On</span>
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Off</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {{ recipe.revision }}
+                                {% if recipe.updated_at %}
+                                <div class="sk-text-muted" style="font-size:0.85rem;">{{ recipe.updated_at.strftime("%Y-%m-%d %H:%M") }} UTC</div>
+                                {% endif %}
+                            </td>
+                            <td style="white-space:nowrap;">
+                                <a href="/admin/bot/guilds/{{ guild.id }}/proactive-recipes/{{ recipe.id }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/proactive-recipes/{{ recipe.id }}/toggle" style="display:inline;">
+                                    {{ csrf_field() }}
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">{% if recipe.enabled %}Turn off{% else %}Turn on{% endif %}</button>
+                                </form>
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/proactive-recipes/{{ recipe.id }}/delete" style="display:inline;" data-confirm="Delete the recipe “{{ recipe.name }}”? The agent can no longer open it.">
+                                    {{ csrf_field() }}
+                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No recipes yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Preview length</div>
+            <div class="sk-panel-body">
+                <p class="sk-text-muted" style="font-size:0.85rem;">
+                    The agent is shown each recipe's first paragraph, cut to this many characters
+                    (default {{ preview_default }}).
+                </p>
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/proactive-recipes/settings" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end;">
+                    {{ csrf_field() }}
+                    <label>Characters<br><input type="number" name="preview_chars" value="{{ preview_chars }}" min="{{ preview_min }}" max="{{ preview_max }}" required></label>
+                    <button class="sk-btn-outline" type="submit">Save</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce() }}">
+document.querySelectorAll("form[data-confirm]").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+        if (!window.confirm(form.getAttribute("data-confirm"))) { event.preventDefault(); }
+    });
+});
+</script>
+{% endblock %}

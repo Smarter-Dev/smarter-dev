@@ -1,0 +1,160 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{% if recipe %}Edit Recipe{% else %}Add Recipe{% endif %} - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{% if recipe %}Edit Recipe{% else %}Add Recipe{% endif %}</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/proactive-recipes">&larr; Proactive Recipes</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Recipe</div>
+            <div class="sk-panel-body">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/proactive-recipes/{% if recipe %}{{ recipe.id }}/edit{% else %}create{% endif %}">
+                    {{ csrf_field() }}
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" value="{{ form_data.name }}" maxlength="{{ name_max }}" required>
+                    <small class="sk-text-muted">The agent opens the recipe by this name. Names are unique in this server, ignoring case.</small>
+
+                    <label for="instructions">Instructions</label>
+                    <textarea id="instructions" name="instructions" rows="16" maxlength="{{ instructions_max }}" required>{{ form_data.instructions }}</textarea>
+                    <small class="sk-text-muted">Start with a short paragraph saying when to use it; that paragraph is the preview. Up to {{ instructions_max }} characters.</small>
+
+                    <div data-recipe-editor-preview data-preview-chars="{{ preview_chars }}" style="margin-top:1rem;">
+                        <div class="sk-text-muted" style="font-size:0.8rem;">What the agent sees before it opens the recipe</div>
+                        <div data-recipe-preview style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:0.75rem 1rem; white-space:pre-wrap;">{% if preview %}{{ preview }}{% else %}<span class="sk-text-muted">Write the instructions to see the preview.</span>{% endif %}</div>
+                        <div data-recipe-preview-status class="sk-text-muted" style="font-size:0.85rem; margin-top:0.25rem;">The first paragraph (everything before the first blank line), cut to {{ preview_chars }} characters.</div>
+                        <div class="sk-text-muted" style="font-size:0.8rem; margin-top:0.75rem;">Your text, with the part that becomes the preview highlighted</div>
+                        <div data-recipe-mirror aria-hidden="true" style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:0.75rem 1rem; white-space:pre-wrap; max-height:16rem; overflow:auto; font-family:inherit;"></div>
+                        {% if not form_data.enabled %}<p class="sk-text-muted" style="font-size:0.85rem;">The recipe is off, so the agent is shown nothing until it is switched on.</p>{% endif %}
+                    </div>
+
+                    <label style="margin-top:1rem;">
+                        <input type="checkbox" name="enabled" {% if form_data.enabled %}checked{% endif %}>
+                        On (the agent can see and open it)
+                    </label>
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" name="action" value="save" class="sk-btn">{% if recipe %}Save Recipe{% else %}Create Recipe{% endif %}</button>
+                        <button type="submit" name="action" value="preview" class="sk-btn-outline">Show preview</button>
+                        <a href="/admin/bot/guilds/{{ guild.id }}/proactive-recipes" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script nonce="{{ csp_nonce() }}">
+// recipe-preview:start
+// The server's rule (smarter_dev/web/proactive_recipes.py recipe_preview):
+// the first paragraph, ASCII whitespace runs collapsed to one space, cut to
+// previewChars code points with the ellipsis counted in. A test runs both on
+// the same texts. Also returns where the preview starts and stops in the
+// CRLF-normalised text, and why it stops there.
+function recipePreview(instructions, previewChars) {
+    var SPACE = " \t\n\r\f\v";
+    var text = instructions.replace(/\r\n/g, "\n");
+    var chars = Array.from(text);
+    var first = 0;
+    var last = chars.length;
+    while (first < last && SPACE.indexOf(chars[first]) !== -1) { first++; }
+    while (last > first && SPACE.indexOf(chars[last - 1]) !== -1) { last--; }
+    var body = chars.slice(first, last).join("");
+    var blank = /\n[ \t]*\n/.exec(body);
+    var paragraphChars = Array.from(blank ? body.slice(0, blank.index) : body);
+    var more = blank !== null;
+    var paragraph = paragraphChars.join("").replace(/[ \t\n\r\f\v]+/g, " ").replace(/^ +| +$/g, "");
+    var collapsed = Array.from(paragraph);
+    var cut = collapsed.length > previewChars;
+    var kept = cut ? collapsed.slice(0, Math.max(0, previewChars - 1)).join("").replace(/ +$/, "") : paragraph;
+    var keptLength = Array.from(kept).length;
+    // Walk the source: each non-space character is one preview character,
+    // each run of spaces is one.
+    var end = first;
+    var produced = 0;
+    var index = 0;
+    while (produced < keptLength && index < paragraphChars.length) {
+        if (SPACE.indexOf(paragraphChars[index]) !== -1) {
+            while (index < paragraphChars.length && SPACE.indexOf(paragraphChars[index]) !== -1) { index++; }
+        } else {
+            index++;
+        }
+        produced++;
+    }
+    end = first + index;
+    return {
+        preview: cut ? kept + "\u2026" : paragraph,
+        length: Array.from(cut ? kept + "\u2026" : paragraph).length,
+        start: first,
+        end: end,
+        reason: cut ? "limit" : (more ? "blank_line" : "whole"),
+        chars: chars
+    };
+}
+// recipe-preview:end
+
+(function () {
+    var box = document.getElementById("instructions");
+    var panel = document.querySelector("[data-recipe-editor-preview]");
+    if (!box || !panel) { return; }
+    var limit = parseInt(panel.getAttribute("data-preview-chars"), 10);
+    var previewEl = panel.querySelector("[data-recipe-preview]");
+    var statusEl = panel.querySelector("[data-recipe-preview-status]");
+    var mirror = panel.querySelector("[data-recipe-mirror]");
+
+    function span(text, style) {
+        var el = document.createElement("span");
+        el.textContent = text;
+        if (style) { el.setAttribute("style", style); }
+        return el;
+    }
+
+    function render() {
+        var result = recipePreview(box.value, limit);
+        previewEl.textContent = result.preview || "";
+        if (!result.preview) {
+            previewEl.appendChild(span("Write the instructions to see the preview.", "opacity:0.6;"));
+        }
+        var why = {
+            limit: "cut at the " + limit + "-character limit (the \u2026 counts as one)",
+            blank_line: "ends at the first blank line",
+            whole: "the whole text"
+        }[result.reason];
+        statusEl.textContent = result.length + " / " + limit + " characters in preview \u00b7 " + why;
+        var chars = result.chars;
+        mirror.textContent = "";
+        mirror.appendChild(span(chars.slice(0, result.start).join(""), "opacity:0.45;"));
+        mirror.appendChild(span(chars.slice(result.start, result.end).join(""), "background:rgba(255, 213, 79, 0.45); border-radius:2px;"));
+        if (result.preview) {
+            mirror.appendChild(span(result.reason === "limit" ? "\u2702\u2026" : "\u2702", "font-weight:bold; padding:0 0.15rem;"));
+        }
+        mirror.appendChild(span(chars.slice(result.end).join(""), "opacity:0.45;"));
+    }
+
+    box.addEventListener("input", render);
+    render();
+})();
+</script>
+{% endblock %}

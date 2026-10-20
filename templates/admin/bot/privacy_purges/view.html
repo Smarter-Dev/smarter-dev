@@ -134,6 +134,12 @@
                 {% else %}
                 <p>Nothing found.</p>
                 {% endif %}
+                <h4>Proactive recipes: admins' own text, never rewritten by the purge; edit any listed here by hand, then run the check again ({{ (report.admin_written or []) | length }})</h4>
+                {% if report.admin_written %}
+                <ul>{% for hit in report.admin_written %}<li><a href="/admin/bot/guilds/{{ hit.guild_id }}/proactive-recipes/{{ hit.recipe_id }}/edit">{{ hit.recipe_name }}</a> (<code>{{ hit.location }}</code>): {{ hit.id_hits }} ID, {{ hit.name_hits }} name</li>{% endfor %}</ul>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
                 {% else %}
                 <p class="sk-text-muted">Runs when every guild is acknowledged, or on demand.</p>
                 {% endif %}

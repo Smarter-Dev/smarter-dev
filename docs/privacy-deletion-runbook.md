@@ -412,7 +412,7 @@ still being deleted, wait and run the check again; do not start a purge.
    `worker: guild …`. Run the pod check above, then press "Run the purge
    again". A late answer still counts.
 5. Read the check report. It lists hits by store, location, id-hit count
-   and name-hit count, never the text, in four sections:
+   and name-hit count, never the text, in five sections:
    - **"Still found where the purge rewrites"** (memory, notes, revisions,
      watch instructions, histories): an id hit is a leftover, so press "Run
      the purge again". A name hit may be another member with the same name:
@@ -428,6 +428,12 @@ still being deleted, wait and run the check again; do not start a purge.
      `chat_agent_compaction_events`, `chat_agent_errors`): expected at this
      point. Step 6 and the hourly sweep clear them, and step 10 checks
      again.
+   - **"Proactive recipes"** (`proactive_recipes`): instructions an admin
+     wrote for the proactive agent that hold the id or a name. The purge
+     never rewrites an admin's text. Open each listed recipe (the name links
+     to its edit page), take the person out by hand, save, then press "Run
+     the check again". A name hit may be someone else with the same name;
+     leave it then, and write the count in the receipt note.
    - **"Flagged by the runtimes' acks"**: each line names a guild, the
      runtime and its reasons ("failed", "missing structured fields", "N name
      hit(s)", "history tombstoned", "N unchecked name(s)"). Press "Run the
