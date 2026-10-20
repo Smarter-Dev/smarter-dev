@@ -140,7 +140,7 @@ async def _check_address(text: str) -> tuple[str | None, dict]:
 async def _start_anonymous(request: Request, link: WebSearchLink, text: str) -> Response:
     redis = get_redis_client()
     refused = await anonymous.admit(
-        redis, visitor=get_client_ip(request.scope), link_id=link.id
+        redis, visitor=get_client_ip(request.scope), owner_user_id=link.owner_user_id
     )
     if refused:
         return _limited(

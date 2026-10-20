@@ -158,7 +158,14 @@ async def wait_seconds(redis, key: str, limit: int, window_seconds: int) -> int:
     return int(await redis.eval(_COUNT, 1, key, limit, window_seconds))
 
 
-async def admit(redis, *, visitor: str, link_id: UUID | str) -> Refusal | None:
+def link_day_key(owner_user_id: UUID | str) -> str:
+    """The daily count of a member's search link. It names the owner, never
+    the link: a link made, remade or deleted (here or on next.smarter.dev,
+    which keeps links in D1) carries the same day."""
+    return f"web_search:anonymous:link:owner:{owner_user_id}"
+
+
+async def admit(redis, *, visitor: str, owner_user_id: UUID | str) -> Refusal | None:
     """Count one search against its visitor's minute and its link's day.
 
     None when both allow it. A visitor refused for the minute isn't counted
@@ -169,7 +176,7 @@ async def admit(redis, *, visitor: str, link_id: UUID | str) -> Refusal | None:
     if wait:
         return Refusal(VISITOR_LIMITED, wait, per_link=False)
     wait = await wait_seconds(
-        redis, f"web_search:anonymous:link:{link_id}", LINK_PER_DAY_LIMIT, 86_400
+        redis, link_day_key(owner_user_id), LINK_PER_DAY_LIMIT, 86_400
     )
     if wait:
         return Refusal(LINK_LIMITED, wait, per_link=True)

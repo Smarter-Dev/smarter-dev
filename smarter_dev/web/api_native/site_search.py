@@ -42,7 +42,6 @@ from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import BotApiException
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
-from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.user_content import StillRunning
 from smarter_dev.web.user_content import delete_search
@@ -94,9 +93,11 @@ async def _owned(session: AsyncSession, user: User, run_id: str) -> WebSearchRun
     return run
 
 
-async def _link_of(session: AsyncSession, owner_id: str) -> WebSearchLink:
-    """The active member's search link, refused as the /s/ page refuses a link
-    that doesn't exist."""
+async def _owner_of(session: AsyncSession, owner_id: str) -> UUID:
+    """The active member whose search link the site resolved. The link itself
+    lives on the site (D1), so Python may have no row for it; an unknown or
+    inactive owner is refused as the /s/ page refuses a link that doesn't
+    exist."""
     try:
         uid = UUID(owner_id)
         if str(uid) != owner_id.lower():
@@ -104,16 +105,9 @@ async def _link_of(session: AsyncSession, owner_id: str) -> WebSearchLink:
     except ValueError:
         raise plain_error(400, "Invalid account ID") from None
     owner = await session.get(User, uid)
-    link = (
-        await session.scalar(
-            select(WebSearchLink).where(WebSearchLink.owner_user_id == uid)
-        )
-        if owner is not None and owner.is_active
-        else None
-    )
-    if link is None:
+    if owner is None or not owner.is_active:
         raise plain_error(404, "This search link doesn't exist.")
-    return link
+    return uid
 
 
 def _error_response(request: Request, exc: Exception) -> Response:
@@ -229,18 +223,27 @@ class SiteSearchController(Controller):
     async def start_anonymous(
         self, db_session: AsyncSession, owner_id: str, data: StartAnonymousSearch
     ) -> dict[str, Any]:
-        link = await _link_of(db_session, owner_id)
+        owner = await _owner_of(db_session, owner_id)
         text = " ".join(data.request.split())[:MAX_REQUEST_CHARS]
         if not text:
             raise plain_error(422, "Describe what you're looking for.")
         redis = get_redis_client()
-        refused = await anonymous.admit(redis, visitor=data.visitor, link_id=link.id)
+        refused = await anonymous.admit(
+            redis, visitor=data.visitor, owner_user_id=owner
+        )
         if refused:
+            # per_link: the link's day ran out, which waiting a minute won't
+            # fix (the /s/ page then shows no wait).
             raise BotApiException(
-                429, {"detail": refused.message, "wait": refused.wait}
+                429,
+                {
+                    "detail": refused.message,
+                    "wait": refused.wait,
+                    "per_link": refused.per_link,
+                },
             )
         entry = await anonymous.launch(
-            redis, owner_user_id=link.owner_user_id, nid=None, request=text
+            redis, owner_user_id=owner, nid=None, request=text
         )
         return {"search": entry["site"]}
 
