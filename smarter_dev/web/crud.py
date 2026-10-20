@@ -51,6 +51,9 @@ from smarter_dev.web.models import (
     ChannelModelOverride,
     ProactiveAgentHistory,
     ProactiveChannelSettings,
+    ProactiveRecipe,
+    ProactiveRecipeSettings,
+    PROACTIVE_RECIPE_PREVIEW_DEFAULT,
     ChatAgentGuildMemory,
     ChatAgentMemoryNote,
     ChatAgentMemoryRevision,
@@ -6201,3 +6204,125 @@ async def upsert_proactive_agent_history(
         "Proactive agent history revision conflict: "
         f"stored={stored_revision}, received={revision}"
     )
+
+
+# -- Proactive-agent recipes (#267) ------------------------------------------
+
+
+async def list_proactive_recipes(
+    session: AsyncSession, guild_id: str, *, enabled_only: bool = False
+) -> list[ProactiveRecipe]:
+    """A guild's recipes by name; only the switched-on ones with ``enabled_only``."""
+    statement = select(ProactiveRecipe).where(ProactiveRecipe.guild_id == guild_id)
+    if enabled_only:
+        statement = statement.where(ProactiveRecipe.enabled.is_(True))
+    result = await session.execute(statement.order_by(ProactiveRecipe.name_key))
+    return list(result.scalars().all())
+
+
+async def get_proactive_recipe(
+    session: AsyncSession, guild_id: str, recipe_id: UUID
+) -> ProactiveRecipe | None:
+    """One of ``guild_id``'s recipes; ``None`` for another guild's or none."""
+    result = await session.execute(
+        select(ProactiveRecipe).where(
+            ProactiveRecipe.guild_id == guild_id, ProactiveRecipe.id == recipe_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_proactive_recipe_by_name_key(
+    session: AsyncSession, guild_id: str, name_key: str
+) -> ProactiveRecipe | None:
+    result = await session.execute(
+        select(ProactiveRecipe).where(
+            ProactiveRecipe.guild_id == guild_id,
+            ProactiveRecipe.name_key == name_key,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_proactive_recipe(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    name: str,
+    name_key: str,
+    instructions: str,
+    enabled: bool,
+) -> ProactiveRecipe:
+    """Add a recipe at revision 1; ``ConflictError`` when the name is taken."""
+    if await get_proactive_recipe_by_name_key(session, guild_id, name_key):
+        raise ConflictError(f"A recipe named {name!r} already exists.")
+    recipe = ProactiveRecipe(
+        guild_id=guild_id,
+        name=name,
+        name_key=name_key,
+        instructions=instructions,
+        enabled=enabled,
+        revision=1,
+    )
+    session.add(recipe)
+    await session.flush()
+    return recipe
+
+
+async def update_proactive_recipe(
+    session: AsyncSession,
+    recipe: ProactiveRecipe,
+    *,
+    name: str,
+    name_key: str,
+    instructions: str,
+    enabled: bool,
+) -> bool:
+    """Apply an edit; the revision goes up only when the name or text changed.
+
+    Returns whether it did. ``ConflictError`` when the new name is another
+    recipe's.
+    """
+    if name_key != recipe.name_key:
+        other = await get_proactive_recipe_by_name_key(
+            session, recipe.guild_id, name_key
+        )
+        if other is not None and other.id != recipe.id:
+            raise ConflictError(f"A recipe named {name!r} already exists.")
+    changed = name != recipe.name or instructions != recipe.instructions
+    recipe.name = name
+    recipe.name_key = name_key
+    recipe.instructions = instructions
+    recipe.enabled = enabled
+    if changed:
+        # In SQL, so two admins saving the same loaded revision both count.
+        recipe.revision = ProactiveRecipe.revision + 1
+    await session.flush()
+    if changed:
+        await session.refresh(recipe, attribute_names=["revision"])
+    return changed
+
+
+async def get_proactive_recipe_preview_chars(
+    session: AsyncSession, guild_id: str
+) -> int:
+    """The guild's preview length, or the default when it never set one."""
+    value = await session.scalar(
+        select(ProactiveRecipeSettings.preview_chars).where(
+            ProactiveRecipeSettings.guild_id == guild_id
+        )
+    )
+    return PROACTIVE_RECIPE_PREVIEW_DEFAULT if value is None else value
+
+
+async def set_proactive_recipe_preview_chars(
+    session: AsyncSession, guild_id: str, preview_chars: int
+) -> None:
+    record = await session.get(ProactiveRecipeSettings, guild_id)
+    if record is None:
+        session.add(
+            ProactiveRecipeSettings(guild_id=guild_id, preview_chars=preview_chars)
+        )
+    else:
+        record.preview_chars = preview_chars
+    await session.flush()

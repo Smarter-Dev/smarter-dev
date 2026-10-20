@@ -1139,6 +1139,35 @@ class EnabledProactiveChannelRead(BaseAPIModel):
     )
 
 
+class ProactiveRecipePreviewRead(BaseAPIModel):
+    """An enabled recipe as the proactive agent's prompt lists it (#267)."""
+
+    id: UUID = Field(description="Recipe id")
+    name: str = Field(description="The name the agent opens it by")
+    preview: str = Field(
+        description="First paragraph, cut to the guild's preview length"
+    )
+    revision: int = Field(description="Goes up whenever the name or text changes")
+    updated_at: datetime = Field(description="Last change")
+
+
+class ProactiveRecipeListRead(BaseAPIModel):
+    """A guild's enabled recipes, previews only."""
+
+    preview_chars: int = Field(description="The guild's preview length")
+    recipes: list[ProactiveRecipePreviewRead] = Field(default_factory=list)
+
+
+class ProactiveRecipeRead(BaseAPIModel):
+    """One enabled recipe, whole: what open_recipe returns to the agent."""
+
+    id: UUID = Field(description="Recipe id")
+    name: str = Field(description="Recipe name")
+    instructions: str = Field(description="The full instructions")
+    revision: int = Field(description="Goes up whenever the name or text changes")
+    updated_at: datetime = Field(description="Last change")
+
+
 class ProactiveUsageEntry(BaseAPIModel):
     """One model's token usage inside a single proactive wake."""
 

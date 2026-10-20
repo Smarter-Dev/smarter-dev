@@ -275,6 +275,16 @@ allowed — that is a keyword watch, not a command.
 - `proactive_agent_histories` — the proactive agent's own working history,
   with the bounds described above (summary only after 2 idle hours); it is
   not an operator-facing audit trail.
+- `proactive_recipes` and `proactive_recipe_settings` (#267) — instructions an
+  admin writes on the admin site for the proactive agent to open on demand,
+  and each server's preview length. Nothing in them is read from Discord, and
+  only admins write them; the agent cannot. Neither the sweep nor a deletion
+  request rewrites them: an admin's instructions are theirs to edit. A copy
+  the agent opened lives in its working history, which the bounds above and
+  the agent purge already cover; when the agent purge rewrites that history
+  it keeps only the recipe's name. The purge's check searches every recipe and lists one that
+  holds the person's ID or a name, which keeps the request in review until an
+  admin edits it by hand and runs the check again. No age bound.
 - The chat agent's own memory. Three tables, exempt for two different reasons:
 
   | Table | What it holds | Why it is exempt |

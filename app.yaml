@@ -105,6 +105,7 @@ controllers:
   # authorization — see smarter_dev/shared/config_links.py).
   - smarter_dev.web.bot_admin.channel_config:ChannelConfigController
   - smarter_dev.web.api_native.chat_memory:ChatMemoryController
+  - smarter_dev.web.api_native.proactive_recipes:ProactiveRecipesController
   - smarter_dev.web.api_native.site_memory:SiteMemoryController
   - smarter_dev.web.api_native.site_memory:SitePublicMemoryController
   - smarter_dev.web.api_native.handlers:HandlerController
@@ -155,6 +156,7 @@ controllers:
   - smarter_dev.web.bot_admin.chat_memory:ChatMemoryAdminController
   - smarter_dev.web.bot_admin.privacy_purge:PrivacyPurgeAdminController
   - smarter_dev.web.bot_admin.proactive_overview:ProactiveChannelsAdminController
+  - smarter_dev.web.bot_admin.proactive_recipes:ProactiveRecipesAdminController
   - smarter_dev.web.handlers_admin:HandlersAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController

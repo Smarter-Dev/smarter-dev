@@ -90,6 +90,7 @@ from smarter_dev.web.models import ChatBotOptIn
 from smarter_dev.web.models import ChatBotPurgeRequest
 from smarter_dev.web.models import ProactiveAgentHistory
 from smarter_dev.web.models import ProactiveChannelSettings
+from smarter_dev.web.models import ProactiveRecipe
 
 logger = logging.getLogger(__name__)
 
@@ -1258,18 +1259,36 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
         async for hit in _table_hits(session, model, columns, target):
             information.append(hit)
 
+    # Proactive-agent recipes (#267) are an admin's instructions, not member
+    # data: the purge never rewrites them. One that names the person is
+    # reported for an admin to edit by hand, and keeps the request in review.
+    admin_written: list[dict] = []
+    for recipe in (await session.scalars(select(ProactiveRecipe))).all():
+        checked += 1
+        hit = _hit(
+            "proactive_recipes",
+            f"guild:{recipe.guild_id}/recipe:{recipe.id}",
+            *target.value_hits([recipe.name, recipe.instructions]),
+            recipe.guild_id,
+        )
+        if hit:
+            hit["recipe_id"] = str(recipe.id)
+            hit["recipe_name"] = recipe.name
+            admin_written.append(hit)
+
     return {
         "stores_checked": checked,
         "remains": remains,
         "operational": operational,
         "information": information,
+        "admin_written": admin_written,
     }
 
 
 def hit_counts(report: dict) -> dict[str, int]:
-    """Hits per store over remains, operational and information: names and counts only."""
+    """Hits per store over every section of the check: names and counts only."""
     counts: dict[str, int] = {}
-    for section in ("remains", "operational", "information"):
+    for section in ("remains", "operational", "information", "admin_written"):
         for hit in report.get(section) or []:
             counts[hit["store"]] = counts.get(hit["store"], 0) + 1
     return counts
@@ -1278,7 +1297,7 @@ def hit_counts(report: dict) -> dict[str, int]:
 def run_outcome(steps: dict, report: dict) -> str:
     """``complete`` only when every step succeeded and no searched store hits.
 
-    Any hit (remains, operational copies, audit tables), a tombstoned guild,
+    Any hit (remains, operational copies, audit tables, recipes), a tombstoned guild,
     an unchecked name, or a flagged ack ends in review.
     """
     failed = bool(steps.get("error"))
@@ -1537,6 +1556,7 @@ def receipt_summary(request: ChatBotPurgeRequest) -> dict:
         "operational": len(report.get("operational") or []),
         "information": len(report.get("information") or []),
         "tombstoned": len(report.get("tombstoned") or []),
+        "admin_written": len(report.get("admin_written") or []),
     }
 
 

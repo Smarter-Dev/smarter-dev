@@ -6588,6 +6588,66 @@ class ProactiveAgentHistory(Base):
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
+# Recipe limits (#267); the admin form and the API share them.
+PROACTIVE_RECIPE_NAME_MAX = 80
+PROACTIVE_RECIPE_INSTRUCTIONS_MAX = 20_000
+PROACTIVE_RECIPE_PREVIEW_DEFAULT = 300
+PROACTIVE_RECIPE_PREVIEW_MIN = 50
+PROACTIVE_RECIPE_PREVIEW_MAX = 2000
+
+
+class ProactiveRecipe(Base):
+    """An admin-written recipe the proactive agent can open on demand (#267).
+
+    The agent sees each enabled recipe's name and preview (its first
+    paragraph, cut to the guild's ``preview_chars``) and opens one by name to
+    read ``instructions`` whole. Only admins write recipes; the agent cannot.
+    ``revision`` goes up whenever the name or instructions change (switching
+    a recipe on or off does not), which is how the agent learns that a copy
+    it opened is out of date. ``name_key`` is the name casefolded with its
+    whitespace collapsed: names are unique per guild in that form, and the
+    agent opens a recipe by it.
+    """
+
+    __tablename__ = "proactive_recipes"
+    __table_args__ = (
+        UniqueConstraint("guild_id", "name_key", name="uq_proactive_recipes_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    name: Mapped[str] = mapped_column(String(PROACTIVE_RECIPE_NAME_MAX), nullable=False)
+    name_key: Mapped[str] = mapped_column(
+        String(PROACTIVE_RECIPE_NAME_MAX), nullable=False
+    )
+    instructions: Mapped[str] = mapped_column(Text, nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+
+
+class ProactiveRecipeSettings(Base):
+    """A guild's recipe settings: how long a preview the agent is shown.
+
+    A guild without a row uses :data:`PROACTIVE_RECIPE_PREVIEW_DEFAULT`.
+    """
+
+    __tablename__ = "proactive_recipe_settings"
+
+    guild_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    preview_chars: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=PROACTIVE_RECIPE_PREVIEW_DEFAULT,
+        server_default=str(PROACTIVE_RECIPE_PREVIEW_DEFAULT),
+    )
+
+
 class WebSearchRun(Base):
     """One dashboard web search: the model's queries, Brave's results, Jev's ranking.
 
