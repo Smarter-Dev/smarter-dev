@@ -4294,6 +4294,68 @@ class ModerationMemberLock(Base):
     expires_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class ModerationShadowDecision(Base):
+    """What the moderation coordinator would have done, next to what was done.
+
+    One row per judged message revision while the coordinator runs in shadow
+    (``smarter_dev.bot.moderation_coordinator.shadow``). Ids, rule names,
+    labels and decisions only: never the message text. ``legacy`` is filled in
+    a couple of minutes later from the gateway's operations on the same
+    message, and ``agreement`` compares the two. Rows go after
+    ``SHADOW_MAX`` (30 days) and with their author's data on a deletion
+    request: they are an experiment's record, not moderation history.
+    """
+
+    __tablename__ = "moderation_shadow_decisions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    message_id: Mapped[str] = mapped_column(String, nullable=False)
+    revision: Mapped[str] = mapped_column(String(80), nullable=False)
+    is_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    author_id: Mapped[str] = mapped_column(String, nullable=False)
+    message_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    policy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    rules: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    labels: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    classifier: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    decision: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    strongest_action: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    target_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    staff_excluded: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    provisional: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: Why the revision was not judged (a policy read failed); NULL when it was.
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    legacy: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    legacy_strongest_action: Mapped[str | None] = mapped_column(
+        String(20), nullable=True
+    )
+    legacy_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    agreement: Mapped[str | None] = mapped_column(String(30), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id",
+            "message_id",
+            "revision",
+            name="uq_moderation_shadow_decisions_revision",
+        ),
+        Index("ix_moderation_shadow_decisions_created_at", "created_at"),
+        Index("ix_moderation_shadow_decisions_author_id", "author_id"),
+        Index(
+            "ix_moderation_shadow_decisions_unchecked",
+            "legacy_checked_at",
+            "created_at",
+        ),
+    )
+
+
 class TrackedLinkCounter(Base):
     """Generic outbound-link click counter.
 

@@ -227,6 +227,7 @@ async def _scam_banner(
     actor = AdminActor(
         bot_token="t",
         guild_id=GUILD,
+        staff_exempt_role_ids=(),
         moderation_port=world.discord,
         fire=HandlerFireFacts(
             handler_id=HANDLER,

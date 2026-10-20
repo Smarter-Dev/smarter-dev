@@ -311,6 +311,26 @@ async def test_install_form_unknown_slug_redirects(db_session):
     flash_error.assert_called_once()
 
 
+async def test_install_form_for_a_retired_extension_redirects(db_session):
+    """#255: a template moved to moderation cannot be installed, so its form
+    is not offered either."""
+    flash_error = Mock()
+    with patch(
+        f"{_CAMPAIGNS_MODULE}.get_admin_discord_client", return_value=_admin_client()
+    ), patch(f"{_MODULE}.flash_error", flash_error):
+        response = await ExtensionsAdminController.extension_install_form.fn(
+            None,
+            request=object(),
+            db_session=db_session,
+            guild_id=_GUILD,
+            slug="keyword-watch",
+        )
+
+    assert response.status_code in (302, 303, 307)
+    [[_, message], _] = flash_error.call_args
+    assert "moderation" in message
+
+
 # --- controller: install POST ------------------------------------------------
 
 

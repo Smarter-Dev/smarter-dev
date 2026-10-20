@@ -54,8 +54,12 @@
                                 {% for handler in manifest.handlers %}<code>{{ handler.trigger_type }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
                             </p>
 
+                            {% if manifest.moved_to_moderation %}
+                            <p class="sk-text-muted" style="font-size:0.85rem; margin:0.25rem 0;">{{ manifest.moved_to_moderation }}</p>
+                            {% endif %}
                             <div style="margin-top:0.75rem; white-space:nowrap;">
-                                {% if not install %}
+                                {% if not install and manifest.moved_to_moderation %}
+                                {% elif not install %}
                                 <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/install" class="sk-btn">Install</a>
                                 {% else %}
                                 <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/configure" class="sk-btn-outline sk-btn-small">Configure</a>
@@ -71,7 +75,7 @@
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
                                 </form>
                                 {% endif %}
-                                {{ uninstall_form(guild.id, manifest.slug) }}
+                                {{ uninstall_form(guild.id, manifest.slug, manifest.moved_to_moderation) }}
                                 {% endif %}
                             </div>
                         </div>

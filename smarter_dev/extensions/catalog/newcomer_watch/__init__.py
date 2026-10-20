@@ -196,6 +196,10 @@ MANIFEST = ExtensionManifest(
             channel_scope=[],
         ),
     ],
+    moved_to_moderation=(
+        "Moved into the moderation system: new members' messages are judged "
+        "there, once, so this template can no longer be installed."
+    ),
     example_config={
         "agent_instruction": (
             "Flag crypto or NFT promotion, invite-link spam, and unsolicited "

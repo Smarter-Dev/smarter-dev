@@ -149,6 +149,11 @@ class ExtensionManifest(BaseModel):
     config: list[ConfigField]
     handlers: list[HandlerTemplate]
     example_config: dict
+    #: Set on a template whose job moved into the moderation system: the
+    #: sentence the catalog shows instead of an Install button. New installs
+    #: are refused; an existing install keeps running until the cutover
+    #: retires it (smarter_dev.web.handler_moderation_policy).
+    moved_to_moderation: str | None = None
 
     @field_validator("slug")
     @classmethod

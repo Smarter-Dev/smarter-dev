@@ -43,6 +43,13 @@ MANAGE_NICKNAMES = 1 << 27
 MANAGE_ROLES = 1 << 28
 MANAGE_WEBHOOKS = 1 << 29
 MODERATE_MEMBERS = 1 << 40
+MENTION_EVERYONE = 1 << 17
+MUTE_MEMBERS = 1 << 22
+DEAFEN_MEMBERS = 1 << 23
+MOVE_MEMBERS = 1 << 24
+MANAGE_GUILD_EXPRESSIONS = 1 << 30
+MANAGE_EVENTS = 1 << 33
+MANAGE_THREADS = 1 << 34
 
 #: Holding any of these, at guild level or in any channel, makes a member staff.
 STAFF_PERMISSIONS = (
@@ -57,6 +64,20 @@ STAFF_PERMISSIONS = (
     | MANAGE_NICKNAMES
     | MANAGE_WEBHOOKS
     | VIEW_AUDIT_LOG
+)
+
+#: Not staff standing (holding one does not protect a member), but real power
+#: over others: mass pings, locking or deleting threads, muting or moving
+#: people in voice, editing events and emoji. Automation never hands out or
+#: takes away a role carrying one (:func:`role_refusal`).
+ELEVATED_PERMISSIONS = (
+    MENTION_EVERYONE
+    | MANAGE_THREADS
+    | MANAGE_EVENTS
+    | MANAGE_GUILD_EXPRESSIONS
+    | MUTE_MEMBERS
+    | DEAFEN_MEMBERS
+    | MOVE_MEMBERS
 )
 
 # Refusal reasons. Callers put them in logs, tool results and reports.
@@ -190,4 +211,47 @@ def non_member_refusal(
         return unknown("whether the user is a bot is unknown")
     if is_bot:
         return A_BOT
+    return None
+
+
+# Why a role may not be granted or removed by automation.
+A_STAFF_ROLE = "is a staff role"
+ROLE_STAFF_PERMISSION = "carries a staff permission"
+ROLE_CHANNEL_STAFF_PERMISSION = "carries a staff permission in a channel"
+ROLE_ELEVATED_PERMISSION = "carries an elevated permission"
+
+
+def role_refusal(
+    role_id: str, guild: GuildFacts, *, extra_role_ids: Iterable[str] = ()
+) -> str | None:
+    """Why automation may not grant or remove ``role_id``, or None when it may.
+
+    A role that makes its holder staff under :func:`member_refusal` is never
+    changed by automation: granting one would put a member out of moderation's
+    reach, and removing one would let a later run punish a moderator (strip the
+    role in one fire, ban in the next). Nor is a role carrying one of
+    :data:`ELEVATED_PERMISSIONS`. The @everyone role, an unknown role and a
+    role the guild facts cannot resolve are refused too.
+    """
+    rid = str(role_id)
+    if rid == str(guild.guild_id):
+        return "is the @everyone role"
+    staff_roles = STAFF_ROLE_IDS | {str(extra) for extra in extra_role_ids}
+    if rid in staff_roles:
+        return A_STAFF_ROLE
+    permissions = guild.role_permissions.get(rid)
+    if permissions is None:
+        return unknown(f"role {rid} could not be resolved")
+    if int(permissions) & STAFF_PERMISSIONS:
+        return ROLE_STAFF_PERMISSION
+    for overwrites in guild.channel_overwrites:
+        overwrite = overwrites.get(rid)
+        if overwrite is not None and overwrite.allow & STAFF_PERMISSIONS:
+            return ROLE_CHANNEL_STAFF_PERMISSION
+    if int(permissions) & ELEVATED_PERMISSIONS or any(
+        overwrite.allow & ELEVATED_PERMISSIONS
+        for overwrites in guild.channel_overwrites
+        if (overwrite := overwrites.get(rid)) is not None
+    ):
+        return ROLE_ELEVATED_PERMISSION
     return None

@@ -56,6 +56,7 @@ from smarter_dev.shared.model_router import agent_retries_for
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.web.handler_lint import lint_script
+from smarter_dev.web.handler_moderation_policy import moderation_refusal
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
@@ -1126,6 +1127,24 @@ async def _validate_admin_draft(
             ),
             None,
         )
+
+    target = next(
+        (
+            handler
+            for handler in existing_handlers
+            if resolved.target_handler_id
+            and handler.get("handler_id") == resolved.target_handler_id
+        ),
+        {},
+    )
+    reason = moderation_refusal(
+        script,
+        existing_script=target.get("script"),
+        handler_name=target.get("name"),
+    )
+    if reason is not None:
+        logger.info("admin draft refused: it sanctions members")
+        return _DraftRejection(is_mechanical=False, feedback=reason), None
 
     if resolved.trigger_type in ("schedule", "timer"):
         try:

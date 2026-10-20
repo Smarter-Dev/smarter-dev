@@ -50,6 +50,12 @@ GATEWAY_TABLES = [
     models.ModerationMemberLock.__table__,
     models.ModerationAction.__table__,
     models.SpamRingIncident.__table__,
+    # The moderation coordinator's shadow, and what it reads.
+    models.ModerationShadowDecision.__table__,
+    models.MemberActivity.__table__,
+    models.ModerationFilterConfig.__table__,
+    models.AttachmentFilterConfig.__table__,
+    models.AdminHandler.__table__,
 ]
 
 

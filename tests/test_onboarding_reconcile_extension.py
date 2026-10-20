@@ -120,6 +120,11 @@ class _FakeActor:
     # Member ids that model a member who has left (404): the role op returns False.
     gone: set = field(default_factory=set)
 
+    # Roles that confer staff standing are refused (role_refusal); none of
+    # this fake's roles do unless a test lists them here.
+    async def role_refusal(self, role_id):
+        return getattr(self, "protected_roles", {}).get(str(role_id))
+
     async def add_role(self, user_id, role_id, reason=None):
         self.calls.append(("add_role", user_id, role_id, reason))
         return user_id not in self.gone

@@ -41,6 +41,7 @@ from smarter_dev.web.handler_runtime import run_handler_script
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ChannelHandler
+from smarter_dev.web.models import ModerationFilterConfig
 from tests.moderation_fakes import FakeModerationDiscord
 
 
@@ -91,6 +92,7 @@ def _actor(discord: _Discord) -> AdminActor:
     return AdminActor(
         bot_token="t",
         guild_id="G1",
+        staff_exempt_role_ids=(),
         moderation_port=discord,
         fire=HandlerFireFacts(handler_id="H1", handler_name="probe"),
     )
@@ -412,6 +414,60 @@ async def test_admin_fire_job_gives_a_script_real_holds_and_claims(
     held = await redis.hgetall("hhold:G1:U7")
     assert {f"{handler_id}:post-a", f"{handler_id}:post-b"} <= set(held)
     assert await redis.exists(f"hclaim:{handler_id}:bad:k") == 1
+
+
+async def test_admin_fire_job_hands_the_actor_the_guilds_staff_roles(
+    monkeypatch, test_engine, redis
+):
+    """#255: the fire's actor protects the roles the guild's filters treat
+    as staff (``staff_exempt_role_ids``); left unread it refuses everything."""
+    handler_id = uuid4()
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
+        session.add(
+            AdminHandler(
+                id=handler_id,
+                guild_id="G1",
+                name="role-probe",
+                trigger_type="message",
+                settings={},
+                channel_ids=[],
+                description="d",
+                script="x = 1\n",
+                created_by_admin="A1",
+            )
+        )
+        session.add(
+            ModerationFilterConfig(guild_id="G1", staff_exempt_role_ids=["R9", 77])
+        )
+        await session.commit()
+
+    built = []
+
+    def actor(**kwargs):
+        built.append(kwargs)
+        return AdminActor(**kwargs)
+
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs, "get_db_session_context", _SessionCtx(test_engine)
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(admin_actions, "AdminActor", actor)
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=str(handler_id),
+            channel_id="C2",
+            trigger_context={"trigger_type": "message", "author_id": "U7"},
+        ),
+        _job(),
+    )
+
+    assert [kwargs["staff_exempt_role_ids"] for kwargs in built] == [("R9", "77")]
 
 
 async def test_standard_fire_job_gives_a_script_claimed(

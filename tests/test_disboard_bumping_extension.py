@@ -94,6 +94,11 @@ class _Actor:
         self.calls.append(("delete", channel_id, message_id))
         return "ok"
 
+    # Roles that confer staff standing are refused (role_refusal); none of
+    # this fake's roles do unless a test lists them here.
+    async def role_refusal(self, role_id):
+        return getattr(self, "protected_roles", {}).get(str(role_id))
+
     async def add_role(self, user_id, role_id, reason=None):
         self.calls.append(("add_role", user_id, role_id))
         return True

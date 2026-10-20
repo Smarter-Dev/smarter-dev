@@ -250,6 +250,26 @@ async def test_unknown_slug_rejected(db_session, worker_stub, monkeypatch):
         )
 
 
+@pytest.mark.parametrize("slug", ["newcomer-watch", "keyword-watch", "edit-ping-catch"])
+async def test_a_template_moved_into_moderation_is_not_installed(
+    db_session, worker_stub, slug
+):
+    """#239: the catalog's moderation templates would be parallel punishers
+    beside the coordinator; a new install is refused and writes nothing."""
+    from smarter_dev.extensions.registry import get_registry
+
+    manifest = get_registry().get(slug).manifest
+    with pytest.raises(ExtensionInstallError, match="moderation system"):
+        await install_extension(
+            db_session,
+            guild_id=GUILD,
+            slug=slug,
+            raw_config=dict(manifest.example_config),
+            installed_by="admin",
+        )
+    assert await _count_handlers(db_session, GUILD) == 0
+
+
 # -- config edit ---------------------------------------------------------------
 
 

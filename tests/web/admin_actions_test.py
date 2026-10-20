@@ -58,7 +58,12 @@ def _actor(requests: list[httpx.Request], status_code: int | None = None) -> Adm
     """
     discord = _discord(status_code)
     discord.writes = requests
-    return AdminActor(bot_token="t", guild_id="G1", transport=discord.transport())
+    return AdminActor(
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=discord.transport(),
+    )
 
 
 async def test_ban_user_with_reason_sends_auth_and_audit_headers():
@@ -122,7 +127,10 @@ def _member_actor(member: dict | None, status_code: int = 200) -> AdminActor:
         return httpx.Response(status_code, json=member)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -174,7 +182,12 @@ async def test_remove_timeout_never_lifts_a_moderators_timeout():
     discord = _discord()
     discord.writes = requests
     discord.members["U1"] = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    actor = AdminActor(bot_token="t", guild_id="G1", transport=discord.transport())
+    actor = AdminActor(
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=discord.transport(),
+    )
     out = await actor.remove_timeout("U1")
     assert "not removed" in out
     assert requests == []
@@ -264,7 +277,10 @@ def _thread_actor(
         return httpx.Response(mutate_status)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -358,15 +374,65 @@ async def test_thread_verification_cached_across_ops():
 # -- role mutation (add_role / remove_role) + ban purge window (E2) --
 
 
+MANAGE_MESSAGES = 1 << 13
+MENTION_EVERYONE = 1 << 17
+MANAGE_THREADS = 1 << 34
+STAFF_ROLE = "644390354157568014"
+
+#: The guild the role rule reads: R1 an ordinary role, R_MOD one carrying a
+#: staff permission, R_CHAN one granted a staff permission in a channel.
+GUILD_ROLES = [
+    {"id": "G1", "permissions": "0"},
+    {"id": "R1", "permissions": "0"},
+    {"id": STAFF_ROLE, "permissions": "0"},
+    {"id": "R_MOD", "permissions": str(MANAGE_MESSAGES)},
+    {"id": "R_CHAN", "permissions": "0"},
+    {"id": "R_PING", "permissions": str(MENTION_EVERYONE)},
+    {"id": "R_THREADS", "permissions": "0"},
+]
+GUILD_CHANNELS = [
+    {
+        "id": "C1",
+        "permission_overwrites": [
+            {"id": "R_CHAN", "type": 0, "allow": str(MANAGE_MESSAGES), "deny": "0"},
+            {"id": "R_THREADS", "type": 0, "allow": str(MANAGE_THREADS), "deny": "0"},
+        ],
+    }
+]
+
+
 def _role_actor(
-    requests: list[httpx.Request], status_code: int = 204
+    requests: list[httpx.Request],
+    status_code: int = 204,
+    *,
+    guild_status: int = 200,
 ) -> AdminActor:
+    """Writes answer ``status_code``; the guild and channel reads the role rule
+    needs answer ``guild_status`` (and are not collected)."""
+
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET":
+            if guild_status != 200:
+                return httpx.Response(guild_status)
+            if request.url.path.endswith("/guilds/G1"):
+                return httpx.Response(
+                    200, json={"id": "G1", "owner_id": "O1", "roles": GUILD_ROLES}
+                )
+            if request.url.path.endswith("/guilds/G1/channels"):
+                return httpx.Response(200, json=GUILD_CHANNELS)
+            if "/members/" in request.url.path:
+                return httpx.Response(200, json={"user": {"id": "U1"}, "roles": []})
+            if request.url.path.endswith("/users/@me"):
+                return httpx.Response(200, json={"id": "BOT"})
+            return httpx.Response(404)
         requests.append(request)
         return httpx.Response(status_code)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -409,6 +475,42 @@ async def test_add_role_forbidden_403_raises_admin_action_error():
             await _role_actor([], status_code=status).remove_role("U1", "R1")
 
 
+@pytest.mark.parametrize(
+    ("role_id", "why"),
+    [
+        (STAFF_ROLE, "is a staff role"),
+        ("R_MOD", "carries a staff permission"),
+        ("R_CHAN", "carries a staff permission in a channel"),
+        ("R_GONE", "could not be checked"),
+        ("G1", "@everyone"),
+        # #255: not staff standing, but mass pings and thread moderation.
+        ("R_PING", "carries an elevated permission"),
+        ("R_THREADS", "carries an elevated permission"),
+    ],
+)
+async def test_a_role_that_confers_staff_standing_is_never_changed(role_id, why):
+    """#239: strip a moderator's role in one fire, ban them in the next. The
+    role change itself is refused, both ways, before any write."""
+    from smarter_dev.web.admin_actions import ProtectedRoleError
+
+    requests: list[httpx.Request] = []
+    actor = _role_actor(requests)
+    with pytest.raises(ProtectedRoleError, match=why):
+        await actor.remove_role("U1", role_id)
+    with pytest.raises(ProtectedRoleError, match=why):
+        await actor.add_role("U1", role_id)
+    assert requests == []
+
+
+async def test_a_role_whose_standing_cannot_be_read_is_refused():
+    from smarter_dev.web.admin_actions import ProtectedRoleError
+
+    requests: list[httpx.Request] = []
+    with pytest.raises(ProtectedRoleError, match="could not be checked"):
+        await _role_actor(requests, guild_status=503).add_role("U1", "R1")
+    assert requests == []
+
+
 async def test_add_role_encodes_audit_reason():
     requests: list[httpx.Request] = []
     await _role_actor(requests).add_role("U1", "R1", reason="sus — telegram")
@@ -443,7 +545,10 @@ def _webhook_actor(
         return httpx.Response(status_code)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -566,7 +671,10 @@ def _lookup_actor(
         return httpx.Response(404)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 

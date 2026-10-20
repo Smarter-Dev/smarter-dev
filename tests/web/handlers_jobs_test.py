@@ -97,6 +97,9 @@ class _FakeSession:
     async def scalars(self, statement):
         return []  # empty guild-memory snapshot for the emitter-guild regression
 
+    async def scalar(self, statement):
+        return None  # no filter config: the guild lists no extra staff roles
+
     async def commit(self):
         pass
 

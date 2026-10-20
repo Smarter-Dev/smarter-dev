@@ -440,6 +440,15 @@ ADMIN_SCRIPT = (
     'if context.get("author_joined_at"):\n'
     '    report = await spawn_agent("scam?", has_tools=False)\n'
     '    if "scam" in report.lower():\n'
+    '        await delete_message(context["message_id"])\n'
+    '        await send_message("removed a scam", "MODCHAT")\n'
+)
+
+#: A live handler from before #239 that punishes members itself.
+LEGACY_BANNER_SCRIPT = (
+    'if context.get("author_joined_at"):\n'
+    '    report = await spawn_agent("scam?", has_tools=False)\n'
+    '    if "scam" in report.lower():\n'
     '        await ban_user(context["author_id"], "scam")\n'
     '        await send_message("banned a scammer", "MODCHAT")\n'
 )
@@ -452,7 +461,7 @@ ADMIN_EXISTING = [
         "settings": {},
         "channel_ids": [],
         "description": "bans scammers",
-        "script": ADMIN_SCRIPT,
+        "script": LEGACY_BANNER_SCRIPT,
     },
 ]
 
@@ -489,7 +498,7 @@ async def test_admin_pipeline_create():
     assert result.action == "create"
     assert result.name == "raid-alarm"
     assert result.trigger_type == "message"
-    assert "ban_user" in result.script
+    assert "delete_message" in result.script
 
 
 async def test_admin_pipeline_edit():
@@ -507,6 +516,84 @@ async def test_admin_pipeline_edit():
     assert result.ok
     assert result.action == "edit"
     assert result.target_handler_id == "33333333-3333-3333-3333-333333333333"
+
+
+async def test_admin_pipeline_refuses_a_new_handler_that_punishes_members():
+    """#239: a new handler cannot become a second punisher beside the
+    moderation coordinator; the draft never reaches the judge."""
+    judged = []
+
+    async def judge(script, trigger_context):
+        judged.append(script)
+        return _verdict()
+
+    result = await run_admin_creation_pipeline(
+        request="watch for scams and ban them",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(_admin_plan(script=LEGACY_BANNER_SCRIPT)),
+        judge=judge,
+    )
+    assert not result.ok
+    assert "can no longer punish members (ban_user)" in result.error
+    assert judged == []
+
+
+async def test_admin_pipeline_edit_of_a_live_punisher_is_refused():
+    """#255: a live script that sanctions is frozen. Rewording it keeps the
+    ban call but could change what it bans for, so it is refused too."""
+    plan = _admin_plan(
+        action="edit",
+        target_handler_id="33333333-3333-3333-3333-333333333333",
+        name="",
+        script=LEGACY_BANNER_SCRIPT.replace("banned a scammer", "banned one"),
+    )
+    result = await run_admin_creation_pipeline(
+        request="say it shorter",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "can no longer be changed" in result.error
+
+
+async def test_admin_pipeline_edit_may_remove_a_live_handlers_sanctions():
+    plan = _admin_plan(
+        action="edit",
+        target_handler_id="33333333-3333-3333-3333-333333333333",
+        name="",
+        script=LEGACY_BANNER_SCRIPT.replace(
+            'await ban_user(context["author_id"], "scam")',
+            'await send_message("scam?", "MODCHAT")',
+        ),
+    )
+    result = await run_admin_creation_pipeline(
+        request="just tell the mods",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert "ban_user" not in result.script
+
+
+async def test_admin_pipeline_edit_cannot_add_a_sanction():
+    plan = _admin_plan(
+        action="edit",
+        target_handler_id="33333333-3333-3333-3333-333333333333",
+        name="",
+        script=LEGACY_BANNER_SCRIPT
+        + '        await timeout_user(context["author_id"], 600)\n',
+    )
+    result = await run_admin_creation_pipeline(
+        request="also time them out",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "can no longer be changed" in result.error
+    assert "timeout_user" in result.error
 
 
 async def test_admin_pipeline_edit_unknown_target():
@@ -743,7 +830,7 @@ async def test_admin_rejected_draft_goes_back_to_the_author_once():
     assert result.script == CLEAN_ADMIN_SCRIPT
     assert len(requests) == 2
     # The revision carries the first draft's script and the rejection detail.
-    assert "ban_user" in requests[1]
+    assert "delete_message" in requests[1]
     assert "no condition" in requests[1]
     assert "alert mods about raids" in requests[1]
     assert any("no condition" in m for m in messages)

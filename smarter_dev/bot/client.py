@@ -27,6 +27,7 @@ from smarter_dev.bot.audit_logger import log_message_delete
 from smarter_dev.bot.audit_logger import log_message_edit
 from smarter_dev.bot.content_filter import check_content_filters
 from smarter_dev.bot.forum_posts import resolve_forum_tag_names
+from smarter_dev.bot.moderation_coordinator.shadow import register_moderation_shadow
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.guild_chat_memory_service import GuildChatMemoryService
@@ -1830,6 +1831,11 @@ async def run_bot() -> None:
     # The attachment filter above stays an independent listener: it only fires
     # on messages that carry attachments and shares no state with these two.
     register_message_moderation_listeners(bot)
+
+    # The moderation coordinator, in shadow for the guilds listed in
+    # MODERATION_SHADOW_GUILD_IDS: it judges the same messages and records its
+    # decision next to the legacy actors' effects. It cannot act.
+    register_moderation_shadow(bot)
 
     @bot.listen()
     async def on_interaction_create(event: hikari.InteractionCreateEvent) -> None:
