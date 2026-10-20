@@ -4,6 +4,8 @@ The web pod imports this module, so it must not import pydantic-ai."""
 
 from __future__ import annotations
 
+from typing import Any
+
 from smarter_dev.web.models import WebSearchRun
 
 ACTIVE_STATUSES = ("queued", "planning", "searching", "ranking", "answering")
@@ -54,6 +56,56 @@ def snapshot(run: WebSearchRun) -> dict:
         "created_at": _iso(run.created_at),
         "started_at": _iso(run.started_at),
         "finished_at": _iso(run.finished_at),
+    }
+
+
+def structured(run: WebSearchRun) -> dict[str, Any]:
+    """The search as structured data. The answer is Markdown, never HTML: the
+    site renders it with its own safe renderer, citations as ``[n]``."""
+    answer = run.answer or None
+    return {
+        "id": str(run.id),
+        "request": run.request,
+        "status": run.status,
+        "active": run.status in ACTIVE_STATUSES,
+        "queries": [
+            {
+                "query": item.get("query", ""),
+                "angle": item.get("angle", ""),
+                "status": item.get("status", "pending"),
+                "count": item.get("count"),
+                "domains": item.get("domains", []),
+            }
+            for item in run.queries or []
+        ],
+        "results": [
+            {
+                "title": item.get("title", ""),
+                "url": item.get("url", ""),
+                "domain": item.get("domain", ""),
+                "snippet": item.get("snippet", ""),
+                "favicon": item.get("favicon", ""),
+                "age": item.get("age", ""),
+                "relevant": bool(item.get("relevant")),
+                "best": bool(item.get("best")),
+                "score": item.get("score"),
+            }
+            for item in run.results or []
+        ],
+        "ranked": bool(run.ranked),
+        "needs_answer": bool(run.needs_answer),
+        "answer": (
+            {
+                "status": answer.get("status", "reading"),
+                "markdown": answer.get("markdown", ""),
+                "reads": answer.get("reads", []),
+                "error": answer.get("error"),
+            }
+            if answer
+            else None
+        ),
+        "error": run.error,
+        "version": run.version,
     }
 
 

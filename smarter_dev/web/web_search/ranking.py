@@ -21,6 +21,8 @@ from pydantic import Field
 from pydantic import create_model
 from pydantic_ai import Agent
 
+from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.shared.usage_meter import run_through
 from smarter_dev.web.llm_pricing import JEV_INPUT_PRICE_PER_MILLION_USD
 
 RANK_MODEL = os.getenv("WEB_SEARCH_RANK_MODEL", "jev-1.13.0")
@@ -163,11 +165,36 @@ def judge(verdicts: dict, details: dict, count: int) -> list[dict]:
     return judgments
 
 
-async def rank(request: str, results: list[dict]) -> tuple[list[dict], dict]:
+def _usage(model: str, input_tokens: int) -> dict:
+    return {
+        "model": model,
+        "input_tokens": input_tokens,
+        "cost_usd": round(input_tokens * INPUT_PRICE_PER_MILLION_USD / 1e6, 6),
+    }
+
+
+def spent(meter: UsageMeter) -> dict | None:
+    """What a failed ranking was billed, from its meter: the input of each
+    response Jev gave before the ranking raised. None when Jev gave none."""
+    stages = meter.stages()
+    if not stages:
+        return None
+    model, _, _ = stages[0]
+    return {
+        **_usage(model, sum(total.input_tokens for _, total, _ in stages)),
+        "failed": True,
+    }
+
+
+async def rank(
+    request: str, results: list[dict], meter: UsageMeter | None = None
+) -> tuple[list[dict], dict]:
     """Jev's judgment of each result, in the order given, and the call's usage.
 
     Each judgment is ``{"score", "level", "relevant", "quality", "local",
-    "best_probability", "best"}``; exactly one has ``"best": True``."""
+    "best_probability", "best"}``; exactly one has ``"best": True``. *meter*
+    keeps Jev's response as it arrives, for the caller to bill if the ranking
+    raises after Jev answered."""
     agent = Agent(build_model(), output_type=judgment_model(results), retries=0)
     run = await agent.run(
         material(request, results),
@@ -176,12 +203,10 @@ async def rank(request: str, results: list[dict]) -> tuple[list[dict], dict]:
             "timeout": TIMEOUT_SECONDS,
             "typesafe_boolean_threshold": BOOLEAN_THRESHOLD,
         },
+        **run_through(meter, agent),
     )
     judgments = judge(run.output.model_dump(), run.response.provider_details or {}, len(results))
     usage = run.usage() if callable(run.usage) else run.usage
-    input_tokens = usage.input_tokens or 0
-    return judgments, {
-        "model": run.response.model_name or RANK_MODEL,
-        "input_tokens": input_tokens,
-        "cost_usd": round(input_tokens * INPUT_PRICE_PER_MILLION_USD / 1e6, 6),
-    }
+    return judgments, _usage(
+        run.response.model_name or RANK_MODEL, usage.input_tokens or 0
+    )

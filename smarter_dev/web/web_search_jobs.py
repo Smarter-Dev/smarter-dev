@@ -79,4 +79,8 @@ async def run_anonymous_web_search_job(payload: WebSearchPayload) -> dict:
         return {"status": "expired"}
     if entry["search"]["status"] in {"complete", "error"}:
         return {"status": entry["search"]["status"], "idempotent": True}
-    return {"status": await search(anonymous.UnsavedRun(redis, entry))}
+    try:
+        return {"status": await search(anonymous.UnsavedRun(redis, entry))}
+    except anonymous.Expired:
+        # Its 30 minutes ran out mid-run: stop, and don't retry.
+        return {"status": "expired"}

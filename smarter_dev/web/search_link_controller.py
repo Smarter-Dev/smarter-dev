@@ -139,57 +139,20 @@ async def _check_address(text: str) -> tuple[str | None, dict]:
 
 async def _start_anonymous(request: Request, link: WebSearchLink, text: str) -> Response:
     redis = get_redis_client()
-    wait = await anonymous.wait_seconds(
-        redis,
-        f"web_search:anonymous:visitor:{get_client_ip(request.scope)}",
-        anonymous.PER_MINUTE_LIMIT,
-        60,
+    refused = await anonymous.admit(
+        redis, visitor=get_client_ip(request.scope), link_id=link.id
     )
-    if wait:
+    if refused:
         return _limited(
             request,
-            message=(
-                f"Searches without logging in are limited to {anonymous.PER_MINUTE_LIMIT} a minute."
-            ),
-            wait=wait,
+            message=refused.message,
+            wait=None if refused.per_link else refused.wait,
             login=True,
         )
-    if await anonymous.wait_seconds(
-        redis,
-        f"web_search:anonymous:link:{link.id}",
-        anonymous.LINK_PER_DAY_LIMIT,
-        86_400,
-    ):
-        return _limited(
-            request,
-            message="This search link has run all its searches without logging in for today.",
-            wait=None,
-            login=True,
-        )
-    state = await anonymous.start(
+    entry = await anonymous.launch(
         redis, owner_user_id=link.owner_user_id, nid=ensure_nid(request), request=text
     )
-    from skrift.workers import submit as worker_submit
-
-    from smarter_dev.web.chat.dispatch import ensure_submission_handler
-
-    try:
-        ensure_submission_handler(anonymous.JOB_TYPE)
-        await worker_submit(
-            anonymous.JOB_TYPE,
-            {"search_id": state["id"]},
-            queue="agents",
-            job_id=f"anonymous:{state['id']}",
-        )
-    except Exception as error:  # noqa: BLE001 - shown on the search page
-        logger.error("Anonymous web search couldn't start (%s)", type(error).__name__)
-        entry = await anonymous.load(redis, state["id"])
-        if entry is not None:
-            entry["search"].update(
-                status="error", active=False, error="Couldn't start the search. Try again."
-            )
-            await anonymous.save(redis, entry)
-    return Redirect(path=f"/s/r/{state['id']}", status_code=303)
+    return Redirect(path=f"/s/r/{entry['search']['id']}", status_code=303)
 
 
 async def _visible(request: Request, search_id: UUID) -> dict | None:
