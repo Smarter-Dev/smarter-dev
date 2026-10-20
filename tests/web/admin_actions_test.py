@@ -58,7 +58,12 @@ def _actor(requests: list[httpx.Request], status_code: int | None = None) -> Adm
     """
     discord = _discord(status_code)
     discord.writes = requests
-    return AdminActor(bot_token="t", guild_id="G1", transport=discord.transport())
+    return AdminActor(
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=discord.transport(),
+    )
 
 
 async def test_ban_user_with_reason_sends_auth_and_audit_headers():
@@ -122,7 +127,10 @@ def _member_actor(member: dict | None, status_code: int = 200) -> AdminActor:
         return httpx.Response(status_code, json=member)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -174,7 +182,12 @@ async def test_remove_timeout_never_lifts_a_moderators_timeout():
     discord = _discord()
     discord.writes = requests
     discord.members["U1"] = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    actor = AdminActor(bot_token="t", guild_id="G1", transport=discord.transport())
+    actor = AdminActor(
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=discord.transport(),
+    )
     out = await actor.remove_timeout("U1")
     assert "not removed" in out
     assert requests == []
@@ -264,7 +277,10 @@ def _thread_actor(
         return httpx.Response(mutate_status)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -359,6 +375,8 @@ async def test_thread_verification_cached_across_ops():
 
 
 MANAGE_MESSAGES = 1 << 13
+MENTION_EVERYONE = 1 << 17
+MANAGE_THREADS = 1 << 34
 STAFF_ROLE = "644390354157568014"
 
 #: The guild the role rule reads: R1 an ordinary role, R_MOD one carrying a
@@ -369,12 +387,15 @@ GUILD_ROLES = [
     {"id": STAFF_ROLE, "permissions": "0"},
     {"id": "R_MOD", "permissions": str(MANAGE_MESSAGES)},
     {"id": "R_CHAN", "permissions": "0"},
+    {"id": "R_PING", "permissions": str(MENTION_EVERYONE)},
+    {"id": "R_THREADS", "permissions": "0"},
 ]
 GUILD_CHANNELS = [
     {
         "id": "C1",
         "permission_overwrites": [
-            {"id": "R_CHAN", "type": 0, "allow": str(MANAGE_MESSAGES), "deny": "0"}
+            {"id": "R_CHAN", "type": 0, "allow": str(MANAGE_MESSAGES), "deny": "0"},
+            {"id": "R_THREADS", "type": 0, "allow": str(MANAGE_THREADS), "deny": "0"},
         ],
     }
 ]
@@ -408,7 +429,10 @@ def _role_actor(
         return httpx.Response(status_code)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -459,6 +483,9 @@ async def test_add_role_forbidden_403_raises_admin_action_error():
         ("R_CHAN", "carries a staff permission in a channel"),
         ("R_GONE", "could not be checked"),
         ("G1", "@everyone"),
+        # #255: not staff standing, but mass pings and thread moderation.
+        ("R_PING", "carries an elevated permission"),
+        ("R_THREADS", "carries an elevated permission"),
     ],
 )
 async def test_a_role_that_confers_staff_standing_is_never_changed(role_id, why):
@@ -518,7 +545,10 @@ def _webhook_actor(
         return httpx.Response(status_code)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 
@@ -641,7 +671,10 @@ def _lookup_actor(
         return httpx.Response(404)
 
     return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=httpx.MockTransport(handle),
     )
 
 

@@ -130,6 +130,18 @@ SPAM_ACTIONS = (SPAM_ACTION_NONE, SPAM_ACTION_WARN, SPAM_ACTION_MUTE)
 # ---------------------------------------------------------------------------
 
 
+_FILE_TYPE = re.compile(r"\.[a-z0-9]{1,10}")
+
+
+def _shown_type(extension: str) -> str:
+    """The file type for a row's reasons. Whatever follows a name's last dot
+    can be anything the member wrote (``x.call me at 555-0100``), so only an
+    extension-shaped one is kept."""
+    if extension == "(no extension)" or _FILE_TYPE.fullmatch(extension):
+        return extension
+    return "(unusual extension)"
+
+
 def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleHit]:
     """Blocked files: the message is removed and the author told; warn-tier
     files: the author is told. Neither is a sanction."""
@@ -145,7 +157,7 @@ def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleH
             RuleHit(
                 rule=ATTACHMENT_FILTER,
                 # The file type, not its name: a name is member content.
-                reason=f"blocked attachment type {blocked[0]['extension']}",
+                reason=f"blocked attachment type {_shown_type(blocked[0]['extension'])}",
                 target_user_id=facts.author_id,
                 target_name=facts.author_name,
                 cleanup=(Cleanup(facts.channel_id, facts.message_id),),
@@ -156,7 +168,7 @@ def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleH
         return [
             RuleHit(
                 rule=ATTACHMENT_FILTER,
-                reason=f"cautioned attachment type {warned[0]['extension']}",
+                reason=f"cautioned attachment type {_shown_type(warned[0]['extension'])}",
                 target_user_id=facts.author_id,
                 target_name=facts.author_name,
                 notice=NOTICE_ATTACHMENT_WARNED,

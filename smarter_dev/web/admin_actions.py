@@ -149,6 +149,11 @@ class AdminActor(DiscordBotClient):
 
     guild_id: str
     fire: HandlerFireFacts | None = None
+    #: The guild's configured extra staff roles (the filter config's
+    #: ``staff_exempt_role_ids``, which the filters, spam engine, spam ring,
+    #: triage and coordinator all treat as staff). None means they were not
+    #: read, and every staff and role check refuses.
+    staff_exempt_role_ids: tuple[str, ...] | None = None
     #: Tests hand in a fake Discord; production talks REST through this actor.
     moderation_port: ModerationPort | None = None
     _verified_thread_ids: set[str] = field(default_factory=set, init=False)
@@ -331,8 +336,14 @@ class AdminActor(DiscordBotClient):
         roles and channel overwrites, read once per fire. A failed read
         refuses.
         """
+        if self.staff_exempt_role_ids is None:
+            return unknown("the guild's staff roles were not read")
         try:
-            return role_refusal(str(role_id), await self._protection_guild_facts())
+            return role_refusal(
+                str(role_id),
+                await self._protection_guild_facts(),
+                extra_role_ids=self.staff_exempt_role_ids,
+            )
         except Exception as error:  # noqa: BLE001 — unknown refuses
             logger.warning(
                 "Role protection check for role %s in guild %s failed: %s",
@@ -577,8 +588,13 @@ class AdminActor(DiscordBotClient):
                 is_bot=bool((member.get("user") or {}).get("bot", False)),
                 role_ids=tuple(str(role_id) for role_id in member.get("roles", [])),
             )
+            if self.staff_exempt_role_ids is None:
+                return unknown("the guild's staff roles were not read")
             return member_refusal(
-                facts, await self._protection_guild_facts(), bot_user_id=bot_user_id
+                facts,
+                await self._protection_guild_facts(),
+                bot_user_id=bot_user_id,
+                extra_role_ids=self.staff_exempt_role_ids,
             )
         except Exception as error:  # noqa: BLE001 — unknown protects
             logger.warning(

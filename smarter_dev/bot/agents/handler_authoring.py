@@ -1128,16 +1128,20 @@ async def _validate_admin_draft(
             None,
         )
 
-    existing_script = next(
+    target = next(
         (
-            handler.get("script")
+            handler
             for handler in existing_handlers
             if resolved.target_handler_id
             and handler.get("handler_id") == resolved.target_handler_id
         ),
-        None,
+        {},
     )
-    reason = moderation_refusal(script, existing_script=existing_script)
+    reason = moderation_refusal(
+        script,
+        existing_script=target.get("script"),
+        handler_name=target.get("name"),
+    )
     if reason is not None:
         logger.info("admin draft refused: it sanctions members")
         return _DraftRejection(is_mechanical=False, feedback=reason), None

@@ -22,7 +22,6 @@ decision: a shadow comparison against a drifted live script says so.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import time
 from dataclasses import dataclass
@@ -35,30 +34,21 @@ from smarter_dev.bot.spam_engine import SpamEngineSettings
 from smarter_dev.bot.spam_ring import SpamRingSettings
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
+from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_HANDLER
+from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_REFERENCE_SHA256
+from smarter_dev.web.handler_moderation_policy import script_sha256
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.moderation_gateway.gateway import default_session_factory
 
 logger = logging.getLogger(__name__)
 
-#: sha256 of ``scripts/handler_scripts/scam-banner.monty``, the script the
-#: scam gate was ported from. A test fails when the file changes without this
-#: (and the rules) changing with it.
-SCAM_BANNER_REFERENCE_SHA256 = (
-    "e8ba764de2d9e026ef96c774c4ad9eadc90f0538ee28f2207982a3edeb0af623"
-)
-
-SCAM_BANNER_HANDLER = "scam-banner"
 EDIT_PING_HANDLER = "edit-ping-catch"
 BUMP_TRACKER_HANDLER = "disboard-bump-tracker"
 
 #: How long one guild's policy snapshot is reused. Config edits reach the
 #: shadow within this; the cutover replaces it with the revision check.
 POLICY_TTL_SECONDS = 60.0
-
-
-def script_sha256(script: str) -> str:
-    return hashlib.sha256(script.encode("utf-8")).hexdigest()
 
 
 @dataclass(frozen=True, slots=True)

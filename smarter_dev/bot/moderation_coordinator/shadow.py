@@ -22,7 +22,6 @@ waiting is dropped and counted rather than queued.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 import os
 import time
@@ -38,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from smarter_dev.bot import leadership
+from smarter_dev.bot.moderation_coordinator.classifier import ClassifierBudget
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
@@ -94,10 +94,18 @@ def shadow_guild_ids(raw: str | None = None) -> frozenset[str]:
     return frozenset(part.strip() for part in raw.split(",") if part.strip())
 
 
-def revision_of(content: str, *, is_edit: bool) -> str:
+def revision_of(edited_at: datetime | None, *, is_edit: bool, now: float) -> str:
+    """``create``, or ``edit:<when Discord says it was edited, in ms>``.
+
+    Taken from the edit's time, not its text, so a row holds nothing derived
+    from what was written (a hash of a short edit could be matched against a
+    guess); a replayed edit event carries the same time and is not judged
+    twice.
+    """
     if not is_edit:
         return "create"
-    return "edit:" + hashlib.sha256(content.encode("utf-8")).hexdigest()[:24]
+    moment = edited_at.timestamp() if edited_at is not None else now
+    return f"edit:{int(moment * 1000)}"
 
 
 # ---------------------------------------------------------------------------
@@ -139,7 +147,9 @@ def facts_from_message(
         account_created_at=snowflake_to_datetime(int(author.id)),
         joined_at=getattr(member, "joined_at", None) if member else None,
         attachments=_attachments(message),
-        revision=revision_of(content, is_edit=is_edit),
+        revision=revision_of(
+            getattr(message, "edited_timestamp", None), is_edit=is_edit, now=now
+        ),
         is_edit=is_edit,
         author_is_bot=bool(getattr(author, "is_bot", False)),
         is_webhook=getattr(message, "webhook_id", None) is not None,
@@ -362,6 +372,26 @@ def row_from(evaluation: Evaluation) -> ModerationShadowDecision:
 
 
 class ShadowRecorder:
+    async def requests_today(
+        self, guild_ids: Iterable[str], now: float
+    ) -> dict[str, int]:
+        """Classifier requests each guild's rows record since 00:00 UTC."""
+        day_start = datetime.fromtimestamp(now - now % 86400, UTC)
+        requests = ModerationShadowDecision.classifier["requests"].as_integer()
+        async with default_session_factory()() as session:
+            rows = await session.execute(
+                select(
+                    ModerationShadowDecision.guild_id,
+                    func.coalesce(func.sum(requests), 0),
+                )
+                .where(
+                    ModerationShadowDecision.guild_id.in_(list(guild_ids)),
+                    ModerationShadowDecision.created_at >= day_start,
+                )
+                .group_by(ModerationShadowDecision.guild_id)
+            )
+            return {guild_id: int(total) for guild_id, total in rows}
+
     async def record(self, row: ModerationShadowDecision) -> bool:
         """Insert one row; a revision already recorded (a replayed event) is kept."""
         async with default_session_factory()() as session:
@@ -610,6 +640,8 @@ class ModerationShadow:
         self._slots = asyncio.Semaphore(MAX_CONCURRENT)
         self._tasks: set[asyncio.Task] = set()
         self.dropped = 0
+        #: The comparison loop, once started.
+        self.background: asyncio.Task | None = None
 
     def wants(self, guild_id: Any) -> bool:
         return guild_id is not None and str(guild_id) in self.guild_ids
@@ -706,13 +738,41 @@ class ModerationShadow:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
+async def restore_budget(
+    budget: ClassifierBudget, recorder: ShadowRecorder, guild_ids: Iterable[str]
+) -> None:
+    """Read today's spend back into ``budget``; on failure it stays shut.
+
+    App ``StartedEvent`` listeners run once this process acts, so the count
+    includes what the previous process recorded before it handed over.
+    """
+    now = time.time()
+    try:
+        spent = await recorder.requests_today(guild_ids, now)
+    except Exception:  # noqa: BLE001 — retried on the next pass
+        log_exception(
+            logger,
+            "Moderation shadow could not read today's classifier spend",
+            level=logging.WARNING,
+        )
+        return
+    budget.restore(spent, now)
+    logger.info(
+        "Moderation shadow classifier budget restored: %s",
+        ", ".join(f"{guild}={count}" for guild, count in sorted(spent.items()))
+        or "nothing spent today",
+    )
+
+
 def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
     """Listen for the shadow guilds' messages; None when no guild is listed."""
     guild_ids = shadow_guild_ids()
     if not guild_ids:
         return None
+    budget = ClassifierBudget(restored=False)
     shadow = ModerationShadow(
-        Coordinator(BotReads(bot), ModerationClassifier()), guild_ids=guild_ids
+        Coordinator(BotReads(bot), ModerationClassifier(budget=budget)),
+        guild_ids=guild_ids,
     )
 
     @bot.listen()
@@ -731,6 +791,8 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
 
     async def compare_forever() -> None:
         while True:
+            if not budget.restored:
+                await restore_budget(budget, shadow.recorder, guild_ids)
             await asyncio.sleep(SWEEP_SECONDS)
             if not leadership.is_acting():
                 continue
@@ -741,7 +803,8 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
 
     @bot.listen()
     async def on_moderation_shadow_started(event: hikari.StartedEvent) -> None:
-        asyncio.get_running_loop().create_task(compare_forever())
+        # Kept: the loop holds the only reference otherwise.
+        shadow.background = asyncio.get_running_loop().create_task(compare_forever())
 
     logger.info(
         "Moderation coordinator shadow on for guild(s) %s", ", ".join(sorted(guild_ids))

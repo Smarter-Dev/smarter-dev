@@ -75,7 +75,7 @@
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
                                 </form>
                                 {% endif %}
-                                {{ uninstall_form(guild.id, manifest.slug) }}
+                                {{ uninstall_form(guild.id, manifest.slug, manifest.moved_to_moderation) }}
                                 {% endif %}
                             </div>
                         </div>

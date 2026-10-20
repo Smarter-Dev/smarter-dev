@@ -192,9 +192,16 @@ async def _reschedule(record: AdminHandler) -> None:
     await _recurring_chain.arm_occurrence(record, fire_at)
 
 
-def _reject_new_sanctions(script: str, *, existing_script: str | None = None) -> None:
+def _reject_new_sanctions(
+    script: str,
+    *,
+    existing_script: str | None = None,
+    handler_name: str | None = None,
+) -> None:
     """422 for a script that would punish members (handler_moderation_policy)."""
-    reason = moderation_refusal(script, existing_script=existing_script)
+    reason = moderation_refusal(
+        script, existing_script=existing_script, handler_name=handler_name
+    )
     if reason is not None:
         raise plain_error(422, reason)
 
@@ -267,12 +274,19 @@ class AdminHandlerController(Controller):
         data: UpdateAdminHandlerRequest,
     ) -> AdminHandlerResponse:
         parsed_handler_id = parse_uuid_path(handler_id, "handler_id")
-        record = await db_session.get(AdminHandler, parsed_handler_id)
+        # Locked until commit: the sanction check below reads the live
+        # script, and a concurrent write must not land between the check and
+        # this one (the /script route's conditional UPDATE, done as a lock).
+        record = await db_session.get(
+            AdminHandler, parsed_handler_id, with_for_update=True
+        )
         if record is None:
             raise plain_error(404, "admin handler not found")
         # trigger_type is immutable on edit, so validate against the stored one.
         _reject_bot_optin_on_non_message(data.settings, record.trigger_type)
-        _reject_new_sanctions(data.script, existing_script=record.script)
+        _reject_new_sanctions(
+            data.script, existing_script=record.script, handler_name=record.name
+        )
 
         if data.name is not None:
             name = _normalized_name(data.name)
@@ -319,7 +333,9 @@ class AdminHandlerController(Controller):
             raise plain_error(404, "admin handler not found")
         # Against the script the caller read: the write below only lands
         # while that is still the live one.
-        _reject_new_sanctions(data.script, existing_script=data.expected_script)
+        _reject_new_sanctions(
+            data.script, existing_script=data.expected_script, handler_name=record.name
+        )
         # The check and the write are one statement, so two callers who both
         # read the old script cannot both get past it: the row matches only
         # while the script is still what the caller read, and the one that

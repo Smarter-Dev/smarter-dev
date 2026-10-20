@@ -275,13 +275,21 @@ class Coordinator:
                 )
                 and not await author_is_staff()
             ):
-                window = await self.reads.channel_window(
-                    facts.guild_id,
-                    facts.channel_id,
-                    now_dt - ring.lookback,
-                    MAX_RING_MESSAGES,
-                    extra_roles,
-                )
+                # The history is only read for a request the budget would
+                # take (as the ring checks its budget first): past it, the
+                # request is refused anyway and the read would be wasted.
+                window = None
+                if (
+                    self.classifier.budget_refusal(facts.guild_id, facts.author_id)
+                    is None
+                ):
+                    window = await self.reads.channel_window(
+                        facts.guild_id,
+                        facts.channel_id,
+                        now_dt - ring.lookback,
+                        MAX_RING_MESSAGES,
+                        extra_roles,
+                    )
                 messages, authors = window if window is not None else ([], {})
                 if not any(m.message_id == facts.message_id for m in messages):
                     messages.append(

@@ -214,3 +214,38 @@ async def test_the_live_handlers_channel_scope_is_kept():
     )
     result = await replay(case)
     assert result.calls.total == 0
+
+
+async def test_a_raid_past_the_budget_reads_no_ring_history():
+    """#255: 120 new members each post a link in one channel within a minute.
+    The guild's minute budget takes 20 requests; the other 100 would be
+    refused, so their sweeps never read the channel's history (Discord's rate
+    limit is shared with the live actors)."""
+    from tests.bot.moderation_coordinator.replay_cases import GENERAL
+
+    raiders = [
+        Member(f"raider{i}", 500 + i, NOW - timedelta(days=3), NOW - timedelta(hours=1))
+        for i in range(120)
+    ]
+    reads = ReplayReads(windows={GENERAL: ([], {})})
+    case = ReplayCase(
+        name="raid",
+        policy=policy(),
+        messages=[
+            say(
+                raider,
+                f"join us https://raid{i}.example",
+                NOW + timedelta(seconds=i / 2),
+            )
+            for i, raider in enumerate(raiders)
+        ],
+        answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
+        reads=reads,
+    )
+    result = await replay(case)
+
+    requests = sum(e.classifier.requests for e in result.evaluations)
+    refused = [e for e in result.evaluations if e.classifier.outcome == BUDGET]
+    assert requests == 20
+    assert len(refused) == 100
+    assert reads.window_reads == requests

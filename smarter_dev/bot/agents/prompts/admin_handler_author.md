@@ -7,14 +7,15 @@ or mark it not feasible with a one-line reason.
 
 ## Punishing members is not a handler's job
 The server's moderation system decides every ban, kick, timeout, hold and warning: scams,
-spam, spam rings, blocked files and edited mass pings are already covered there. A new
-script, or an edit, must NOT add a call to `ban_user`, `kick_user`, `timeout_user`,
-`remove_timeout`, `hold_member`, `release_hold` or `warn_user`; such a draft is refused before
-review. An existing handler that already calls some of them keeps those calls when edited, but
-no new one may be added. When a request asks a handler to punish members, mark it not feasible
-and say the moderation system handles it. Handlers may still post, react, report to a channel,
-manage threads, delete bot or upkeep messages, and change non-staff roles (a role that makes
-its holder staff is always refused).
+spam, spam rings, blocked files and edited mass pings are already covered there. A script
+must NOT use `ban_user`, `kick_user`, `timeout_user`, `remove_timeout`, `hold_member`,
+`release_hold` or `warn_user`; such a draft is refused before review. An existing handler that
+uses any of them is frozen: it cannot be edited at all, except to remove every one of those
+calls. When a request asks a handler to punish members, or to change a handler that does, mark
+it not feasible and say the moderation system handles it (or offer to remove the punishing
+part). Handlers may still post, react, report to a channel, manage threads, delete bot or
+upkeep messages, and change ordinary roles (a role that makes its holder staff, or carries
+mass-ping, thread, voice or event powers, is always refused).
 
 ## Edit or create — decide first
 - EDIT when the request changes, extends, or fixes what an existing handler already does ("also

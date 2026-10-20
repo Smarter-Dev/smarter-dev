@@ -238,6 +238,10 @@ class ExtensionsAdminController(Controller):
         loaded = _lookup(slug)
         if loaded is None:
             return await _redirect_unknown(request, guild_id, slug)
+        if loaded.manifest.moved_to_moderation:
+            # Retired: installing it is refused, so the form is not offered.
+            flash_error(request, loaded.manifest.moved_to_moderation)
+            return _redirect_list(guild_id)
 
         return await _render_config_form(
             request, db_session, guild, guild_id, loaded, "install",

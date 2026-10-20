@@ -35,6 +35,8 @@ import re
 import time
 from collections import deque
 from collections.abc import Callable
+from collections.abc import Iterable
+from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
@@ -86,23 +88,29 @@ JEV = "jev"
 DEADLINE_SECONDS = 10.0
 #: Room for a short JSON reply after low-effort adaptive thinking.
 HAIKU_MAX_TOKENS = 2048
-#: Bounds on what one request carries.
+#: Bounds on what one request carries, in UTF-8 bytes: a token is at least
+#: one byte, so bytes bound the input tokens whatever the script of the text.
 MAX_MESSAGE_CHARS = 4000
 MAX_CONTEXT_LINE_CHARS = 300
 MAX_ATTACHMENTS = 10
+#: All the untrusted material of one Haiku request together. The message, its
+#: attachments, the ad and each candidate's name come first; candidates' lines
+#: and then the channel context (newest first) fill what is left.
+MAX_MATERIAL_BYTES = 16_000
 
 #: Budget defaults: the ring's caps per author and per guild minute, and a
-#: per-guild daily ceiling for the shadow. At Haiku 5.5's $0.10/$0.50 per
-#: million tokens a capped request (about 5k tokens in, 300 out) is about
-#: $0.0007, so the default ceiling bounds a day at well under $1.
+#: per-guild daily ceiling for the shadow. The worst Haiku 5.5 request
+#: ($0.10/$0.50 per million tokens) is :data:`MAX_MATERIAL_BYTES` plus the
+#: instructions in (under 18k tokens) and 2048 out, about $0.0029, so the
+#: default ceiling bounds a day at about $0.88; a typical request (1-2k
+#: tokens in, a few hundred out) costs a tenth of that. The day's count is
+#: read back from the shadow's own rows at startup (:meth:`ClassifierBudget.
+#: restore_day`), so a restart does not reset it.
 PER_AUTHOR = 2
 AUTHOR_WINDOW_SECONDS = 600.0
 PER_GUILD_MINUTE = 20
 DAILY_REQUESTS_ENV_VAR = "MODERATION_SHADOW_DAILY_REQUESTS"
-DEFAULT_DAILY_REQUESTS = 500
-#: The day's count lives in the process: a restart or a leader handover
-#: starts it again, so a day can see this cap more than once in the worst
-#: case. The per-minute cap still bounds the rate.
+DEFAULT_DAILY_REQUESTS = 300
 MAX_TRACKED_AUTHORS = 4096
 
 METER_OPERATION = "moderation_shadow_classifier"
@@ -149,6 +157,7 @@ class ClassifierBudget:
         author_window: float = AUTHOR_WINDOW_SECONDS,
         per_guild_minute: int = PER_GUILD_MINUTE,
         per_guild_day: int | None = None,
+        restored: bool = True,
     ) -> None:
         self.per_author = per_author
         self.author_window = author_window
@@ -159,30 +168,48 @@ class ClassifierBudget:
         self._authors: dict[tuple[str, str], deque[float]] = {}
         self._minutes: dict[str, deque[float]] = {}
         self._days: dict[tuple[str, int], int] = {}
+        #: False until :meth:`restore` has read today's spend back: until
+        #: then every request is refused, so a restart never resets the day.
+        self.restored = restored
 
     @staticmethod
     def _trim(calls: deque[float], horizon: float) -> None:
         while calls and calls[0] <= horizon:
             calls.popleft()
 
+    def refusal(self, guild_id: str, author_id: str | None, now: float) -> str | None:
+        """The cap that would refuse a request now, or None; charges nothing.
+
+        Asked before work that only a request would use (the ring's history
+        read), so a raid past the budget does not spend Discord's rate limit
+        on reads whose results would be thrown away.
+        """
+        if not self.restored:
+            return "not_restored"
+        if self._days.get((guild_id, int(now // 86400)), 0) >= self.per_guild_day:
+            return "guild_day"
+        if author_id is not None:
+            author_calls = self._authors.get((guild_id, author_id))
+            if author_calls is not None:
+                self._trim(author_calls, now - self.author_window)
+                if len(author_calls) >= self.per_author:
+                    return "author"
+        minute = self._minutes.get(guild_id)
+        if minute is not None:
+            self._trim(minute, now - 60)
+            if len(minute) >= self.per_guild_minute:
+                return "guild_minute"
+        return None
+
     def try_spend(self, guild_id: str, author_id: str | None, now: float) -> str | None:
         """Charge one request and return None, or name the cap that refused it."""
+        refused = self.refusal(guild_id, author_id, now)
+        if refused is not None:
+            return refused
         day = (guild_id, int(now // 86400))
-        if self._days.get(day, 0) >= self.per_guild_day:
-            return "guild_day"
-        author_calls = None
+        self._minutes.setdefault(guild_id, deque()).append(now)
         if author_id is not None:
-            author_calls = self._authors.setdefault((guild_id, author_id), deque())
-            self._trim(author_calls, now - self.author_window)
-            if len(author_calls) >= self.per_author:
-                return "author"
-        minute = self._minutes.setdefault(guild_id, deque())
-        self._trim(minute, now - 60)
-        if len(minute) >= self.per_guild_minute:
-            return "guild_minute"
-        minute.append(now)
-        if author_calls is not None:
-            author_calls.append(now)
+            self._authors.setdefault((guild_id, author_id), deque()).append(now)
         self._days[day] = self._days.get(day, 0) + 1
         for key in [key for key in self._days if key[1] < day[1]]:
             del self._days[key]
@@ -192,6 +219,14 @@ class ClassifierBudget:
                 if not calls:
                     del self._authors[key]
         return None
+
+    def restore(self, spent: Mapping[str, int], now: float) -> None:
+        """Count what each guild already spent today (UTC), as recorded."""
+        day = int(now // 86400)
+        for guild_id, requests in spent.items():
+            key = (guild_id, day)
+            self._days[key] = max(self._days.get(key, 0), int(requests))
+        self.restored = True
 
     def spent_today(self, guild_id: str, now: float) -> int:
         return self._days.get((guild_id, int(now // 86400)), 0)
@@ -306,8 +341,20 @@ _FENCE = re.compile(r"</?untrusted>", re.IGNORECASE)
 
 
 def _clip(text: str, limit: int) -> str:
+    """``text`` in at most ``limit`` UTF-8 bytes, with the fence tags removed."""
     text = _FENCE.sub("", text or "")
-    return text if len(text) <= limit else text[: limit - 1] + "…"
+    encoded = text.encode("utf-8")
+    if len(encoded) <= limit:
+        return text
+    return encoded[: limit - 3].decode("utf-8", errors="ignore") + "…"
+
+
+def _size(lines: Iterable[str]) -> int:
+    return sum(len(line.encode("utf-8")) + 1 for line in lines)
+
+
+#: The section titles :func:`haiku_prompt` may add after the budget is set.
+_TITLE_BYTES = 200
 
 
 def haiku_prompt(request: ClassifierRequest) -> str:
@@ -328,26 +375,51 @@ def haiku_prompt(request: ClassifierRequest) -> str:
     material = ["MESSAGE:", _clip(request.content, MAX_MESSAGE_CHARS)]
     for item in request.attachments[:MAX_ATTACHMENTS]:
         material.append(
-            f"Attachment {_clip(item.filename, 200)} "
-            f"({item.content_type or 'unknown type'}): {_clip(item.url or '', 500)}"
+            f"Attachment {_clip(item.filename, 100)} "
+            f"({_clip(item.content_type or 'unknown type', 100)}): "
+            f"{_clip(item.url or '', 300)}"
         )
     if request.ring_ad is not None:
         material.append("\nAD (the event post the CANDIDATES may be promoting):")
         material.append(_clip(request.ring_ad, MAX_MESSAGE_CHARS))
-    if request.ring_context:
-        material.append("\nCONTEXT (the channel, oldest first, for reference only):")
-        material.extend(
-            _clip(line, MAX_CONTEXT_LINE_CHARS) for line in request.ring_context
-        )
+    # What is left, in order: each candidate's name, their lines, then the
+    # channel context, newest first. A candidate left out gets no answer,
+    # which is unknown: never acted on.
+    room = MAX_MATERIAL_BYTES - _size(material) - _TITLE_BYTES
     candidates = {c.user_id: c for c in request.ring_candidates}
-    if participants:
+    said: dict[str, list[str]] = {}
+    for user_id in participants:
+        candidate = candidates.get(user_id)
+        header = (
+            f"[{user_id}] {_clip(candidate.username if candidate else user_id, 100)}:"
+        )
+        if _size([header]) > room:
+            break
+        said[header] = []
+        room -= _size([header])
+    for header, user_id in zip(said, participants, strict=False):
+        candidate = candidates.get(user_id)
+        for line in candidate.messages if candidate else ():
+            clipped = "  " + _clip(line, MAX_CONTEXT_LINE_CHARS)
+            if _size([clipped]) > room:
+                break
+            said[header].append(clipped)
+            room -= _size([clipped])
+    context: list[str] = []
+    for line in reversed(request.ring_context):
+        clipped = _clip(line, MAX_CONTEXT_LINE_CHARS)
+        if _size([clipped]) > room:
+            break
+        context.append(clipped)
+        room -= _size([clipped])
+    if context:
+        material.append("\nCONTEXT (the channel, oldest first, for reference only):")
+        material.extend(reversed(context))
+    if said:
         material.append("\nCANDIDATES:")
-        for user_id in participants:
-            candidate = candidates.get(user_id)
-            name = candidate.username if candidate else user_id
-            material.append(f"[{user_id}] {_clip(name, 100)}:")
-            for line in candidate.messages if candidate else ():
-                material.append("  " + _clip(line, MAX_CONTEXT_LINE_CHARS))
+        for header, lines_said in said.items():
+            material.append(header)
+            material.extend(lines_said)
     return (
         "\n".join(lines) + "\n\n<untrusted>\n" + "\n".join(material) + "\n</untrusted>"
     )
@@ -568,6 +640,10 @@ class ModerationClassifier:
             model = model()
             setattr(self, attr, model)
         return model
+
+    def budget_refusal(self, guild_id: str, author_id: str | None) -> str | None:
+        """The budget cap a request would meet now (:meth:`ClassifierBudget.refusal`)."""
+        return self.budget.refusal(guild_id, author_id, self._clock())
 
     async def classify(self, request: ClassifierRequest) -> ClassifierResult:
         labels = sorted(request.labels)

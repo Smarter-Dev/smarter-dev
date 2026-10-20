@@ -1160,6 +1160,21 @@ async def test_a_staff_role_is_refused_even_when_allowlisted(call):
     assert result.usage["role_changes"] == 0
 
 
+async def test_a_role_check_that_could_not_read_is_named_as_such():
+    """#255: a failed guild read refuses, but not as a protected role."""
+    actor = _FakeActor()
+    actor.protected_roles = {
+        "R1": "could not be checked (HTTPStatusError); treated as protected"
+    }
+    script = 'await add_role(context["author_id"], "R1")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget("message"), actor=actor, allowed_role_ids=["R1"]
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "role_unchecked"
+    assert actor.calls == []
+
+
 async def test_add_role_denied_when_allowlist_empty():
     actor = _FakeActor()
     script = 'await add_role(context["author_id"], "R1")\n'

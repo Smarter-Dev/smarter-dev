@@ -57,6 +57,7 @@ def _actor(discord: _Discord, handler_id: str = "H1") -> AdminActor:
     return AdminActor(
         bot_token="t",
         guild_id=GUILD,
+        staff_exempt_role_ids=(),
         moderation_port=discord,
         fire=HandlerFireFacts(handler_id=handler_id, handler_name="scam-banner"),
     )

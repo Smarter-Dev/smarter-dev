@@ -4,24 +4,38 @@ Admin handlers used to be how a guild added a moderator: a script judged a
 message and banned, timed out or warned on its own (scam-banner, Newcomer
 Watch, Keyword Watch). Every such script is a parallel punisher beside the
 moderation coordinator (``smarter_dev.bot.moderation_coordinator``), which is
-taking those decisions over. So a script that is new, or that would call a
-sanction it did not call before, is refused when it:
+taking those decisions over. So a script that uses a sanction is refused when
+it:
 
 * is authored with ``/adminhandler`` (``handler_authoring``);
 * is created or rewritten through the bot API (``api_native.admin_handlers``).
 
-A script already live that sanctions keeps the sanctions it has (scam-banner
-until the cutover retires it), so editing its wording still works; it cannot
-add one. Removing messages, roles and threads stay available for upkeep (the
-role rule refuses staff roles separately, ``staff_protection.role_refusal``).
-The catalog's moderation templates are retired the same way
+A script already live that sanctions is **frozen**: saving it unchanged still
+works (an edit of the handler's other fields), and so does removing every
+sanction from it, but any other change is refused. Keeping only the sanction
+call sites would not be enough: the condition around a ``ban_user`` call is
+the punisher, and rewriting it ("ban anyone who says hello") keeps the call.
+The one exception is scam-banner, which may be put back to its reference copy
+(:data:`SCAM_BANNER_REFERENCE_SHA256`) until the cutover retires it.
+
+A script Python cannot parse is refused outright: the runtime (Monty) accepts
+syntax Python 3.13 rejects, so any other reading of such a script could miss a
+sanction. Python's parser NFKC-normalises identifiers as Monty does, so
+``ｂan_user`` is read as ``ban_user``. Only identifiers are normalised, never
+the whole text: a fullwidth quote inside a string would otherwise become a
+real quote and could swallow the code after it.
+
+Removing messages, roles and threads stay available for upkeep (the role rule
+refuses staff roles separately, ``staff_protection.role_refusal``). The
+catalog's moderation templates are retired the same way
 (``ExtensionManifest.moved_to_moderation``).
 """
 
 from __future__ import annotations
 
 import ast
-import re
+import hashlib
+import unicodedata
 
 #: The script functions that sanction a member.
 SANCTION_FUNCTIONS = frozenset(
@@ -36,6 +50,15 @@ SANCTION_FUNCTIONS = frozenset(
     }
 )
 
+SCAM_BANNER_HANDLER = "scam-banner"
+
+#: sha256 of ``scripts/handler_scripts/scam-banner.monty``, the script the
+#: scam gate was ported from. A test fails when the file changes without this
+#: (and the rules) changing with it.
+SCAM_BANNER_REFERENCE_SHA256 = (
+    "e8ba764de2d9e026ef96c774c4ad9eadc90f0538ee28f2207982a3edeb0af623"
+)
+
 REFUSAL = (
     "handlers can no longer punish members ({calls}): bans, kicks, timeouts, "
     "holds and warnings are decided by the server's moderation system, which "
@@ -43,7 +66,34 @@ REFUSAL = (
     "A handler may still post, react, manage threads and change non-staff roles"
 )
 
-_NAME = re.compile(r"\b(" + "|".join(sorted(SANCTION_FUNCTIONS)) + r")\b")
+FROZEN_REFUSAL = (
+    "this handler punishes members ({calls}), so it can no longer be changed: "
+    "bans, kicks, timeouts, holds and warnings are moving to the server's "
+    "moderation system. Save it unchanged, or remove every sanction from it"
+)
+
+UNPARSEABLE_REFUSAL = "the script is not valid Python ({error})"
+
+_BOM = "\ufeff"
+
+
+def script_sha256(script: str) -> str:
+    return hashlib.sha256(script.encode("utf-8")).hexdigest()
+
+
+def _parse(script: str) -> ast.Module:
+    """The syntax tree of ``script`` as the runtime reads it.
+
+    A leading byte-order mark is dropped (Monty ignores one; Python's
+    ``compile`` of a str rejects it). Raises SyntaxError or ValueError for a
+    script Python cannot parse.
+    """
+    return compile(
+        script.removeprefix(_BOM),
+        "<handler>",
+        "exec",
+        flags=ast.PyCF_ONLY_AST | ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+    )
 
 
 def sanction_calls(script: str | None) -> frozenset[str]:
@@ -52,37 +102,49 @@ def sanction_calls(script: str | None) -> frozenset[str]:
     Any use counts, not only a direct call: ``f = ban_user; await f(id)`` or
     passing ``kick_user`` along reaches the same external function, and a
     sanction function as a value has no other purpose. Read from the syntax
-    tree, so a name in a comment or a string does not count; a script that
-    does not parse is read with a plain pattern instead (stricter: any
-    mention counts).
+    tree, so a name in a comment or a string does not count. Raises
+    SyntaxError or ValueError for a script Python cannot parse.
     """
     if not script:
         return frozenset()
-    try:
-        tree = compile(
-            script,
-            "<handler>",
-            "exec",
-            flags=ast.PyCF_ONLY_AST | ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
-        )
-    except (SyntaxError, ValueError):
-        return frozenset(_NAME.findall(script))
     return frozenset(
         node.id
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and node.id in SANCTION_FUNCTIONS
+        for node in ast.walk(_parse(script))
+        if isinstance(node, ast.Name)
+        and unicodedata.normalize("NFKC", node.id) in SANCTION_FUNCTIONS
     )
 
 
 def moderation_refusal(
-    script: str | None, *, existing_script: str | None = None
+    script: str | None,
+    *,
+    existing_script: str | None = None,
+    handler_name: str | None = None,
 ) -> str | None:
     """Why ``script`` may not be saved, or None when it may.
 
-    ``existing_script`` is the live script a rewrite replaces: the sanctions
-    it already calls are kept, no new one may be added.
+    ``existing_script`` is the live script a rewrite replaces (None for a new
+    handler) and ``handler_name`` the handler's name.
     """
-    new = sanction_calls(script) - sanction_calls(existing_script)
-    if not new:
+    try:
+        calls = sanction_calls(script)
+    except (SyntaxError, ValueError) as error:
+        return UNPARSEABLE_REFUSAL.format(error=_parse_error(error))
+    if not calls:
         return None
-    return REFUSAL.format(calls=", ".join(sorted(new)))
+    if existing_script is None:
+        return REFUSAL.format(calls=", ".join(sorted(calls)))
+    if script == existing_script:
+        return None
+    if (
+        handler_name == SCAM_BANNER_HANDLER
+        and script_sha256(script) == SCAM_BANNER_REFERENCE_SHA256
+    ):
+        return None
+    return FROZEN_REFUSAL.format(calls=", ".join(sorted(calls)))
+
+
+def _parse_error(error: SyntaxError | ValueError) -> str:
+    if isinstance(error, SyntaxError) and error.lineno is not None:
+        return f"line {error.lineno}: {error.msg}"
+    return str(error)

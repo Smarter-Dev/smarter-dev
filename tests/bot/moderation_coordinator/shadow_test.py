@@ -196,6 +196,7 @@ async def test_an_edit_is_its_own_revision():
     await shadow.on_create(event)
     edit = _event(discord, user_id, "hello @everyone", message_id=event.message.id)
     edit.old_message = SimpleNamespace(content="hello")
+    edit.message.edited_timestamp = datetime(2026, 10, 19, 12, 0, 1, tzinfo=UTC)
     await shadow.on_update(edit)
     await shadow.drain()
 
@@ -203,7 +204,11 @@ async def test_an_edit_is_its_own_revision():
     created = by_revision.pop("create")
     [edited] = by_revision.values()
     assert created.strongest_action is None
-    assert edited.revision == revision_of("hello @everyone", is_edit=True)
+    # The edit's time, never anything derived from its text (#255).
+    assert edited.revision == "edit:1792411201000"
+    assert edited.revision == revision_of(
+        edit.message.edited_timestamp, is_edit=True, now=0
+    )
     assert edited.is_edit
     assert edited.strongest_action == gw.DELETE  # edit-ping's cleanup
 
@@ -241,6 +246,44 @@ def test_shadow_guilds_come_from_the_environment(monkeypatch):
     assert shadow_guild_ids() == frozenset({"644299523686006834", "1"})
     monkeypatch.setenv(shadow_module.GUILDS_ENV_VAR, "")
     assert shadow_guild_ids() == frozenset()
+
+
+async def test_the_registered_shadow_reads_the_day_back_once_it_acts(monkeypatch):
+    """The bot's shadow starts with its budget shut; the started listener
+    (run once this process acts) reads the day back and keeps its loop."""
+    import asyncio
+
+    class Bot:
+        listeners: list = []
+
+        def listen(self):
+            def register(callback):
+                self.listeners.append(callback)
+                return callback
+
+            return register
+
+    monkeypatch.setenv(shadow_module.GUILDS_ENV_VAR, GUILD)
+    await _shadow_row("1", "42", None, [], classifier={"requests": 1})
+    bot = Bot()
+    shadow = shadow_module.register_moderation_shadow(bot)
+    budget = shadow.coordinator.classifier.budget
+    assert not budget.restored
+
+    started = next(
+        cb for cb in bot.listeners if cb.__name__ == "on_moderation_shadow_started"
+    )
+    await started(SimpleNamespace())
+    for _ in range(100):
+        if budget.restored:
+            break
+        await asyncio.sleep(0.01)
+    try:
+        assert budget.restored
+        assert budget.spent_today(GUILD, time.time()) == 1
+        assert shadow.background is not None and not shadow.background.done()
+    finally:
+        shadow.background.cancel()
 
 
 # -- the legacy side -----------------------------------------------------------
@@ -481,6 +524,58 @@ async def test_rows_are_deleted_after_thirty_days():
         assert await prune_moderation_shadow_decisions(session, later, later) == 1
         await session.commit()
     assert await rows() == []
+
+
+async def test_the_days_spend_is_read_back_from_the_rows():
+    """#255: the daily cap survives a restart; today's rows are counted, not
+    yesterday's or another guild's. A failed read leaves the budget shut."""
+    from smarter_dev.bot.moderation_coordinator.shadow import ShadowRecorder
+    from smarter_dev.bot.moderation_coordinator.shadow import restore_budget
+
+    now = time.time()
+    today = datetime.fromtimestamp(now - now % 86400, UTC)
+    await _shadow_row("1", "42", None, [], classifier={"requests": 1})
+    await _shadow_row("2", "43", None, [], classifier={"requests": 1})
+    await _shadow_row("3", "44", None, [], classifier={"requests": 0})
+    await _shadow_row("4", "45", None, [], classifier=None)
+    await _shadow_row(
+        "5",
+        "46",
+        None,
+        [],
+        classifier={"requests": 1},
+        created_at=today - timedelta(seconds=1),
+    )
+    async with sessions() as session:
+        session.add(
+            ModerationShadowDecision(
+                guild_id="999",
+                channel_id="1",
+                message_id="6",
+                revision="create",
+                is_edit=False,
+                author_id="47",
+                message_at=datetime.now(UTC),
+                classifier={"requests": 1},
+            )
+        )
+        await session.commit()
+
+    budget = ClassifierBudget(per_guild_day=3, restored=False)
+    await restore_budget(budget, ShadowRecorder(), [GUILD])
+    assert budget.restored
+    assert budget.spent_today(GUILD, time.time()) == 2
+    assert budget.try_spend(GUILD, "A", time.time()) is None
+    assert budget.try_spend(GUILD, "B", time.time()) == "guild_day"
+
+    class Broken(ShadowRecorder):
+        async def requests_today(self, guild_ids, now):
+            raise ConnectionError("db down")
+
+    shut = ClassifierBudget(restored=False)
+    await restore_budget(shut, Broken(), [GUILD])
+    assert not shut.restored
+    assert shut.try_spend(GUILD, "A", time.time()) == "not_restored"
 
 
 async def test_a_deletion_request_removes_the_persons_shadow_rows():

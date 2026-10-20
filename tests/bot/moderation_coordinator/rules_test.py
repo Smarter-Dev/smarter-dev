@@ -93,6 +93,12 @@ def test_attachment_tiers():
     blocked = rules.attachment_hits(files("b.pdf", "c.exe"), policy)
     assert blocked[0].notice == "attachment_blocked" and blocked[0].cleanup
     assert blocked[0].reason == "blocked attachment type .exe"  # never the name
+    # #255: after the last dot is still the member's text, unless it looks
+    # like a file type.
+    odd = rules.attachment_hits(files("x.call me at 555-0100"), policy)
+    assert odd[0].reason == "blocked attachment type (unusual extension)"
+    bare = rules.attachment_hits(files("README"), policy)
+    assert bare[0].reason == "blocked attachment type (no extension)"
 
 
 def test_edit_ping_only_on_edits_and_case_sensitive_like_the_handler():

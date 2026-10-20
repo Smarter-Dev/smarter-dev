@@ -538,9 +538,9 @@ async def test_admin_pipeline_refuses_a_new_handler_that_punishes_members():
     assert judged == []
 
 
-async def test_admin_pipeline_edit_keeps_a_live_handlers_existing_sanctions():
-    """scam-banner keeps its ban until the cutover retires it: a wording edit
-    that still calls ban_user is accepted."""
+async def test_admin_pipeline_edit_of_a_live_punisher_is_refused():
+    """#255: a live script that sanctions is frozen. Rewording it keeps the
+    ban call but could change what it bans for, so it is refused too."""
     plan = _admin_plan(
         action="edit",
         target_handler_id="33333333-3333-3333-3333-333333333333",
@@ -553,8 +553,28 @@ async def test_admin_pipeline_edit_keeps_a_live_handlers_existing_sanctions():
         author=_admin_author_returning(plan),
         judge=_judge_approving(),
     )
+    assert not result.ok
+    assert "can no longer be changed" in result.error
+
+
+async def test_admin_pipeline_edit_may_remove_a_live_handlers_sanctions():
+    plan = _admin_plan(
+        action="edit",
+        target_handler_id="33333333-3333-3333-3333-333333333333",
+        name="",
+        script=LEGACY_BANNER_SCRIPT.replace(
+            'await ban_user(context["author_id"], "scam")',
+            'await send_message("scam?", "MODCHAT")',
+        ),
+    )
+    result = await run_admin_creation_pipeline(
+        request="just tell the mods",
+        existing_handlers=ADMIN_EXISTING,
+        author=_admin_author_returning(plan),
+        judge=_judge_approving(),
+    )
     assert result.ok
-    assert "ban_user" in result.script
+    assert "ban_user" not in result.script
 
 
 async def test_admin_pipeline_edit_cannot_add_a_sanction():
@@ -572,7 +592,8 @@ async def test_admin_pipeline_edit_cannot_add_a_sanction():
         judge=_judge_approving(),
     )
     assert not result.ok
-    assert "(timeout_user)" in result.error
+    assert "can no longer be changed" in result.error
+    assert "timeout_user" in result.error
 
 
 async def test_admin_pipeline_edit_unknown_target():

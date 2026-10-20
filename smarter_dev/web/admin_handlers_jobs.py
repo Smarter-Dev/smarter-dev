@@ -20,6 +20,7 @@ from functools import partial
 from uuid import UUID
 
 from skrift.workers import RetryPolicy, WorkerContext, handler
+from sqlalchemy import select
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
@@ -55,6 +56,7 @@ from smarter_dev.web.handler_script_services import (
 )
 from smarter_dev.web.job_errors import redacted_job_errors
 from smarter_dev.web.models import AdminHandler
+from smarter_dev.web.models import ModerationFilterConfig
 
 __all__ = ["AdminHandlerFirePayload", "run_admin_handler_fire"]
 
@@ -116,6 +118,14 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         # Guild-shared store: snapshotted before the fire so guild_memory_* reads
         # see a consistent view; changed keys are persisted per key after.
         guild_memory = await load_guild_memory(session, guild_id)
+        # The roles the bot's filters treat as staff, so a script can neither
+        # strip one from a moderator nor act on its holders.
+        exempt = await session.scalar(
+            select(ModerationFilterConfig.staff_exempt_role_ids).where(
+                ModerationFilterConfig.guild_id == guild_id
+            )
+        )
+        staff_exempt_role_ids = tuple(str(role_id) for role_id in exempt or [])
 
     # For time triggers there's no triggering channel; default to the first
     # scoped channel (the script should target channels explicitly for "all").
@@ -135,7 +145,11 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         bot_token=settings.discord_bot_token, guild_id=guild_id, redis=redis
     )
     limiter = WindowedLimiter(redis=redis)
-    actor = AdminActor(bot_token=settings.discord_bot_token, guild_id=guild_id)
+    actor = AdminActor(
+        bot_token=settings.discord_bot_token,
+        guild_id=guild_id,
+        staff_exempt_role_ids=staff_exempt_role_ids,
+    )
     services = AdminScriptServices(
         handler_id=handler_id,
         handler_name=handler_name,

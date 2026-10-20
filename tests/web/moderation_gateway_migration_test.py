@@ -450,9 +450,14 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
             target_ids=[SCAMMER],
             staff_excluded={},
             labels={"scam": {"outcome": "answered", "answer": True, "confidence": 0.9}},
+            classifier={"backend": "haiku", "requests": 1},
         )
     )
     assert recorded
+    # The daily cap's read-back (#255), on Postgres's JSON operators.
+    assert await ShadowRecorder().requests_today([GUILD], now.timestamp()) == {
+        GUILD: 1
+    }
     async with db() as session:
         session.add(
             MemberActivity(
@@ -475,8 +480,25 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
         assert row.legacy_strongest_action == "timeout"
         assert row.agreement == "shadow_stronger"
 
+        assert await prune_moderation_shadow_decisions(session, now, now) == 0
         deleted = await delete_member_moderation_content(session, SCAMMER)
         assert deleted.shadow == 1
+        await session.commit()
+
+    # Retention, on a row of its own: the one above is gone (#255).
+    assert await ShadowRecorder().record(
+        ModerationShadowDecision(
+            guild_id=GUILD,
+            channel_id=CHANNEL,
+            message_id="9" + MESSAGE[1:],
+            revision="create",
+            is_edit=False,
+            author_id="1" + SCAMMER[1:],
+            message_at=now,
+        )
+    )
+    async with db() as session:
         far = now + timedelta(days=31)
-        assert await prune_moderation_shadow_decisions(session, far, far) == 0
+        assert await prune_moderation_shadow_decisions(session, now, now) == 0
+        assert await prune_moderation_shadow_decisions(session, far, far) == 1
         await session.commit()

@@ -148,9 +148,14 @@ def api() -> FakeDiscordApi:
     return FakeDiscordApi()
 
 
-def _actor(api: FakeDiscordApi) -> AdminActor:
+def _actor(
+    api: FakeDiscordApi, staff_exempt_role_ids: tuple[str, ...] | None = ()
+) -> AdminActor:
     return AdminActor(
-        bot_token="t", guild_id=GUILD, transport=httpx.MockTransport(api.handle)
+        bot_token="t",
+        guild_id=GUILD,
+        staff_exempt_role_ids=staff_exempt_role_ids,
+        transport=httpx.MockTransport(api.handle),
     )
 
 
@@ -245,6 +250,39 @@ async def test_a_staff_role_cannot_be_stripped_to_clear_the_way_for_a_ban(api):
     with pytest.raises(ProtectedRoleError, match="is a staff role"):
         await actor.remove_role(STAFF_ROLE_HOLDER, "644301991832453120")
     out = await actor.ban_user(STAFF_ROLE_HOLDER, "scam")
+
+    assert out.startswith("not banned")
+    assert api.mutations == []
+
+
+async def test_the_guilds_staff_exempt_roles_are_staff_roles(api):
+    """#255: a role the guild's filter config lists as staff carries no
+    permission bit, yet the filters treat its holders as staff. A script may
+    neither strip it from a moderator (then punish them) nor hand it out (to
+    exempt a spammer), and its holders are protected."""
+    from smarter_dev.web.admin_actions import ProtectedRoleError
+
+    api.members[MEMBER]["roles"].append("52")
+    api.roles.append({"id": "52", "permissions": str(SEND_MESSAGES)})
+    actor = _actor(api, staff_exempt_role_ids=("52",))
+
+    with pytest.raises(ProtectedRoleError, match="is a staff role"):
+        await actor.remove_role(MEMBER, "52")
+    with pytest.raises(ProtectedRoleError, match="is a staff role"):
+        await actor.add_role(OTHER_BOT, "52")
+    out = await actor.ban_user(MEMBER, "scam")
+
+    assert out.startswith("not banned")
+    assert "holds a staff role" in out
+    assert api.mutations == []
+
+
+async def test_unread_staff_exempt_roles_refuse_everything(api):
+    actor = _actor(api, staff_exempt_role_ids=None)
+
+    with pytest.raises(Exception, match="staff roles were not read"):
+        await actor.add_role(MEMBER, "51")
+    out = await actor.ban_user(MEMBER, "scam")
 
     assert out.startswith("not banned")
     assert api.mutations == []

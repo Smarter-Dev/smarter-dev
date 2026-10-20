@@ -143,9 +143,9 @@ class Attachment:
 class MessageFacts:
     """One revision of one guild message, as every rule sees it.
 
-    ``revision`` is ``create`` for a new message and ``edit:<digest>`` for an
-    edit that changed the text, so an edit is judged as its own revision and a
-    replay of the same revision is not judged twice. ``posted_at`` is when the
+    ``revision`` is ``create`` for a new message and ``edit:<edited at, ms>``
+    for an edit that changed the text, so an edit is judged as its own
+    revision and a replay of the same revision is not judged twice. ``posted_at`` is when the
     revision arrived (epoch seconds), the clock every window is measured on.
     """
 

@@ -206,6 +206,30 @@ def test_budget_caps_author_guild_minute_and_guild_day():
     assert budget.try_spend("G", "D", 86400 + 1) is None
 
 
+def test_asking_the_budget_charges_nothing():
+    """#255: the coordinator asks before the ring's history read."""
+    budget = ClassifierBudget(per_author=1, per_guild_minute=2, per_guild_day=9)
+    assert budget.refusal("G", "A", 0) is None
+    assert budget.refusal("G", "A", 0) is None
+    assert budget.spent_today("G", 0) == 0
+    assert budget.try_spend("G", "A", 0) is None
+    assert budget.refusal("G", "A", 1) == "author"
+    assert budget.try_spend("G", "B", 1) is None
+    assert budget.refusal("G", "C", 2) == "guild_minute"
+    assert budget.refusal("G", "C", 61) is None
+
+
+def test_the_day_is_read_back_before_anything_is_spent():
+    """#255: a restart does not reset the day. Until the day's spend is
+    read back every request is refused; then the recorded spend counts."""
+    budget = ClassifierBudget(per_guild_day=5, restored=False)
+    assert budget.try_spend("G", "A", 100) == "not_restored"
+    budget.restore({"G": 4}, 100)
+    assert budget.try_spend("G", "A", 101) is None
+    assert budget.try_spend("G", "B", 102) == "guild_day"
+    assert budget.try_spend("H", "A", 103) is None  # another guild: its own day
+
+
 async def test_a_spent_budget_makes_no_request():
     calls = ModelCalls()
     budget = ClassifierBudget(per_guild_day=0)
@@ -234,6 +258,38 @@ def test_prompt_fences_untrusted_content_and_bounds_it():
     assert len(prompt) < clf.MAX_MESSAGE_CHARS + 2000
     assert '"scam"' in prompt and '"abuse"' in prompt
     assert '"participants"' not in prompt
+
+
+def test_the_worst_haiku_request_is_bounded_and_a_day_costs_under_a_dollar():
+    """#255: every field at its limit, in four-byte characters (a token is at
+    least one byte), with 100 candidates and 100 context lines. Haiku 5.5 is
+    $0.10 in and $0.50 out per million tokens; output is capped at
+    HAIKU_MAX_TOKENS, thinking included."""
+    from smarter_dev.bot.moderation_coordinator.model import Attachment
+
+    big = "\U0001d41b" * 5000
+    ids = [str(10**17 + i) for i in range(100)]
+    request = ClassifierRequest(
+        guild_id="G",
+        channel_id="C",
+        author_id="A",
+        labels=frozenset(
+            {SCAM, ABUSE, EVENT_PROMOTION, *(participant_label(i) for i in ids)}
+        ),
+        content=big,
+        attachments=tuple(Attachment(big, big, 1, big) for _ in range(20)),
+        ring_context=tuple(big for _ in range(100)),
+        ring_ad=big,
+        ring_candidates=tuple(
+            RingCandidate(user_id=i, username=big, messages=(big,) * 5) for i in ids
+        ),
+    )
+    input_bytes = len(clf.HAIKU_INSTRUCTIONS.encode()) + len(
+        haiku_prompt(request).encode()
+    )
+    assert input_bytes <= 18_000
+    worst = (18_000 * 0.10 + clf.HAIKU_MAX_TOKENS * 0.50) / 1_000_000
+    assert worst * clf.DEFAULT_DAILY_REQUESTS <= 1.0
 
 
 def test_the_real_models_are_built_with_retries_off(monkeypatch):
