@@ -850,7 +850,8 @@ async def test_adding_a_forum_refuses_a_bad_csrf_token_or_ids(db_session, patche
 
 def test_the_template_labels_forums_and_offers_to_add_one():
     configured = proactive_overview.ProactiveChannelRow(
-        channel_id=FORUM, name="questions", enabled=True, is_forum=True
+        channel_id=FORUM, name="questions", enabled=True, is_forum=True,
+        marked_forum=True,
     )
     unconfigured = proactive_overview.ProactiveChannelRow(
         channel_id=NEW_FORUM, name="showcase", enabled=False, is_forum=True,
@@ -876,4 +877,141 @@ def test_the_template_labels_forums_and_offers_to_add_one():
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{NEW_FORUM}"' not in html
     assert f'name="channel_id" value="{NEW_FORUM}"' in html
     assert html.count('action="/admin/bot/proactive-channels/forums"') == 2
-    assert html.count(f'name="{CSRF_FIELD_NAME}"') == 3
+    # The configured forum's on/off and new-posts switches, the add button
+    # and the add-by-ID form.
+    assert html.count(f'name="{CSRF_FIELD_NAME}"') == 4
+
+
+# --- a forum's new posts straight to the agent (#297) ---------------------------
+
+
+toggle_new_posts = Controller.toggle_new_posts.fn
+
+
+async def _seed_forum(session, *, enabled=True, new_posts=False, guild_id=GUILD):
+    session.add(
+        ProactiveChannelSettings(
+            guild_id=guild_id,
+            channel_id=FORUM,
+            enabled=enabled,
+            watch_addendum="keep",
+            is_forum=True,
+            new_posts_to_agent=new_posts,
+        )
+    )
+    await session.commit()
+
+
+async def _new_posts(session) -> bool | None:
+    session.expire_all()
+    row = await session.scalar(
+        select(ProactiveChannelSettings).where(
+            ProactiveChannelSettings.channel_id == FORUM
+        )
+    )
+    return None if row is None else row.new_posts_to_agent
+
+
+async def _post_new_posts(session, value: str, *, guild_id=GUILD, channel_id=FORUM):
+    return await toggle_new_posts(
+        Controller,
+        _request({"new_posts_to_agent": value}),
+        session,
+        guild_id=guild_id,
+        channel_id=channel_id,
+    )
+
+
+def test_the_new_posts_switch_needs_the_administrator_permission_and_a_post():
+    handler = Controller.toggle_new_posts
+    assert auth_guard in handler.guards
+    assert any(
+        isinstance(guard, Permission) and guard.permission == "administrator"
+        for guard in handler.guards
+    )
+    assert handler.http_methods == {"POST"}
+
+
+async def test_the_new_posts_setting_round_trips_through_the_page(
+    db_session, patched, redis, rest
+):
+    await _seed_forum(db_session)
+
+    response = await overview(Controller, _request(), db_session)
+    (row,) = [r for r in response.context["sections"][0].channels if r.channel_id == FORUM]
+    assert (row.new_posts_to_agent, row.marked_forum) == (False, True)
+
+    await _post_new_posts(db_session, "on")
+    assert await _new_posts(db_session) is True
+    response = await overview(Controller, _request(), db_session)
+    (row,) = [r for r in response.context["sections"][0].channels if r.channel_id == FORUM]
+    assert row.new_posts_to_agent is True
+
+    await _post_new_posts(db_session, "off")
+    assert await _new_posts(db_session) is False
+    # Only the setting changed: still on, addendum kept, nobody woken.
+    assert await _enabled(db_session, FORUM) is True
+    assert await _wakes(redis) == []
+    assert [level for level, _ in patched.flashes] == ["success", "success"]
+
+
+async def test_the_new_posts_switch_refuses_a_channel_that_is_not_a_forum(
+    db_session, patched
+):
+    await _seed(db_session, (GUILD, GENERAL, True))
+
+    await _post_new_posts(db_session, "on", channel_id=GENERAL)
+
+    assert [level for level, _ in patched.flashes] == ["error"]
+
+
+async def test_the_new_posts_switch_refuses_another_guilds_forum(db_session, patched):
+    await _seed_forum(db_session, guild_id=OTHER_GUILD)
+
+    await _post_new_posts(db_session, "on")
+
+    assert await _new_posts(db_session) is False
+    assert [level for level, _ in patched.flashes] == ["error"]
+
+
+async def test_the_new_posts_switch_refuses_a_bad_csrf_token(db_session, patched):
+    await _seed_forum(db_session)
+    with patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=False)):
+        await _post_new_posts(db_session, "on")
+
+    assert await _new_posts(db_session) is False
+
+
+def test_the_template_offers_the_new_posts_switch_on_forums_only():
+    forum = proactive_overview.ProactiveChannelRow(
+        channel_id=FORUM, name="questions", enabled=True, is_forum=True,
+        new_posts_to_agent=True, marked_forum=True,
+    )
+    # Discord says it is a forum, but its row is not marked one: the
+    # handler would refuse the switch, so it is not offered.
+    unmarked = proactive_overview.ProactiveChannelRow(
+        channel_id=NEW_FORUM, name="showcase", enabled=True, is_forum=True
+    )
+    plain = proactive_overview.ProactiveChannelRow(
+        channel_id=GENERAL, name="general", enabled=True
+    )
+    html = render_admin_template(
+        "admin/bot/proactive_channels.html",
+        sections=[
+            proactive_overview.ProactiveGuildSection(
+                guild_id=GUILD,
+                name="Smarter Dev",
+                channels=[forum, unmarked, plain],
+                enabled_count=3,
+                names_unavailable=False,
+            )
+        ],
+        flash_messages=[],
+        active_page="proactive_channels",
+        guild_id=None,
+    )
+    assert f'action="/admin/bot/proactive-channels/{GUILD}/{FORUM}/new-posts"' in html
+    assert f'action="/admin/bot/proactive-channels/{GUILD}/{GENERAL}/new-posts"' not in html
+    assert f'action="/admin/bot/proactive-channels/{GUILD}/{NEW_FORUM}/new-posts"' not in html
+    assert '<input type="hidden" name="new_posts_to_agent" value="off">' in html
+    assert "Send new posts straight to the assistant" in html

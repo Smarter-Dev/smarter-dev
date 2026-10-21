@@ -6052,10 +6052,12 @@ async def upsert_proactive_channel_settings(
     enabled: bool,
     watch_addendum: str,
     is_forum: bool | None = None,
+    new_posts_to_agent: bool | None = None,
 ) -> ProactiveChannelSettings:
     """Insert or update the single proactive-settings row for ``channel_id``.
 
-    ``is_forum=None`` keeps the row's forum mark (false for a new row).
+    ``is_forum=None`` keeps the row's forum mark and ``new_posts_to_agent=None``
+    its new-post setting (both false for a new row).
     """
     record = await get_proactive_channel_settings(session, guild_id, channel_id)
     if record is None:
@@ -6065,6 +6067,7 @@ async def upsert_proactive_channel_settings(
             enabled=enabled,
             watch_addendum=watch_addendum,
             is_forum=bool(is_forum),
+            new_posts_to_agent=bool(new_posts_to_agent),
         )
         session.add(record)
     else:
@@ -6073,6 +6076,8 @@ async def upsert_proactive_channel_settings(
         record.watch_addendum = watch_addendum
         if is_forum is not None:
             record.is_forum = is_forum
+        if new_posts_to_agent is not None:
+            record.new_posts_to_agent = new_posts_to_agent
     await session.flush()
     await session.refresh(record)
     return record

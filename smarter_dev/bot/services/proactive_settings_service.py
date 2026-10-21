@@ -32,6 +32,8 @@ class ProactiveChannelSettings:
     exists: bool = True
     # The row switches on a whole forum, whose posts are the channels.
     is_forum: bool = False
+    # A forum's new posts wake the agent without the watcher (#297).
+    new_posts_to_agent: bool = False
 
     @classmethod
     def from_api_response(cls, payload: dict) -> ProactiveChannelSettings:
@@ -41,6 +43,7 @@ class ProactiveChannelSettings:
             enabled=payload["enabled"],
             watch_addendum=payload["watch_addendum"],
             is_forum=bool(payload.get("is_forum", False)),
+            new_posts_to_agent=bool(payload.get("new_posts_to_agent", False)),
         )
 
     @classmethod
@@ -158,6 +161,23 @@ class ProactiveSettingsService(BaseService):
             watch_addendum=watch_addendum,
         )
 
+    async def set_new_posts_to_agent(
+        self, guild_id: str, forum_id: str, new_posts_to_agent: bool
+    ) -> ProactiveChannelSettings:
+        """Send a forum's new posts straight to the agent, or back through
+        the watcher; the switch and watch addendum are kept.
+
+        A moderator runs this right after a change on the web page, so it
+        reads the row fresh: a cached switch would turn the forum back on.
+        The row is a forum's by definition, so it is marked one.
+        """
+        current = await self.get_settings(guild_id, forum_id, fresh=True)
+        return await self._put(
+            guild_id, forum_id, enabled=current.enabled,
+            watch_addendum=current.watch_addendum, is_forum=True,
+            new_posts_to_agent=new_posts_to_agent,
+        )
+
     async def record_wake_usage(
         self,
         guild_id: str,
@@ -189,10 +209,13 @@ class ProactiveSettingsService(BaseService):
         enabled: bool,
         watch_addendum: str,
         is_forum: bool | None = None,
+        new_posts_to_agent: bool | None = None,
     ) -> ProactiveChannelSettings:
         payload = {"enabled": enabled, "watch_addendum": watch_addendum}
         if is_forum is not None:
             payload["is_forum"] = is_forum
+        if new_posts_to_agent is not None:
+            payload["new_posts_to_agent"] = new_posts_to_agent
         response = await self._api_client.put(
             self._path(guild_id, channel_id), json_data=payload
         )

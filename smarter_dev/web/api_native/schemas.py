@@ -1107,6 +1107,11 @@ class ProactiveChannelSettingsWrite(BaseAPIModel):
         description="The channel is a forum switched on as a whole; "
         "omitted keeps the stored mark",
     )
+    new_posts_to_agent: bool | None = Field(
+        None,
+        description="A forum's new posts go straight to the agent, skipping "
+        "the watcher; omitted keeps the stored setting",
+    )
 
 
 class ProactiveChannelSettingsRead(BaseAPIModel):
@@ -1122,6 +1127,11 @@ class ProactiveChannelSettingsRead(BaseAPIModel):
     )
     is_forum: bool = Field(
         False, description="The channel is a forum switched on as a whole"
+    )
+    new_posts_to_agent: bool = Field(
+        False,
+        description="A forum's new posts go straight to the agent, skipping "
+        "the watcher",
     )
     created_at: datetime = Field(description="Row creation time")
     updated_at: datetime = Field(description="Row last-update time")

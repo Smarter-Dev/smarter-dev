@@ -65,6 +65,8 @@ class _Settings:
         self.rows = {str(cid): on for cid, on in (rows or {}).items()}
         # Rows marked as a whole forum's.
         self.forums: set[str] = set()
+        # Forums whose new posts go straight to the agent (#297).
+        self.new_posts: set[str] = set()
         self.addenda = {str(cid): text for cid, text in (addenda or {}).items()}
         self.lookups: list[str] = []
         self.set_calls: list[tuple[str, str, bool]] = []
@@ -80,7 +82,12 @@ class _Settings:
             enabled=self.rows[str(channel_id)],
             watch_addendum=self.addenda.get(str(channel_id), ""),
             is_forum=str(channel_id) in self.forums,
+            new_posts_to_agent=str(channel_id) in self.new_posts,
         )
+
+    async def set_new_posts_to_agent(self, guild_id, forum_id, send):
+        (self.new_posts.add if send else self.new_posts.discard)(str(forum_id))
+        return await self.get_settings(guild_id, forum_id)
 
     async def list_enabled_channels(self, guild_id):
         return [
@@ -1468,3 +1475,350 @@ async def test_post_info_does_not_fetch_a_failed_forum_twice():
 
     assert info == forum_posts.ForumPostInfo(title="Q", tag_names=())
     assert len(forum_fetches) == 1
+
+
+# --- a forum that sends new posts straight to the agent (#297) --------------------
+
+
+def _new_posts_forum(forum_setup, **kwargs):
+    setup = forum_setup({FORUM: True}, **kwargs)
+    setup.service.new_posts.add(str(FORUM))
+    return setup
+
+
+async def test_a_new_post_wakes_the_agent_without_the_watcher(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    (queued,) = setup.run.guild_state_for(GUILD).queue.items
+    state = setup.run.channel_states[POST]
+    await proactive._run_producer(state)
+
+    assert queued.wakes
+    assert queued.message_ids == (str(POST),)
+    assert queued.channel_id == str(POST)
+    assert queued.body.startswith("New forum post, sent straight to you")
+    assert 'titled "How do I sort a dict?" (tags: python, help)]\nsort?' in queued.body
+    # The watcher never saw it, and the cursor moved past it.
+    assert setup.produced == []
+    assert state.last_reviewed_message_id == str(POST)
+    assert state.pending_new_post_ids == set()
+
+
+async def test_a_new_post_sent_straight_reaches_the_agents_wake(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    await _wake(setup)
+
+    (consumer,) = setup.consumers
+    assert [n.message_ids for n in consumer.drained] == [(str(POST),)]
+    assert str(POST) in consumer.at_start
+
+
+async def test_a_new_post_in_a_forum_without_the_setting_goes_to_the_watcher(
+    forum_setup,
+):
+    setup = forum_setup({FORUM: True})
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    ((context, _store),) = setup.produced
+    assert [m.id for m in context.new_messages] == [str(POST)]
+
+
+async def test_replies_in_a_post_still_go_to_the_watcher(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    await proactive._run_producer(setup.run.channel_states[POST])
+    setup.run.guild_state_for(GUILD).queue.drain()
+    await proactive.on_guild_message(_event(POST, _message(501, content="also")))
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    ((context, _store),) = setup.produced
+    assert [m.id for m in context.new_messages] == ["501"]
+
+
+async def test_a_reply_batched_with_the_new_post_alone_goes_to_the_watcher(
+    forum_setup,
+):
+    setup = _new_posts_forum(forum_setup)
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    await proactive.on_guild_message(_event(POST, _message(501, content="also")))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    ((context, _store),) = setup.produced
+    assert [m.id for m in context.new_messages] == ["501"]
+
+
+async def test_a_new_post_that_mentions_the_bot_wakes_it_once(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+
+    await proactive.on_guild_message(
+        _event(POST, _message(POST, content="<@999> help?", mentions=(999,)))
+    )
+
+    kinds = [n.kind for n in setup.run.guild_state_for(GUILD).queue.items]
+    assert kinds.count("mention") == 1
+    assert "watcher_summary" not in kinds
+
+
+async def test_a_post_with_its_own_row_does_not_take_the_forums_setting(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+    setup.service.rows[str(POST)] = True
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+
+
+async def test_an_opted_out_authors_new_post_never_reaches_the_agent(
+    forum_setup, monkeypatch
+):
+    setup = _new_posts_forum(forum_setup)
+    blocked = SimpleNamespace(
+        is_blocked=lambda user_id, *_a: str(user_id) == "901", loaded=True
+    )
+    monkeypatch.setattr(proactive, "get_blocked_users", lambda: blocked)
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+    assert POST not in setup.run.channel_states
+
+
+async def test_an_external_new_post_is_published_and_marked_engaged(
+    forum_setup, monkeypatch
+):
+    """Published to the forum keys as a mention is, and recorded engaged so
+    restart recovery does not replay it (#282)."""
+    import fakeredis.aioredis
+
+    from smarter_dev.bot.proactive import redis_queue
+
+    setup = _new_posts_forum(forum_setup)
+    redis = fakeredis.aioredis.FakeRedis()
+    await redis.set(proactive.FORUM_POSTS_CAPABILITY_KEY, b"1")
+    _external(setup, monkeypatch, redis)
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    (published,) = [
+        json.loads(fields[b"payload"])
+        for _id, fields in await redis.xrange(
+            redis_queue.forum_wake_stream_key(str(GUILD))
+        )
+    ]
+    assert (published["channel_id"], published["wakes"]) == (str(POST), True)
+    assert published["message_ids"] == [str(POST)]
+    assert setup.produced == []
+    engaged = await setup.run.history_store().engaged_ids(POST, since=0)
+    assert str(POST) in engaged
+
+
+async def test_new_posts_on_in_a_post_sets_the_forum(forum_setup, moderator):
+    setup = forum_setup({FORUM: True})
+    ctx = SimpleNamespace(
+        guild_id=GUILD,
+        channel_id=POST,
+        options=SimpleNamespace(send=True),
+        respond=AsyncMock(),
+    )
+
+    await proactive.proactive_new_posts.callback(ctx)
+
+    assert setup.service.new_posts == {str(FORUM)}
+    assert "straight to the assistant" in ctx.respond.await_args.args[0]
+
+    ctx.options.send = False
+    await proactive.proactive_new_posts.callback(ctx)
+
+    assert setup.service.new_posts == set()
+
+
+async def test_new_posts_outside_a_forum_post_is_refused(forum_setup, moderator):
+    setup = forum_setup({TEXT: True})
+    ctx = SimpleNamespace(
+        guild_id=GUILD,
+        channel_id=TEXT_THREAD,
+        options=SimpleNamespace(send=True),
+        respond=AsyncMock(),
+    )
+
+    await proactive.proactive_new_posts.callback(ctx)
+
+    assert setup.service.new_posts == set()
+    assert ctx.respond.await_args.args[0] == proactive.NEW_POSTS_NOT_IN_A_POST_MESSAGE
+
+
+async def test_status_in_a_post_says_new_posts_skip_the_watcher(forum_setup, moderator):
+    _new_posts_forum(forum_setup)
+    ctx = _ctx(POST, whole_forum=False)
+
+    await proactive.proactive_status.callback(ctx)
+
+    assert "go straight to the assistant" in ctx.respond.await_args.args[0]
+
+
+# --- a follow-up judged with what already woke the agent (#297 review) ---------
+
+
+class _Stream:
+    def __init__(self, items):
+        self._items = iter(items)
+
+    def limit(self, _n):
+        return self
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._items)
+        except StopIteration:
+            raise StopAsyncIteration from None
+
+
+def _channel_history(setup, messages):
+    """Discord's history of the post, newest first, as fetch_messages pages it."""
+
+    def fetch_messages(_channel_id, before=None):
+        kept = [m for m in messages if before is None or m.id < int(before)]
+        return _Stream(sorted(kept, key=lambda m: m.id, reverse=True))
+
+    setup.bot.rest.fetch_messages = fetch_messages
+
+
+def _bot_answer(message_id: int):
+    answer = _message(message_id, content="Use sorted(d.items()).")
+    answer.author = SimpleNamespace(
+        id=999, username="smarter-bot", global_name=None, is_bot=True
+    )
+    return answer
+
+
+def _jev(monkeypatch):
+    monkeypatch.setenv(proactive.WATCHER_MODEL_ENV_VAR, "typesafe:jev-1.13.0")
+    monkeypatch.setattr(proactive, "_schedule_producer", lambda _state: None)
+
+
+def _batch_due(state):
+    state.first_at = state.last_at = (
+        proactive.time.monotonic() - proactive.JEV_MAX_WAIT_SECONDS - 1
+    )
+
+
+async def _follow_up_after(setup, opener):
+    """The opener wakes the agent, the bot answers, and the poster follows
+    up inside the same batch window; the batch is then reviewed."""
+    answer = _bot_answer(600)
+    follow_up = _message(601, content="that gives me a TypeError")
+    _channel_history(setup, [opener, answer, follow_up])
+    await proactive.on_guild_message(_event(POST, opener))
+    await proactive.on_guild_message(_event(POST, follow_up))
+    state = setup.run.channel_states[POST]
+    _batch_due(state)
+    await proactive._run_producer(state)
+    ((context, _store),) = setup.produced
+    return context
+
+
+async def test_a_jev_follow_up_to_a_new_post_is_judged_with_the_post_and_answer(
+    forum_setup, monkeypatch
+):
+    _jev(monkeypatch)
+    setup = _new_posts_forum(forum_setup)
+
+    context = await _follow_up_after(setup, _message(POST, content="sort?"))
+
+    assert [m.id for m in context.new_messages] == ["601"]
+    assert [(m.id, m.is_bot) for m in context.history] == [
+        (str(POST), False),
+        ("600", True),
+    ]
+
+
+async def test_a_jev_follow_up_to_a_mention_is_judged_with_the_mention_and_answer(
+    forum_setup, monkeypatch
+):
+    _jev(monkeypatch)
+    setup = forum_setup({FORUM: True})
+
+    context = await _follow_up_after(
+        setup, _message(500, content="<@999> sort?", mentions=(999,))
+    )
+
+    assert [m.id for m in context.new_messages] == ["601"]
+    assert [m.id for m in context.history] == ["500", "600"]
+
+
+async def test_a_glm_follow_up_to_a_new_post_keeps_the_post_in_view(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+
+    context = await _follow_up_after(setup, _message(POST, content="sort?"))
+
+    assert [m.id for m in context.new_messages] == ["601"]
+    assert [m.id for m in context.history] == [str(POST), "600"]
+
+
+# --- the straight-through cap (#297) ---------------------------------------------
+
+
+def _fill_cap(setup, *, at: float):
+    setup.run.new_post_wakes[str(FORUM)] = proactive.deque(
+        [at] * proactive.NEW_POST_WAKES_PER_WINDOW
+    )
+
+
+async def test_a_new_post_past_the_cap_goes_to_the_watcher(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+    _fill_cap(setup, at=proactive.time.monotonic())
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    ((context, _store),) = setup.produced
+    assert [m.id for m in context.new_messages] == [str(POST)]
+
+
+async def test_the_cap_frees_up_once_the_window_has_passed(forum_setup):
+    setup = _new_posts_forum(forum_setup)
+    _fill_cap(
+        setup,
+        at=proactive.time.monotonic() - proactive.NEW_POST_WAKE_WINDOW_SECONDS - 1,
+    )
+
+    await proactive.on_guild_message(_event(POST, _message(POST, content="sort?")))
+
+    (queued,) = setup.run.guild_state_for(GUILD).queue.items
+    assert queued.message_ids == (str(POST),)
+    assert len(setup.run.new_post_wakes[str(FORUM)]) == 1
+
+
+def test_the_cap_counts_a_rolling_window_per_forum_and_logs_once(caplog):
+    run = SimpleNamespace(new_post_wakes={}, new_post_cap_logged=set())
+    limit = proactive.NEW_POST_WAKES_PER_WINDOW
+    window = proactive.NEW_POST_WAKE_WINDOW_SECONDS
+
+    claims = [
+        proactive._claim_new_post_wake(run, "10", 1000.0 + i) for i in range(limit)
+    ]
+    with caplog.at_level("WARNING", logger=proactive.logger.name):
+        over = [proactive._claim_new_post_wake(run, "10", 1100.0) for _ in range(3)]
+
+    assert claims == [True] * limit
+    assert over == [False] * 3
+    assert sum("later posts go to the watcher" in r.message for r in caplog.records) == 1
+    # Another forum has its own count.
+    assert proactive._claim_new_post_wake(run, "30", 1100.0)
+    # The oldest claim leaves the window: one slot, then full again.
+    assert proactive._claim_new_post_wake(run, "10", 1000.0 + window)
+    assert not proactive._claim_new_post_wake(run, "10", 1000.0 + window)

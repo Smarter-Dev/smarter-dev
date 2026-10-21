@@ -282,3 +282,33 @@ async def test_the_addendum_upsert_keeps_the_forum_mark(db_session):
     )
 
     assert (await _row(db_session)).is_forum is True
+
+
+async def test_the_addendum_upsert_keeps_new_posts_to_agent(db_session):
+    """#297: the worker's watch-instruction PUT never sends the setting, so
+    it must not switch a forum's new posts back to the watcher."""
+    from smarter_dev.web.crud import upsert_proactive_channel_settings
+
+    await upsert_proactive_channel_settings(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True,
+        watch_addendum="", is_forum=True, new_posts_to_agent=True,
+    )
+    await upsert_proactive_channel_settings(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True,
+        watch_addendum='[{"id": "w1"}]',
+    )
+    assert (await _row(db_session)).new_posts_to_agent is True
+
+    await upsert_proactive_channel_settings(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True,
+        watch_addendum="", new_posts_to_agent=False,
+    )
+    assert (await _row(db_session)).new_posts_to_agent is False
+
+
+async def test_new_posts_to_agent_is_off_for_a_new_row(db_session):
+    await set_proactive_channel_enabled_flag(
+        db_session, guild_id=GUILD, channel_id=CHANNEL, enabled=True, is_forum=True
+    )
+
+    assert (await _row(db_session)).new_posts_to_agent is False

@@ -52,6 +52,18 @@ class TestGetProactiveSettings:
         assert body["enabled"] is True
         assert body["watch_addendum"] == "wake me when alice posts benchmarks"
         assert body["guild_id"] == _GUILD
+        assert body["new_posts_to_agent"] is False
+
+    def test_returns_new_posts_to_agent(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.get.return_value = _record(
+            is_forum=True, new_posts_to_agent=True
+        )
+
+        body = proactive_settings_client.get(_url()).json()
+
+        assert body["new_posts_to_agent"] is True
 
     def test_unconfigured_channel_is_404(
         self, proactive_settings_client: TestClient, proactive_settings_crud_mock
@@ -165,6 +177,35 @@ class TestPutProactiveSettings:
 
         assert response.json()["is_forum"] is True
         assert proactive_settings_crud_mock.upsert.await_args.kwargs["is_forum"] is True
+
+    def test_sends_a_forums_new_posts_straight_to_the_agent(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.upsert.return_value = _record(
+            is_forum=True, new_posts_to_agent=True
+        )
+
+        response = proactive_settings_client.put(
+            _url(),
+            json={"enabled": True, "watch_addendum": "", "new_posts_to_agent": True},
+        )
+
+        assert response.json()["new_posts_to_agent"] is True
+        kwargs = proactive_settings_crud_mock.upsert.await_args.kwargs
+        assert kwargs["new_posts_to_agent"] is True
+
+    def test_omitting_new_posts_to_agent_keeps_it(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        # The worker's watch-addendum PUT (#297) never sends it.
+        proactive_settings_crud_mock.upsert.return_value = _record()
+
+        proactive_settings_client.put(
+            _url(), json={"enabled": True, "watch_addendum": "x"}
+        )
+
+        kwargs = proactive_settings_crud_mock.upsert.await_args.kwargs
+        assert kwargs["new_posts_to_agent"] is None
 
     def test_missing_enabled_is_422(
         self, proactive_settings_client: TestClient, proactive_settings_crud_mock

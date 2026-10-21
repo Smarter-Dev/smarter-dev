@@ -8,7 +8,9 @@ first time stays in Discord, where the moderator is in the channel. Forums
 are the exception (#248): a whole forum can be switched on here, either one
 the guild's channel list shows or one entered by ID, and forums are labelled
 as such. Switching a forum on wakes nobody: each post reaches the agent when
-someone writes in it.
+someone writes in it. A forum also has a switch that sends its new posts
+straight to the agent, skipping the watcher (#297); it changes only that
+setting, so it needs no Discord check.
 
 Each button goes through :func:`set_proactive_channel_enabled`, so switching
 a channel on wakes the guild agent exactly as ``/proactive on`` does. That
@@ -106,6 +108,12 @@ class ProactiveChannelRow:
     # False for a forum the guild has that was never switched on: its button
     # adds it rather than toggling a row.
     configured: bool = True
+    # A forum's new posts go straight to the agent, skipping the watcher.
+    new_posts_to_agent: bool = False
+    # The row itself is marked a whole forum's. Only such a row offers the
+    # new-posts switch, as only such a row is accepted by its handler;
+    # ``is_forum`` may also come from Discord's channel type.
+    marked_forum: bool = False
 
 
 @dataclass(frozen=True)
@@ -224,6 +232,8 @@ async def collect_proactive_overview(
                 is_forum=getattr(record, "is_forum", False)
                 or getattr(channels.get(record.channel_id), "type", None)
                 in FORUM_CHANNEL_TYPES,
+                new_posts_to_agent=getattr(record, "new_posts_to_agent", False),
+                marked_forum=bool(getattr(record, "is_forum", False)),
             )
             for record in by_guild[guild_id]
         ]
@@ -395,6 +405,50 @@ class ProactiveChannelsAdminController(Controller):
         flash_success(
             request,
             f"Proactive bot is now {'on' if enabled else 'off'} in channel {channel_id}.",
+        )
+        return back
+
+    @post("/{guild_id:str}/{channel_id:str}/new-posts", guards=_GUARDS)
+    async def toggle_new_posts(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        guild_id: str,
+        channel_id: str,
+    ) -> Redirect:
+        """Send a forum's new posts straight to the agent, or back through
+        the watcher (#297). Only the setting changes: the forum stays on or
+        off, and nobody is woken, so Discord need not be asked."""
+        back = Redirect(path=BASE_PATH)
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return back
+        form = await request.form()
+        send = str(form.get("new_posts_to_agent") or "") == "on"
+
+        record = await get_proactive_channel_settings(db_session, guild_id, channel_id)
+        if record is None:
+            flash_error(request, "That channel isn't on this page. Reload and try again.")
+            return back
+        if not record.is_forum:
+            flash_error(request, "Only a forum's new posts can skip the watcher.")
+            return back
+        ctx = await get_admin_context(request, db_session)
+        record.new_posts_to_agent = send
+        await db_session.commit()
+        logger.info(
+            "proactive forum new posts to agent set from admin overview guild=%s "
+            "forum=%s new_posts_to_agent=%s by site user=%s",
+            guild_id,
+            channel_id,
+            send,
+            ctx["user"].id if ctx.get("user") else None,
+        )
+        flash_success(
+            request,
+            f"New posts in forum {channel_id} now go straight to the assistant."
+            if send
+            else f"New posts in forum {channel_id} now go through the watcher first.",
         )
         return back
 
