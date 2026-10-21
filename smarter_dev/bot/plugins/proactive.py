@@ -32,6 +32,7 @@ import os
 import socket
 import time
 from collections import OrderedDict
+from collections import deque
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -142,6 +143,12 @@ MEMORY_REFRESH_SECONDS = 3600
 # many missed messages it will at most replay.
 CATCHUP_MAX_AGE_SECONDS = 3600
 CATCHUP_MAX_MESSAGES = 50
+# A forum that sends new posts straight to the agent does so for at most
+# this many posts in any rolling window (#297); later posts go through the
+# watcher as if the setting were off, so a burst of posts cannot spend the
+# budget on wakes. Counted in this process: a restart starts it afresh.
+NEW_POST_WAKES_PER_WINDOW = 10
+NEW_POST_WAKE_WINDOW_SECONDS = 3600
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 SKIM_MODEL_ENV_VAR = "PROACTIVE_SKIM_MODEL"
@@ -627,6 +634,10 @@ class ProactiveRuntime:
         self.start_consumers = start_consumers
         # (checked at, whether a worker said it runs forum posts)
         self._forum_posts_capability: tuple[float, bool] | None = None
+        # Forum id -> when its recent new posts went straight to the agent
+        # (monotonic), and the forums whose cap was logged since (#297).
+        self.new_post_wakes: dict[str, deque[float]] = {}
+        self.new_post_cap_logged: set[str] = set()
         # Channel id -> the forum whose settings it last ran on (None: its
         # own row). Publication routes by it, so it never looks the parent
         # up again (#248).
@@ -1151,14 +1162,27 @@ async def _run_producer_once(
     activated_at = datetime.now(UTC)
     me = run.bot.get_me()
     bot_user_id = str(me.id) if me else ""
-    history = await _fetch_history(
+    # Messages that already woke the agent (a mention, a new post sent
+    # straight to it) are context for the rest, not messages to judge: a
+    # follow-up batched with them is judged with them, and with the bot's
+    # answers after them, in view. Jev's history therefore ends at the
+    # first message left to judge, not at the batch's first.
+    woken_ids = live_notified_directed_ids | sent_new_post_ids
+    to_judge = [message for message in new_messages if message.id not in woken_ids]
+    history_end = (to_judge or new_messages)[0].id if new_messages else None
+    fetched = await _fetch_history(
         run.bot,
         int(state.channel_id),
-        exclude_ids={message.id for message in new_messages},
-        before_id=new_messages[0].id if run.uses_jev_batching and new_messages else None,
+        exclude_ids={message.id for message in to_judge},
+        before_id=history_end if run.uses_jev_batching else None,
     )
+    fetched_ids = {message.id for message in fetched}
     visible = ChannelEnvironment(
-        visible=[*history, *new_messages], bot_user_id=bot_user_id
+        visible=[
+            *fetched,
+            *(message for message in new_messages if message.id not in fetched_ids),
+        ],
+        bot_user_id=bot_user_id,
     )
     directed_ids = set(bot_directed_message_ids(new_messages, visible, bot_user_id))
     already_notified_directed_ids = directed_ids & live_notified_directed_ids
@@ -1168,6 +1192,8 @@ async def _run_producer_once(
         if message.id not in already_notified_directed_ids
         and message.id not in sent_new_post_ids
     ]
+    watcher_ids = {message.id for message in watcher_messages}
+    history = [message for message in fetched if message.id not in watcher_ids]
     instruction_store = InstructionStore.from_stored(
         OPERATING_POLICY_BRIEF, settings.watch_addendum
     )
@@ -1748,6 +1774,28 @@ async def _persist_active_window(
         log_exception(logger, "failed to persist active window channel=%s", state.channel_id)
 
 
+def _claim_new_post_wake(run: ProactiveRuntime, forum_id: str, now: float) -> bool:
+    """Whether a forum's new post may still go straight to the agent: at
+    most ``NEW_POST_WAKES_PER_WINDOW`` in any rolling window (#297)."""
+    wakes = run.new_post_wakes.setdefault(forum_id, deque())
+    while wakes and wakes[0] <= now - NEW_POST_WAKE_WINDOW_SECONDS:
+        wakes.popleft()
+    if len(wakes) < NEW_POST_WAKES_PER_WINDOW:
+        wakes.append(now)
+        run.new_post_cap_logged.discard(forum_id)
+        return True
+    if forum_id not in run.new_post_cap_logged:
+        run.new_post_cap_logged.add(forum_id)
+        logger.warning(
+            "proactive forum=%s sent %d new posts straight to the agent within "
+            "%ds; later posts go to the watcher until the window frees up",
+            forum_id,
+            NEW_POST_WAKES_PER_WINDOW,
+            NEW_POST_WAKE_WINDOW_SECONDS,
+        )
+    return False
+
+
 async def _persist_engaged(
     run: ProactiveRuntime, state: ChannelProducerState, message_id: str
 ) -> None:
@@ -1866,10 +1914,15 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         # until consumed, so a restart must still replay it.
         if run.execution_mode_for(str(event.guild_id)) == EXTERNAL_EXECUTION_MODE:
             await _persist_engaged(run, state, converted.id)
-    elif new_post and getattr(settings.settings, "new_posts_to_agent", False):
+    elif (
+        new_post
+        and getattr(settings.settings, "new_posts_to_agent", False)
+        and _claim_new_post_wake(run, str(settings.forum_id), now)
+    ):
         # The forum sends new posts straight to the agent (#297): the
         # opening message wakes it as a mention does, and the watcher never
-        # sees it. Replies in the post are still the watcher's to judge.
+        # sees it. Replies in the post are still the watcher's to judge, as
+        # is a post past the forum's cap.
         await run.enqueue_notification(
             str(event.guild_id),
             new_post_notification(

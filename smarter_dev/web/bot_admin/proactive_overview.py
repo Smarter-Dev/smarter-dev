@@ -110,6 +110,10 @@ class ProactiveChannelRow:
     configured: bool = True
     # A forum's new posts go straight to the agent, skipping the watcher.
     new_posts_to_agent: bool = False
+    # The row itself is marked a whole forum's. Only such a row offers the
+    # new-posts switch, as only such a row is accepted by its handler;
+    # ``is_forum`` may also come from Discord's channel type.
+    marked_forum: bool = False
 
 
 @dataclass(frozen=True)
@@ -229,6 +233,7 @@ async def collect_proactive_overview(
                 or getattr(channels.get(record.channel_id), "type", None)
                 in FORUM_CHANNEL_TYPES,
                 new_posts_to_agent=getattr(record, "new_posts_to_agent", False),
+                marked_forum=bool(getattr(record, "is_forum", False)),
             )
             for record in by_guild[guild_id]
         ]

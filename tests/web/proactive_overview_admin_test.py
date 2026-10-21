@@ -850,7 +850,8 @@ async def test_adding_a_forum_refuses_a_bad_csrf_token_or_ids(db_session, patche
 
 def test_the_template_labels_forums_and_offers_to_add_one():
     configured = proactive_overview.ProactiveChannelRow(
-        channel_id=FORUM, name="questions", enabled=True, is_forum=True
+        channel_id=FORUM, name="questions", enabled=True, is_forum=True,
+        marked_forum=True,
     )
     unconfigured = proactive_overview.ProactiveChannelRow(
         channel_id=NEW_FORUM, name="showcase", enabled=False, is_forum=True,
@@ -938,7 +939,7 @@ async def test_the_new_posts_setting_round_trips_through_the_page(
 
     response = await overview(Controller, _request(), db_session)
     (row,) = [r for r in response.context["sections"][0].channels if r.channel_id == FORUM]
-    assert row.new_posts_to_agent is False
+    assert (row.new_posts_to_agent, row.marked_forum) == (False, True)
 
     await _post_new_posts(db_session, "on")
     assert await _new_posts(db_session) is True
@@ -984,7 +985,12 @@ async def test_the_new_posts_switch_refuses_a_bad_csrf_token(db_session, patched
 def test_the_template_offers_the_new_posts_switch_on_forums_only():
     forum = proactive_overview.ProactiveChannelRow(
         channel_id=FORUM, name="questions", enabled=True, is_forum=True,
-        new_posts_to_agent=True,
+        new_posts_to_agent=True, marked_forum=True,
+    )
+    # Discord says it is a forum, but its row is not marked one: the
+    # handler would refuse the switch, so it is not offered.
+    unmarked = proactive_overview.ProactiveChannelRow(
+        channel_id=NEW_FORUM, name="showcase", enabled=True, is_forum=True
     )
     plain = proactive_overview.ProactiveChannelRow(
         channel_id=GENERAL, name="general", enabled=True
@@ -995,8 +1001,8 @@ def test_the_template_offers_the_new_posts_switch_on_forums_only():
             proactive_overview.ProactiveGuildSection(
                 guild_id=GUILD,
                 name="Smarter Dev",
-                channels=[forum, plain],
-                enabled_count=2,
+                channels=[forum, unmarked, plain],
+                enabled_count=3,
                 names_unavailable=False,
             )
         ],
@@ -1006,5 +1012,6 @@ def test_the_template_offers_the_new_posts_switch_on_forums_only():
     )
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{FORUM}/new-posts"' in html
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{GENERAL}/new-posts"' not in html
+    assert f'action="/admin/bot/proactive-channels/{GUILD}/{NEW_FORUM}/new-posts"' not in html
     assert '<input type="hidden" name="new_posts_to_agent" value="off">' in html
     assert "Send new posts straight to the assistant" in html

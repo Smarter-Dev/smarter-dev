@@ -165,11 +165,16 @@ class ProactiveSettingsService(BaseService):
         self, guild_id: str, forum_id: str, new_posts_to_agent: bool
     ) -> ProactiveChannelSettings:
         """Send a forum's new posts straight to the agent, or back through
-        the watcher; the switch and watch addendum are kept."""
-        current = await self.get_settings(guild_id, forum_id)
+        the watcher; the switch and watch addendum are kept.
+
+        A moderator runs this right after a change on the web page, so it
+        reads the row fresh: a cached switch would turn the forum back on.
+        The row is a forum's by definition, so it is marked one.
+        """
+        current = await self.get_settings(guild_id, forum_id, fresh=True)
         return await self._put(
             guild_id, forum_id, enabled=current.enabled,
-            watch_addendum=current.watch_addendum,
+            watch_addendum=current.watch_addendum, is_forum=True,
             new_posts_to_agent=new_posts_to_agent,
         )
 

@@ -63,7 +63,7 @@
                                     <input type="hidden" name="enabled" value="{{ 'off' if channel.enabled else 'on' }}">
                                     <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Turn off' if channel.enabled else 'Turn on' }}</button>
                                 </form>
-                                {% if channel.is_forum %}
+                                {% if channel.marked_forum %}
                                 <form method="post" action="/admin/bot/proactive-channels/{{ section.guild_id }}/{{ channel.channel_id }}/new-posts" style="margin:0.5rem 0 0;">
                                     {{ csrf_field() }}
                                     <input type="hidden" name="new_posts_to_agent" value="{{ 'off' if channel.new_posts_to_agent else 'on' }}">
