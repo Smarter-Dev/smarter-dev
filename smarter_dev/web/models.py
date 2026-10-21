@@ -6563,6 +6563,11 @@ class ProactiveChannelSettings(Base):
     is_forum: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # A forum's row only (#297): a new post's opening message wakes the agent
+    # without the watcher's classifier. Replies in the post are still gated.
+    new_posts_to_agent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
 
 
 class ProactiveAgentHistory(Base):

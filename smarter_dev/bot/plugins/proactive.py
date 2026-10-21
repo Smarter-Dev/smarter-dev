@@ -89,6 +89,7 @@ from smarter_dev.bot.proactive.notifications import channel_enabled_notification
 from smarter_dev.bot.proactive.notifications import instruction_expired_notification
 from smarter_dev.bot.proactive.notifications import mention_notification
 from smarter_dev.bot.proactive.notifications import mode_change_notification
+from smarter_dev.bot.proactive.notifications import new_post_notification
 from smarter_dev.bot.proactive.notifications import reaction_notification
 from smarter_dev.bot.proactive.notifications import recovery_notification
 from smarter_dev.bot.proactive.notifications import render_notifications
@@ -505,6 +506,8 @@ class ChannelProducerState:
     active_window_restored: bool = False
     last_reviewed_message_id: str | None = None
     pending_directed_ids: set[str] = field(default_factory=set)
+    # New posts already sent to the agent without the watcher (#297).
+    pending_new_post_ids: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -1124,6 +1127,8 @@ async def _run_producer_once(
         buffered_ids = {message.id for message in buffered}
         live_notified_directed_ids = state.pending_directed_ids & buffered_ids
         state.pending_directed_ids.difference_update(buffered_ids)
+        sent_new_post_ids = state.pending_new_post_ids & buffered_ids
+        state.pending_new_post_ids.difference_update(buffered_ids)
     # The list may have changed since these were buffered: re-check them now,
     # as the chat engine re-checks its queue, so a message buffered before its
     # author was blocked never reaches the watcher or an envelope.
@@ -1161,6 +1166,7 @@ async def _run_producer_once(
         message
         for message in new_messages
         if message.id not in already_notified_directed_ids
+        and message.id not in sent_new_post_ids
     ]
     instruction_store = InstructionStore.from_stored(
         OPERATING_POLICY_BRIEF, settings.watch_addendum
@@ -1804,9 +1810,10 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     state = run.state_for(event.guild_id, event.channel_id)
     await _restore_active_window(run, state)
     converted = channel_message_from_hikari(event.message)
-    if settings.forum_id is not None and str(event.message.id) == str(
+    new_post = settings.forum_id is not None and str(event.message.id) == str(
         event.channel_id
-    ):
+    )
+    if new_post:
         # A post's opening message shares the post's id. Its title and tags
         # say what the post is about, so they travel with it.
         info = await post_info(
@@ -1857,6 +1864,21 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         # Only an external wake is durable once enqueued (in the Redis
         # stream); an embedded or shadow one lives in this process's queue
         # until consumed, so a restart must still replay it.
+        if run.execution_mode_for(str(event.guild_id)) == EXTERNAL_EXECUTION_MODE:
+            await _persist_engaged(run, state, converted.id)
+    elif new_post and getattr(settings.settings, "new_posts_to_agent", False):
+        # The forum sends new posts straight to the agent (#297): the
+        # opening message wakes it as a mention does, and the watcher never
+        # sees it. Replies in the post are still the watcher's to judge.
+        await run.enqueue_notification(
+            str(event.guild_id),
+            new_post_notification(
+                converted,
+                channel_id=state.channel_id,
+                channel_name=_channel_name(run.bot, state),
+            ),
+        )
+        state.pending_new_post_ids.add(converted.id)
         if run.execution_mode_for(str(event.guild_id)) == EXTERNAL_EXECUTION_MODE:
             await _persist_engaged(run, state, converted.id)
     if run.uses_jev_batching or now < state.active_until:
@@ -2623,6 +2645,65 @@ async def proactive_off(ctx: lightbulb.Context) -> None:
     await _set_enabled(ctx, False, whole_forum=bool(ctx.options.whole_forum))
 
 
+NEW_POSTS_NOT_IN_A_POST_MESSAGE = (
+    "Run this inside one of the forum's posts: it sets how the whole "
+    "forum's new posts reach the assistant."
+)
+
+
+@proactive_group.child
+@lightbulb.option(
+    "send",
+    "On: each new post goes straight to the assistant. Off: the watcher "
+    "decides first",
+    type=bool,
+    required=True,
+)
+@lightbulb.command(
+    "new_posts",
+    "Inside a forum post: send the forum's new posts straight to the assistant",
+)
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def proactive_new_posts(ctx: lightbulb.Context) -> None:
+    if await deny_without_moderator_permissions(ctx, MODERATOR_DENIAL_MESSAGE):
+        return
+    run = _runtime()
+    service = run.settings_service()
+    if service is None:
+        await ctx.respond(
+            "Proactive settings service is unavailable.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
+    forum_id = await forum_parents(run.bot).forum_for(str(ctx.channel_id))
+    if forum_id is None:
+        await ctx.respond(
+            NEW_POSTS_NOT_IN_A_POST_MESSAGE, flags=hikari.MessageFlag.EPHEMERAL
+        )
+        return
+    send = bool(ctx.options.send)
+    settings = await service.set_new_posts_to_agent(
+        str(ctx.guild_id), forum_id, send
+    )
+    if send:
+        reply = (
+            "New posts in this forum now go **straight to the assistant**, "
+            "without the watcher deciding first. Replies in a post still go "
+            "through the watcher."
+        )
+    else:
+        reply = (
+            "New posts in this forum now go through the **watcher** first, "
+            "like every other message."
+        )
+    if not settings.enabled:
+        reply += (
+            "\n-# The proactive bot is off for this forum, so this only "
+            "applies once it's on (`/proactive on whole_forum:True`)."
+        )
+    await ctx.respond(reply, flags=hikari.MessageFlag.EPHEMERAL)
+
+
 @proactive_group.child
 @lightbulb.command("status", "Show the proactive bot's status for this channel")
 @lightbulb.implements(lightbulb.SlashSubCommand)
@@ -2668,9 +2749,15 @@ async def proactive_status(ctx: lightbulb.Context) -> None:
             f" (its forum <#{effective.forum_id}> is on, but the agent "
             "running this server can't answer forum posts yet)"
         )
+    new_posts = ""
+    if effective.forum_id is not None and getattr(
+        settings, "new_posts_to_agent", False
+    ):
+        new_posts = "New posts in this forum go straight to the assistant.\n"
     await ctx.respond(
         f"Proactive bot: **{'on' if settings.enabled else 'off'}**{inherited} "
         f"(monitoring: {mode})\n"
+        f"{new_posts}"
         f"Watch instructions:\n{instructions[:1500]}",
         flags=hikari.MessageFlag.EPHEMERAL,
     )

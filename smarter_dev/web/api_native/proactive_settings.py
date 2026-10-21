@@ -186,6 +186,7 @@ class ProactiveChannelSettingsController(Controller):
             enabled=data.enabled,
             watch_addendum=data.watch_addendum,
             is_forum=data.is_forum,
+            new_posts_to_agent=data.new_posts_to_agent,
         )
         # Serialize before commit (Skrift-injected session; see model_overrides).
         response = ProactiveChannelSettingsRead.model_validate(record)

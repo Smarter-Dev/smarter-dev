@@ -213,3 +213,44 @@ async def test_set_enabled_marks_a_whole_forum(service, mock_api_client):
         json_data={"enabled": True, "watch_addendum": "keep me", "is_forum": True},
     )
     assert settings.is_forum is True
+
+
+async def test_set_new_posts_to_agent_keeps_the_switch_and_addendum(
+    service, mock_api_client
+):
+    mock_api_client.get.return_value = create_mock_response(
+        200,
+        {"guild_id": GUILD, "channel_id": CHANNEL, "enabled": True,
+         "watch_addendum": "keep me", "is_forum": True},
+    )
+    mock_api_client.put.return_value = create_mock_response(
+        200,
+        {"guild_id": GUILD, "channel_id": CHANNEL, "enabled": True,
+         "watch_addendum": "keep me", "is_forum": True,
+         "new_posts_to_agent": True},
+    )
+
+    settings = await service.set_new_posts_to_agent(GUILD, CHANNEL, True)
+
+    mock_api_client.put.assert_awaited_once_with(
+        PATH,
+        json_data={"enabled": True, "watch_addendum": "keep me",
+                   "new_posts_to_agent": True},
+    )
+    assert settings.new_posts_to_agent is True
+
+
+async def test_the_watch_addendum_write_leaves_new_posts_to_agent_out(
+    service, mock_api_client
+):
+    mock_api_client.get.return_value = create_mock_response(
+        200,
+        {"guild_id": GUILD, "channel_id": CHANNEL, "enabled": True,
+         "watch_addendum": "", "new_posts_to_agent": True},
+    )
+    mock_api_client.put.return_value = create_mock_response(200, _payload())
+
+    await service.set_watch_addendum(GUILD, CHANNEL, "new")
+
+    sent = mock_api_client.put.await_args.kwargs["json_data"]
+    assert "new_posts_to_agent" not in sent

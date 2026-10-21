@@ -24,6 +24,10 @@
             <code>/proactive on</code> or <code>/configure bot</code> in that channel.
             A forum can be switched on here as a whole: each of its posts is its own channel,
             and a post switched off with <code>/proactive off</code> stays off.
+            A forum can also send its new posts straight to the assistant. Normally the
+            watcher reads each message first and wakes the assistant only when it thinks
+            the assistant should look. With this on, a new post's opening message always
+            wakes it. Replies in the post still go through the watcher.
         </p>
 
         {% for section in sections %}
@@ -59,6 +63,14 @@
                                     <input type="hidden" name="enabled" value="{{ 'off' if channel.enabled else 'on' }}">
                                     <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Turn off' if channel.enabled else 'Turn on' }}</button>
                                 </form>
+                                {% if channel.is_forum %}
+                                <form method="post" action="/admin/bot/proactive-channels/{{ section.guild_id }}/{{ channel.channel_id }}/new-posts" style="margin:0.5rem 0 0;">
+                                    {{ csrf_field() }}
+                                    <input type="hidden" name="new_posts_to_agent" value="{{ 'off' if channel.new_posts_to_agent else 'on' }}">
+                                    <span class="sk-text-muted" style="font-size:0.85rem;">Send new posts straight to the assistant: <strong>{{ 'On' if channel.new_posts_to_agent else 'Off' }}</strong></span>
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Turn off' if channel.new_posts_to_agent else 'Turn on' }}</button>
+                                </form>
+                                {% endif %}
                                 {% else %}
                                 <form method="post" action="/admin/bot/proactive-channels/forums" style="margin:0;">
                                     {{ csrf_field() }}

@@ -103,6 +103,34 @@ def reply_notification(
     )
 
 
+def new_post_notification(
+    message: ChannelMessage,
+    channel_id: str = "",
+    channel_name: str = "",
+) -> Notification:
+    """A new forum post's opening message, verbatim, from a forum set to
+    send new posts straight to the agent (#297). It wakes the agent as a
+    mention does; the watcher never saw it.
+
+    Its kind is the watcher's: the worker's wire contract has no other kind
+    for a wake that stands in for the watcher's decision.
+    """
+    return Notification(
+        kind="watcher_summary",
+        created_at=message.timestamp,
+        body=(
+            "New forum post, sent straight to you: this forum skips the "
+            f"watcher for new posts. {_user_metadata(message)} opened it with "
+            f"message id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n"
+            f"> {with_attachments(message.to_record())}"
+        ),
+        channel_id=channel_id,
+        channel_name=channel_name,
+        message_ids=(message.id,),
+        wakes=True,
+    )
+
+
 def watcher_summary_notification(
     *,
     summary: str,
