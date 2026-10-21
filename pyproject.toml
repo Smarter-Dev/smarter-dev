@@ -48,6 +48,9 @@ dependencies = [
     "polar-sdk>=0.31.7",
     "logfire>=4.27.0,<5.0.0",
     "nh3>=0.3.0",
+    # Floor from the eMudhra/emSign CA key incident (GHSA-6q48-6c7w-9gw2,
+    # Oct 2026): older bundles trust roots with compromised intermediates.
+    "certifi>=2026.10.19",
 ]
 
 [dependency-groups]
