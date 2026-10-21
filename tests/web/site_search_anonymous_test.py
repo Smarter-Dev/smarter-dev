@@ -6,6 +6,7 @@ Redis is fakeredis; the agent worker queue and notifications are replaced."""
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -17,6 +18,7 @@ from uuid import uuid4
 import fakeredis
 import pytest
 from litestar.di import Provide
+from litestar.exceptions import HTTPException
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import create_test_client
 from skrift.db.base import Base as SkriftBase
@@ -27,10 +29,13 @@ from sqlalchemy import select
 from smarter_dev.shared.database import Base
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.web import search_link_controller as links
+from smarter_dev.web import site_identity
 from smarter_dev.web import web_search_jobs
 from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native import site_search
 from smarter_dev.web.api_native.site_search import SiteSearchController
+from smarter_dev.web.chat import jobs as chat_jobs
+from smarter_dev.web.models import AccountDeletionRequest
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
@@ -204,18 +209,114 @@ async def test_the_request_and_visitor_are_bounded(env):
     )
 
 
-async def test_an_unknown_or_inactive_owner_is_refused(env):
-    inactive = await _owner(env.session, active=False)
-    inactive_linkless = await _owner(env.session, active=False, link=False)
-
+async def test_an_unknown_owner_is_refused(env):
     assert _start(env.tc, "not-a-uuid").json() == {"detail": "Invalid account ID"}
-    for owner_id in (uuid4(), inactive.id, inactive_linkless.id):
-        response = _start(env.tc, owner_id)
-        assert response.status_code == 404
-        assert response.json() == {"detail": NOT_FOUND}
+    response = _start(env.tc, uuid4())
+    assert response.status_code == 404
+    assert response.json() == {"detail": NOT_FOUND}
     # Refused before any limit is counted or anything is started.
     assert await env.redis.keys("*") == []
     assert env.submitted == []
+
+
+async def _close(session, owner) -> AccountDeletionRequest:
+    """Ask to delete the owner's account, as the account page and the site's
+    privacy API do: inactive, with a pending deletion request."""
+    owner.is_active = False
+    deletion = AccountDeletionRequest(user_id=owner.id, status="pending")
+    session.add(deletion)
+    await session.commit()
+    return deletion
+
+
+async def _run_the_deletion_job(env, monkeypatch, deletion) -> None:
+    @asynccontextmanager
+    async def session_context():
+        yield env.session
+
+    class _Storage:
+        async def delete(self, key):
+            pass
+
+        async def list_keys(self, prefix=""):
+            for key in ():
+                yield key
+
+    class _Manager:
+        def __init__(self, _settings):
+            pass
+
+        async def get(self, _name):
+            return _Storage()
+
+        async def close(self):
+            pass
+
+    monkeypatch.setattr(chat_jobs, "get_db_session_context", session_context)
+    monkeypatch.setattr("skrift.storage.StorageManager", _Manager)
+    monkeypatch.setattr(
+        "skrift.config.get_settings", lambda: SimpleNamespace(storage=None)
+    )
+    # The job fences the account against the site's identity handoff.
+    fence = SimpleNamespace(site_identity_fence_key="test-fence-key-" + "k" * 32)
+    monkeypatch.setattr(site_identity, "get_settings", lambda: fence)
+    assert await chat_jobs.delete_chat_account(
+        chat_jobs.ChatAccountDeletionPayload(request_id=str(deletion.id))
+    ) == {"status": "deleted"}
+    env.session.expire_all()
+
+
+@pytest.mark.parametrize("python_link", [True, False])
+async def test_a_closing_owners_link_runs_until_the_deletion_job(
+    env, monkeypatch, python_link
+):
+    # With a Python link row (made on smarter.dev), or only the site's (D1).
+    owner = await _owner(env.session, link=python_link)
+    owner_id = owner.id
+    deletion = await _close(env.session, owner)
+
+    started = _start(env.tc, owner_id)
+
+    assert started.status_code == 201
+    [submitted] = env.submitted
+    entry = await anonymous.load(env.redis, submitted["search_id"])
+    assert entry["owner_user_id"] == str(owner_id)
+    day = anonymous.link_day_key(owner_id)
+    assert int(await env.redis.get(day)) == 1
+    if python_link:
+        # The /s/ page runs it too, under the same day.
+        token = await env.session.scalar(
+            select(WebSearchLink.token).where(WebSearchLink.owner_user_id == owner_id)
+        )
+        page = await _link_page(env, token, ip="198.51.100.9")
+        assert page.status_code == 303
+        assert int(await env.redis.get(day)) == 2
+
+    # The visitor's minute and the link's day hold as for an active owner.
+    assert _start(env.tc, owner_id).status_code == 201
+    visitor_limited = _start(env.tc, owner_id)
+    assert visitor_limited.status_code == 429
+    assert visitor_limited.json()["per_link"] is False
+    await _use_up_the_day(env, owner_id)
+    assert _limited_for_the_day(_start(env.tc, owner_id, visitor="i" * 32))
+    launched = len(env.submitted)
+    assert launched == (3 if python_link else 2)
+
+    await env.redis.delete(day)
+    await _run_the_deletion_job(env, monkeypatch, deletion)
+    assert await env.session.get(User, owner_id) is None
+
+    gone = _start(env.tc, owner_id, visitor="j" * 32)
+    assert gone.status_code == 404
+    assert gone.json() == {"detail": NOT_FOUND}
+    # Refused before the day is counted or anything is started.
+    assert await env.redis.get(day) is None
+    assert len(env.submitted) == launched
+    if python_link:
+        with pytest.raises(HTTPException) as refused:
+            await _link_page(env, token)
+        assert refused.value.status_code == 404
+        assert refused.value.detail == NOT_FOUND
 
 
 async def test_a_third_search_in_a_minute_waits_like_the_link_page(env):

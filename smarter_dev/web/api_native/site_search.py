@@ -94,18 +94,21 @@ async def _owned(session: AsyncSession, user: User, run_id: str) -> WebSearchRun
 
 
 async def _owner_of(session: AsyncSession, owner_id: str) -> UUID:
-    """The active member whose search link the site resolved. The link itself
-    lives on the site (D1), so Python may have no row for it; an unknown or
-    inactive owner is refused as the /s/ page refuses a link that doesn't
-    exist."""
+    """The member whose search link the site resolved. The link itself lives
+    on the site (D1), so Python may have no row for it.
+
+    The /s/ page never checks the owner: it serves a link until the account
+    deletion job deletes the link's row, and the job deletes the user in the
+    same commit. So an owner whose account is closing (inactive, deletion
+    pending) is served here too, and only an owner who no longer exists is
+    refused, as the /s/ page refuses a link that doesn't exist."""
     try:
         uid = UUID(owner_id)
         if str(uid) != owner_id.lower():
             raise ValueError
     except ValueError:
         raise plain_error(400, "Invalid account ID") from None
-    owner = await session.get(User, uid)
-    if owner is None or not owner.is_active:
+    if await session.get(User, uid) is None:
         raise plain_error(404, "This search link doesn't exist.")
     return uid
 
