@@ -26,6 +26,7 @@ from smarter_dev.bot.plugins.rules import DISCORD_MESSAGE_CHAR_LIMIT
 from smarter_dev.bot.plugins.rules import MAX_RULES_PROMPT_CHARS
 from smarter_dev.bot.plugins.rules import RULE_COMMAND_TYPE
 from smarter_dev.bot.plugins.rules import RULE_CONTEXT_MESSAGE_COUNT
+from smarter_dev.bot.plugins.rules import as_blockquote
 from smarter_dev.bot.plugins.rules import bot_target_rejection
 from smarter_dev.bot.plugins.rules import collect_recent_messages
 from smarter_dev.bot.plugins.rules import estimate_rule_match_tokens
@@ -92,7 +93,11 @@ def _match_message(
 def _unquote(text: str) -> str:
     """Strip the Discord blockquote marker back off every line."""
     return "\n".join(
-        line[2:] if line.startswith("> ") else line[1:] if line == ">" else line
+        ""
+        if line == f"> {ZERO_WIDTH_SPACE}"
+        else line[2:]
+        if line.startswith("> ")
+        else line
         for line in text.split("\n")
     )
 
@@ -123,6 +128,46 @@ def test_format_rule_block_quotes_blank_lines_too():
 
     assert all(line.startswith(">") for line in block.split("\n"))
     assert "\n\n" not in block
+
+
+def test_format_rule_block_never_leaves_a_bare_quote_marker():
+    """Discord shows `>` with nothing after it as a literal `>` (#296)."""
+    rule = _rule(body="Promotion.\n\n*Ask a moderator first.*")
+
+    block = format_rule_block(rule)
+
+    assert block.split("\n") == [
+        "> **1. No self-promotion**",
+        "> Promotion.",
+        f"> {ZERO_WIDTH_SPACE}",
+        "> *Ask a moderator first.*",
+    ]
+    assert _unquote(block) == (
+        "**1. No self-promotion**\nPromotion.\n\n*Ask a moderator first.*"
+    )
+
+
+def test_as_blockquote_fills_whitespace_only_lines_too():
+    """`> ` followed only by spaces is just as unquoted to Discord."""
+    assert as_blockquote("a\n   \nb") == f"> a\n> {ZERO_WIDTH_SPACE}\n> b"
+
+
+def test_render_rule_citation_counts_blank_line_fillers_against_the_limit():
+    """The zero-width filler is a real character in Discord's 2000 count."""
+    title_block = len(format_rule_block(_rule(body="")))
+    blank_line = len(f"\n> {ZERO_WIDTH_SPACE}")
+    blank_lines = (
+        DISCORD_MESSAGE_CHAR_LIMIT - title_block - len("\n> x")
+    ) // blank_line
+    fits = _rule(body="\n" * blank_lines + "x")
+    too_long = _rule(body="\n" * (blank_lines + 1) + "x")
+
+    rendered = render_rule_citation([fits])
+
+    assert rendered is not None
+    assert len(rendered) <= DISCORD_MESSAGE_CHAR_LIMIT
+    assert len(rendered) + blank_line > DISCORD_MESSAGE_CHAR_LIMIT
+    assert render_rule_citation([too_long]) is None
 
 
 def test_format_rule_block_omits_empty_body():

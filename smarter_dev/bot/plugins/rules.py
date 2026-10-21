@@ -72,6 +72,11 @@ DISCORD_MESSAGE_CHAR_LIMIT = 2000
 #: Blank line between the rendered sections of the public post.
 SECTION_SEPARATOR = "\n\n"
 
+#: Zero-width space that keeps a blank line of a quoted rule inside the quote.
+#: It counts toward Discord's character limit like any other character, and
+#: :func:`fit_rule_blocks` measures the rendered blocks, so it is budgeted.
+BLANK_QUOTE_LINE_FILLER = "\u200b"
+
 #: Characters per token, the usual rough English ratio. Only used to charge the
 #: shared token budget for a call whose real usage the agent does not report.
 CHARS_PER_TOKEN = 4
@@ -144,9 +149,16 @@ def as_blockquote(text: str) -> str:
 
     Pure function. Discord's ``>`` quotes a single line, so every line needs its
     own marker — including blank ones, which would otherwise close the quote and
-    split one rule into two visually separate blocks.
+    split one rule into two visually separate blocks. Discord only treats ``> ``
+    as a quote when non-whitespace follows it; a bare ``>`` (or ``> ``) shows
+    as a literal ``>``. A blank line is therefore quoted as ``> `` plus
+    :data:`BLANK_QUOTE_LINE_FILLER`, which is not whitespace to Discord but
+    prints nothing.
     """
-    return "\n".join(f"> {line}" if line else ">" for line in text.split("\n"))
+    return "\n".join(
+        f"> {line}" if line.strip() else f"> {BLANK_QUOTE_LINE_FILLER}"
+        for line in text.split("\n")
+    )
 
 
 def format_rule_block(rule: GuildRule) -> str:
