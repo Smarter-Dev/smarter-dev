@@ -115,6 +115,10 @@ def _start(tc, owner_id, request="why is my build slow", visitor=VISITOR):
     )
 
 
+def _owner_check(tc, owner_id):
+    return tc.get(f"{ROOT}/users/{owner_id}/link-owner")
+
+
 async def _row_counts(session) -> dict[str, int]:
     tables = {
         table.name: table
@@ -137,7 +141,7 @@ async def _row_counts(session) -> dict[str, int]:
         ("service", "site", ["site-memory", "site-privacy", "site-billing"]),
     ],
 )
-def test_both_routes_require_the_site_search_scope(env, principal, service, scopes):
+def test_every_route_requires_the_site_search_scope(env, principal, service, scopes):
     env.key.principal_type, env.key.service_name, env.key.scoped_permission_list = (
         principal,
         service,
@@ -145,6 +149,7 @@ def test_both_routes_require_the_site_search_scope(env, principal, service, scop
     )
     assert _start(env.tc, uuid4()).status_code == 401
     assert env.tc.get(f"{ROOT}/anonymous-runs/{uuid4()}").status_code == 401
+    assert _owner_check(env.tc, uuid4()).status_code == 401
 
 
 async def test_a_start_is_kept_in_redis_only_and_queued_for_the_owner(env):
@@ -317,6 +322,51 @@ async def test_a_closing_owners_link_runs_until_the_deletion_job(
             await _link_page(env, token)
         assert refused.value.status_code == 404
         assert refused.value.detail == NOT_FOUND
+
+
+@pytest.mark.parametrize("python_link", [True, False])
+async def test_the_owner_check_answers_until_the_deletion_job(
+    env, monkeypatch, python_link
+):
+    """The site asks before every answer under /s/<token>, as the /s/ page
+    finds the link's row first: yes for an active or closing owner, and no
+    once the deletion job has deleted them, when the /s/ page says the link
+    doesn't exist."""
+    owner = await _owner(env.session, link=python_link)
+    owner_id = owner.id
+    token = await env.session.scalar(
+        select(WebSearchLink.token).where(WebSearchLink.owner_user_id == owner_id)
+    )
+
+    async def answered():
+        rows = await _row_counts(env.session)
+        response = _owner_check(env.tc, owner_id)
+        assert response.headers["cache-control"] == "private, no-store"
+        # It reads only: nothing counted, started or written.
+        assert await env.redis.keys("*") == []
+        assert env.submitted == []
+        assert await _row_counts(env.session) == rows
+        return response
+
+    active = await answered()
+    assert (active.status_code, active.content) == (204, b"")
+    deletion = await _close(env.session, owner)
+    closing = await answered()
+    # Nothing tells a closing owner from an active one.
+    assert (closing.status_code, closing.content) == (204, b"")
+    assert closing.headers == active.headers
+
+    await _run_the_deletion_job(env, monkeypatch, deletion)
+    assert await env.session.get(User, owner_id) is None
+    gone = await answered()
+    assert gone.status_code == 404
+    assert gone.json() == {"detail": NOT_FOUND}
+    assert _owner_check(env.tc, uuid4()).json() == {"detail": NOT_FOUND}
+    assert _owner_check(env.tc, "not-a-uuid").json() == {"detail": "Invalid account ID"}
+    if python_link:
+        with pytest.raises(HTTPException) as refused:
+            await _link_page(env, token)
+        assert refused.value.status_code == 404
 
 
 async def test_a_third_search_in_a_minute_waits_like_the_link_page(env):
