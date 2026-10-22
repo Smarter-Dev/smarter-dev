@@ -53,10 +53,26 @@ def test_the_staff_permissions_are_exactly_the_eleven_named_in_237():
     assert rule.STAFF_PERMISSIONS == int(expected)
 
 
-def test_the_two_staff_roles_are_protected():
-    assert rule.STAFF_ROLE_IDS == {"644390354157568014", "644301991832453120"}
+def test_the_three_staff_roles_are_protected():
+    assert rule.STAFF_ROLE_IDS == {
+        "644390354157568014",
+        "644301991832453120",
+        "720655282115706892",
+    }
     for role_id in rule.STAFF_ROLE_IDS:
         assert _refusal(_user(role_id), _guild()) == rule.STAFF_ROLE
+
+
+def test_a_member_holding_only_the_staff_role_is_refused():
+    # #303: `staff` grants Manage Messages only through mod-chat's overwrite.
+    mod_chat = {
+        "720655282115706892": Overwrite(
+            allow=int(hikari.Permissions.MANAGE_MESSAGES), deny=0
+        )
+    }
+    guild = _guild({"720655282115706892": 0}, channels=[mod_chat])
+
+    assert _refusal(_user("720655282115706892"), guild) == rule.STAFF_ROLE
 
 
 def test_a_configured_extra_role_is_protected():

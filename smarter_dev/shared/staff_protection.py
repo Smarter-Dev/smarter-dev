@@ -32,8 +32,16 @@ from collections.abc import Iterable
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-#: The guild's two staff roles. Protected whatever permissions they carry.
-STAFF_ROLE_IDS = frozenset({"644390354157568014", "644301991832453120"})
+#: The guild's staff roles. Protected whatever permissions they carry.
+STAFF_ROLE_IDS = frozenset(
+    {
+        "644301991832453120",  # Admin
+        "644390354157568014",  # mods
+        # staff: its power is only a mod-chat overwrite, which no longer
+        # counts (#303).
+        "720655282115706892",
+    }
+)
 
 # Discord permission bits (https://discord.com/developers/docs/topics/permissions).
 KICK_MEMBERS = 1 << 1
