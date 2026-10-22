@@ -641,7 +641,8 @@ async def test_staff_permission_author_is_exempt_from_every_filter(
     _untouched(result, rest, filter_env)
 
 
-async def test_staff_permission_in_one_channel_exempts_the_author(filter_env):
+async def test_staff_permission_in_one_channel_does_not_exempt(filter_env):
+    # #303: an overwrite makes nobody staff.
     rest = _FakeRest(
         overwrites=[
             {},
@@ -651,7 +652,7 @@ async def test_staff_permission_in_one_channel_exempts_the_author(filter_env):
 
     result = await check_content_filters(_bot(rest=rest), _make_event(EVERY_FILTER))
 
-    _untouched(result, rest, filter_env)
+    assert result.message_deleted is True
 
 
 async def test_guild_owner_is_exempt(filter_env):

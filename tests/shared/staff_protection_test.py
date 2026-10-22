@@ -82,16 +82,13 @@ def test_a_configured_extra_role_is_protected():
         hikari.Permissions.VIEW_AUDIT_LOG,
     ],
 )
-def test_each_staff_permission_protects_at_guild_and_channel_level(permission):
+def test_each_staff_permission_protects_at_guild_level_only(permission):
     assert (
         _refusal(_user("5"), _guild({"5": int(permission)}))
         == rule.GUILD_STAFF_PERMISSION
     )
     channel = {USER: Overwrite(allow=int(permission), deny=0)}
-    assert (
-        _refusal(_user("5"), _guild({"5": 0}, channels=[channel]))
-        == rule.CHANNEL_STAFF_PERMISSION
-    )
+    assert _refusal(_user("5"), _guild({"5": 0}, channels=[channel])) is None
 
 
 def test_permissions_given_to_everyone_count():
@@ -112,24 +109,38 @@ def test_an_ordinary_member_is_not_protected():
     assert _refusal(_user("5"), _guild(roles, channels=[channel])) is None
 
 
-def test_channel_overwrites_apply_in_discords_order():
+def test_channel_overwrites_make_nobody_staff():
+    # #303: #the-sudo-squad's @everyone overwrite granted Manage Webhooks, and
+    # every member, squad role or none, came back as staff.
+    webhooks = int(hikari.Permissions.MANAGE_WEBHOOKS)
     manage = int(hikari.Permissions.MANAGE_MESSAGES)
-    role_allow = {"5": Overwrite(allow=manage, deny=0)}
-    member_deny = {
-        "5": Overwrite(allow=manage, deny=0),
-        USER: Overwrite(allow=0, deny=manage),
+    sudo_squad = {
+        GUILD: Overwrite(allow=webhooks, deny=int(hikari.Permissions.VIEW_CHANNEL))
     }
-    everyone_allow_role_deny = {
-        GUILD: Overwrite(allow=manage, deny=0),
-        "5": Overwrite(allow=0, deny=manage),
-    }
-    roles = {"5": 0}
-    assert (
-        _refusal(_user("5"), _guild(roles, [role_allow]))
-        == rule.CHANNEL_STAFF_PERMISSION
+    mod_chat = {"6": Overwrite(allow=manage, deny=0)}
+    own = {USER: Overwrite(allow=manage, deny=0)}
+    guild = _guild({"5": 0, "6": 0}, channels=[sudo_squad, mod_chat, own])
+
+    assert _refusal(_user(), guild) is None
+    assert _refusal(_user("5"), guild) is None
+    assert _refusal(_user("6"), guild) is None
+
+
+def test_real_mods_stay_exempt_beside_channel_overwrites():
+    mods = int(
+        hikari.Permissions.KICK_MEMBERS
+        | hikari.Permissions.BAN_MEMBERS
+        | hikari.Permissions.MANAGE_MESSAGES
+        | hikari.Permissions.MODERATE_MEMBERS
     )
-    assert _refusal(_user("5"), _guild(roles, [member_deny])) is None
-    assert _refusal(_user("5"), _guild(roles, [everyone_allow_role_deny])) is None
+    sudo_squad = {
+        GUILD: Overwrite(allow=int(hikari.Permissions.MANAGE_WEBHOOKS), deny=0)
+    }
+    guild = _guild({"8": mods, "644390354157568014": 0}, channels=[sudo_squad])
+
+    assert _refusal(_user("8"), guild) == rule.GUILD_STAFF_PERMISSION
+    assert _refusal(_user("644390354157568014"), guild) == rule.STAFF_ROLE
+    assert _refusal(_user(user_id=OWNER), guild) == rule.GUILD_OWNER
 
 
 def test_owner_and_bots_are_protected():

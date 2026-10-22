@@ -1122,7 +1122,8 @@ async def test_a_new_member_with_kick_members_is_not_a_candidate(harness):
     assert q2.id not in harness.rest.deleted
 
 
-async def test_a_channel_overwrite_making_a_newcomer_a_moderator_exempts_them(harness):
+async def test_a_channel_overwrite_does_not_exempt_a_newcomer(harness):
+    # #303: only roles at guild level make staff; an overwrite does not.
     harness.bot.cache.channels[CHANNEL_ID] = SimpleNamespace(
         permission_overwrites={
             BOB.id: SimpleNamespace(
@@ -1135,8 +1136,8 @@ async def test_a_channel_overwrite_making_a_newcomer_a_moderator_exempts_them(ha
 
     await harness.check(ad)
 
-    assert str(BOB.id) not in {t["user"] for t in harness.rest.timeouts}
-    assert q2.id not in harness.rest.deleted
+    assert str(BOB.id) in {t["user"] for t in harness.rest.timeouts}
+    assert q2.id in harness.rest.deleted
 
 
 @pytest.mark.parametrize(
@@ -1175,7 +1176,7 @@ async def test_a_newcomer_whose_roles_cannot_be_resolved_is_not_a_candidate(harn
     assert q2.id not in harness.rest.deleted
 
 
-async def test_an_ad_by_a_channel_moderator_is_never_actioned(harness):
+async def test_an_ad_by_a_member_with_a_channel_overwrite_is_actioned(harness):
     harness.bot.cache.channels[OTHER_CHANNEL_ID] = SimpleNamespace(
         permission_overwrites={
             CAROL.id: SimpleNamespace(
@@ -1188,9 +1189,9 @@ async def test_an_ad_by_a_channel_moderator_is_never_actioned(harness):
 
     await harness.check(ad)
 
-    assert harness.classified == []
-    assert harness.rest.timeouts == []
-    assert harness.rest.deleted == []
+    assert harness.classified == [AD_TEXT]
+    assert str(CAROL.id) in {t["user"] for t in harness.rest.timeouts}
+    assert ad.id in harness.rest.deleted
 
 
 # ---------------------------------------------------------------------------

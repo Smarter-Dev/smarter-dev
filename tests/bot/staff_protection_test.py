@@ -60,7 +60,7 @@ async def test_a_role_missing_from_the_cache_is_fetched():
     assert "fetch_roles" in discord.reads
 
 
-async def test_a_moderator_in_any_channel_is_protected():
+async def test_a_role_overwrite_in_one_channel_protects_nobody():
     discord = _discord()
     discord.channels.append(
         SimpleNamespace(
@@ -71,7 +71,28 @@ async def test_a_moderator_in_any_channel_is_protected():
         )
     )
 
-    assert await staff_refusal(discord, GUILD_ID, USER) == rule.CHANNEL_STAFF_PERMISSION
+    assert await staff_refusal(discord, GUILD_ID, USER) is None
+
+
+async def test_an_everyone_overwrite_in_one_channel_protects_nobody():
+    # #303: #the-sudo-squad's @everyone overwrite grants Manage Webhooks; a
+    # new member with only a squad role was skipped by the spam engine.
+    discord = _discord()
+    discord.roles[1404243432469299335] = hikari.Permissions.NONE
+    discord.add_member(USER, role_ids=(700, 1404243432469299335))
+    discord.channels.append(
+        SimpleNamespace(
+            id=1404580470158524486,
+            permission_overwrites={
+                GUILD_ID: overwrite(
+                    allow=hikari.Permissions.MANAGE_WEBHOOKS,
+                    deny=hikari.Permissions.VIEW_CHANNEL,
+                )
+            },
+        )
+    )
+
+    assert await staff_refusal(discord, GUILD_ID, USER) is None
 
 
 async def test_owner_bot_and_bots():
