@@ -391,6 +391,108 @@ async def test_each_revision_gets_only_the_legacy_effects_it_earned():
     assert by_message["802"].agreement == "agree"
 
 
+async def test_a_burst_gets_each_legacy_action_on_the_message_it_answered():
+    """The 14:02 Oct 22 burst: one author, 2 s apart across channels. The
+    spam engine warned on the 14:02:12 post, the bump tracker deleted the
+    14:02:17 post, and the spam engine timed out on the 14:02:19 post. The
+    warn came 4 s before the bump post, and the delete after the next post:
+    each still belongs to the post it answered."""
+    from smarter_dev.web.models import ModerationOperation
+
+    port = FakeModerationDiscord(guild_id=GUILD)
+    port.add_member("42")
+    gateway = ModerationGateway(port)
+    base = datetime.now(UTC) - timedelta(seconds=60)
+    warned, bumped, muted = (
+        snowflake_at(base + timedelta(seconds=offset)) for offset in (0, 5, 7)
+    )
+    bump_channel = str(CHANNEL + 1)
+    port.post(bump_channel, bumped, "42", "check out my server")
+
+    def trigger(actor, message_id, channel, related=()):
+        return Trigger(
+            guild_id=GUILD,
+            actor=actor,
+            reason="posting in so many channels",
+            channel_id=channel,
+            message_id=message_id,
+            author_id="42",
+            related_message_ids=related,
+        )
+
+    await gateway.act(
+        trigger("spam_engine", warned, str(CHANNEL)),
+        [Proposal(kind=gw.WARN, target_user_id="42")],
+    )
+    await gateway.act(
+        trigger("handler:disboard-bump-tracker", bumped, bump_channel, (warned,)),
+        [
+            Proposal(
+                kind=gw.DELETE,
+                target_user_id="42",
+                channel_id=bump_channel,
+                message_ids=(bumped,),
+            )
+        ],
+    )
+    await gateway.act(
+        trigger("spam_engine", muted, str(CHANNEL + 2), (warned, bumped)),
+        [Proposal(kind=gw.TIMEOUT, target_user_id="42", duration_seconds=86400)],
+    )
+    made = {gw.WARN: 1.07, gw.DELETE: 9.95, gw.TIMEOUT: 11.25}
+    async with sessions() as session:
+        operations = list(
+            (await session.execute(select(ModerationOperation))).scalars()
+        )
+        assert {op.kind for op in operations} == set(made)
+        assert len({op.incident_id for op in operations}) == 1
+        for op in operations:
+            op.created_at = base + timedelta(seconds=made[op.kind])
+        await session.commit()
+    await _shadow_row(warned, "42", gw.WARN, ["42"], at=base)
+    await _shadow_row(bumped, "42", gw.DELETE, ["42"], at=base + timedelta(seconds=5))
+    await _shadow_row(muted, "42", gw.TIMEOUT, ["42"], at=base + timedelta(seconds=7))
+
+    await LegacyComparer(clock=lambda: time.time() + 300).sweep()
+    by_message = {row.message_id: row for row in await rows()}
+    assert by_message[warned].legacy_strongest_action == gw.WARN
+    assert by_message[bumped].legacy_strongest_action == gw.DELETE
+    assert by_message[bumped].legacy["message_deleted"] is True
+    assert by_message[muted].legacy_strongest_action == gw.TIMEOUT
+    assert by_message[muted].legacy["targets"]["42"]["deleted"] is False
+    assert {row.agreement for row in by_message.values()} == {"agree"}
+
+
+def test_an_operation_answers_one_revision():
+    from smarter_dev.bot.moderation_coordinator.shadow import answered_revision
+
+    base = datetime(2026, 10, 22, 14, 2, 12, tzinfo=UTC)
+    first, second, third = (
+        snowflake_at(base + timedelta(seconds=offset)) for offset in (0, 5, 7)
+    )
+    revisions = [
+        ("r1", first, base),
+        ("r2", second, base + timedelta(seconds=5)),
+        ("r2-edit", second, base + timedelta(seconds=30)),
+        ("r3", third, base + timedelta(seconds=7)),
+    ]
+    revisions.sort(key=lambda item: item[2])
+
+    def op(after: float, message_ids=None):
+        return SimpleNamespace(
+            created_at=base + timedelta(seconds=after), message_ids=message_ids
+        )
+
+    # Named messages: the newest judged one, whenever the operation came.
+    assert answered_revision(op(60, [first, third, "1"]), revisions) == "r3"
+    assert answered_revision(op(-30, [second]), revisions) == "r2"
+    assert answered_revision(op(40, [second]), revisions) == "r2-edit"
+    # Nothing named, or nothing judged named: the latest revision before it.
+    assert answered_revision(op(1.07), revisions) == "r1"
+    assert answered_revision(op(4.5, ["1"]), revisions) == "r2"
+    assert answered_revision(op(-2), revisions) is None
+
+
 def test_a_repeat_hold_is_a_sanction_and_a_review_hold_is_not():
     from smarter_dev.bot.moderation_coordinator.shadow import summarize_legacy
     from smarter_dev.web.models import ModerationOperation

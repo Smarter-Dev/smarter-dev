@@ -76,6 +76,10 @@ SWEEP_BATCH = 500
 #: Operations on the message's incident count when made from just before the
 #: revision to this long after it.
 LEGACY_WINDOW_SECONDS = 180.0
+#: How far before a revision an operation may be stamped and still answer it
+#: (listener order, pod clocks). Kept short: an author's revisions in a burst
+#: come seconds apart, and a longer lead hands one message's action to the next.
+LEGACY_LEAD_SECONDS = 1.0
 #: How close ``member_activity`` may be to the message before it is taken to
 #: already include it (the dispatch records the message as it fires).
 ACTIVITY_SAME_SECONDS = 2.0
@@ -513,6 +517,32 @@ def _is_legacy_actor(actor: str | None) -> bool:
     )
 
 
+def answered_revision(op: ModerationOperation, revisions) -> Any:
+    """Which of the author's judged revisions ``op`` answers, or ``None``.
+
+    ``revisions`` are ``(id, message_id, message_at)`` in posting order. An
+    operation that names messages (a delete, a purge) answers the newest of
+    them that was judged, whenever it was made. One that names none (a warn,
+    a timeout) answers the latest revision posted before it, allowing
+    :data:`LEGACY_LEAD_SECONDS` for order and clocks: the windows don't
+    overlap, so the warn the previous copy earned is never this one's.
+    """
+    made = _utc(op.created_at)
+    named = set(op.message_ids or ()) & {message_id for _, message_id, _ in revisions}
+    if named:
+        newest = max(named, key=lambda message_id: (len(message_id), message_id))
+        candidates = [item for item in revisions if item[1] == newest]
+    else:
+        candidates = revisions
+    answered = None
+    for revision_id, _, posted in candidates:
+        if posted - timedelta(seconds=LEGACY_LEAD_SECONDS) <= made:
+            answered = revision_id
+    if answered is None and named:
+        answered = candidates[0][0]
+    return answered
+
+
 class LegacyComparer:
     """Fills in the legacy side of rows old enough for it to have settled."""
 
@@ -560,10 +590,10 @@ class LegacyComparer:
 
         The gateway folds an author's copies (and a message's edits) into one
         incident, so the incident alone over-attributes: the mute a fifth
-        duplicate earned would show up on the third. An operation counts for
-        this revision when it is on an incident linked to the message and was
-        made from just before the revision until the author's next judged
-        revision in that incident (or :data:`LEGACY_WINDOW_SECONDS`).
+        duplicate earned would show up on the third. Each operation on an
+        incident linked to the message answers one of the author's judged
+        revisions in it (:func:`answered_revision`), and counts here when that
+        is this revision and it came within :data:`LEGACY_WINDOW_SECONDS`.
         """
         incident_ids = list(
             (
@@ -588,31 +618,40 @@ class LegacyComparer:
                 )
             ).scalars()
         ]
-        at = _utc(row.message_at)
-        later = (
-            await session.execute(
-                select(func.min(ModerationShadowDecision.message_at)).where(
-                    ModerationShadowDecision.guild_id == row.guild_id,
-                    ModerationShadowDecision.author_id == row.author_id,
-                    ModerationShadowDecision.message_id.in_(linked),
-                    ModerationShadowDecision.message_at > row.message_at,
+        revisions = [
+            (revision_id, message_id, _utc(message_at))
+            for revision_id, message_id, message_at in (
+                await session.execute(
+                    select(
+                        ModerationShadowDecision.id,
+                        ModerationShadowDecision.message_id,
+                        ModerationShadowDecision.message_at,
+                    )
+                    .where(
+                        ModerationShadowDecision.guild_id == row.guild_id,
+                        ModerationShadowDecision.author_id == row.author_id,
+                        ModerationShadowDecision.message_id.in_(linked),
+                    )
+                    .order_by(ModerationShadowDecision.message_at)
                 )
-            )
-        ).scalar()
-        start = at - timedelta(seconds=5)
+            ).all()
+        ]
+        at = _utc(row.message_at)
         end = at + timedelta(seconds=LEGACY_WINDOW_SECONDS)
-        if later is not None:
-            end = min(end, _utc(later))
         operations = (
             await session.execute(
                 select(ModerationOperation).where(
                     ModerationOperation.incident_id.in_(incident_ids),
-                    ModerationOperation.created_at >= start,
+                    ModerationOperation.created_at >= at - timedelta(seconds=5),
                     ModerationOperation.created_at < end,
                 )
             )
         ).scalars()
-        return [op for op in operations if _is_legacy_actor(op.actor)]
+        return [
+            op
+            for op in operations
+            if _is_legacy_actor(op.actor) and answered_revision(op, revisions) == row.id
+        ]
 
 
 # ---------------------------------------------------------------------------
