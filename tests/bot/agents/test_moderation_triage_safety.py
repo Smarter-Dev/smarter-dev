@@ -396,7 +396,6 @@ async def test_an_unreadable_config_before_an_action_refuses_it(discord, stored)
 PROTECTED = [
     pytest.param(STAFF_BY_ROLE, id="staff role"),
     pytest.param(STAFF_BY_PERMISSION, id="manage messages via a role"),
-    pytest.param(STAFF_IN_ONE_CHANNEL, id="moderate members in one channel"),
     pytest.param(OWNER_ID, id="owner"),
     pytest.param(OTHER_BOT, id="another bot"),
     pytest.param(BOT_ID, id="the bot itself"),
@@ -586,7 +585,7 @@ async def test_a_failed_call_keeps_its_slot_and_is_reported_as_possibly_applied(
 async def test_refusals_take_no_slot(discord, stored):
     tools, _ = _tools(discord)
 
-    for target in (STAFF_BY_ROLE, OWNER_ID, OTHER_BOT, STAFF_IN_ONE_CHANNEL):
+    for target in (STAFF_BY_ROLE, OWNER_ID, OTHER_BOT):
         await tools["timeout_user"](str(target), "10m", "spam")
     results = [
         await tools["timeout_user"](str(user), "10m", "spam")

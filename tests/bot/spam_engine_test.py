@@ -970,16 +970,17 @@ async def test_staff_are_never_muted_or_deleted(engine_harness, role_name):
     assert _nothing_done(engine_harness)
 
 
-async def test_a_channel_moderator_is_protected_everywhere(engine_harness):
-    # Manage Messages granted only in one channel's overwrites.
+async def test_a_channel_overwrite_does_not_protect(engine_harness):
+    # #303: Manage Messages granted only in one channel's overwrites makes
+    # nobody staff.
     engine_harness.bot.discord.channels[0].permission_overwrites = {
         AUTHOR_ID: overwrite(allow=hikari.Permissions.MANAGE_MESSAGES)
     }
 
     decision = await _scam_flood(engine_harness)
 
-    assert decision.action == spam_engine.SPAM_ACTION_NONE
-    assert _nothing_done(engine_harness)
+    assert decision.action == spam_engine.SPAM_ACTION_MUTE
+    assert engine_harness.rest.deleted_messages == [(str(CHANNEL_ID), str(MESSAGE_ID))]
 
 
 async def test_the_guild_owner_is_protected(engine_harness):

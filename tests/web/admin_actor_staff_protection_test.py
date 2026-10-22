@@ -162,7 +162,6 @@ def _actor(
 PROTECTED = [
     pytest.param(STAFF_ROLE_HOLDER, id="hardcoded staff role"),
     pytest.param(BANNER, id="ban members via a role"),
-    pytest.param(CHANNEL_MOD, id="manage messages in one channel"),
     pytest.param(OWNER, id="owner"),
     pytest.param(OTHER_BOT, id="another bot"),
     pytest.param(BOT, id="the bot itself"),
@@ -205,22 +204,17 @@ async def test_a_role_the_guild_does_not_list_refuses(api):
     assert api.mutations == []
 
 
-@pytest.mark.parametrize("member_denied", [False, True])
-async def test_channel_overwrites_apply_in_discords_order(api, member_denied):
-    # A role grant in one channel protects; a member-level deny there cancels it.
-    overwrites = [{"id": "51", "type": 0, "allow": str(MANAGE_MESSAGES), "deny": "0"}]
-    if member_denied:
-        overwrites.append(
-            {"id": MEMBER, "type": 1, "allow": "0", "deny": str(MANAGE_MESSAGES)}
-        )
-    api.channels[0]["permission_overwrites"] = overwrites
+@pytest.mark.parametrize("target_id", [GUILD, "51", MEMBER])
+async def test_a_channel_overwrite_protects_nobody(api, target_id):
+    # #303: staff standing comes from roles at guild level only; an @everyone,
+    # role or member overwrite granting a staff permission in one channel
+    # does not make the member staff.
+    api.channels[0]["permission_overwrites"] = [
+        {"id": target_id, "type": 0, "allow": str(MANAGE_MESSAGES), "deny": "0"}
+    ]
 
-    out = await _actor(api).kick_user(MEMBER)
-
-    if member_denied:
-        assert out == f"kicked {MEMBER}"
-    else:
-        assert out.startswith("not kicked")
+    assert await _actor(api).kick_user(MEMBER) == f"kicked {MEMBER}"
+    assert await _actor(api).kick_user(CHANNEL_MOD) == f"kicked {CHANNEL_MOD}"
 
 
 async def test_administrator_on_everyone_protects_everybody(api):
@@ -299,7 +293,7 @@ async def test_stripping_an_ordinary_role_leaves_the_member_actionable(api):
 # -- message deletes -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("author", [STAFF_ROLE_HOLDER, CHANNEL_MOD, OWNER])
+@pytest.mark.parametrize("author", [STAFF_ROLE_HOLDER, BANNER, OWNER])
 async def test_a_staff_members_message_is_not_deleted(api, author):
     api.message("M1", author)
 

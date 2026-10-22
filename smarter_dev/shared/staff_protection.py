@@ -8,8 +8,12 @@ bans, kicks, warns or deletes a message of a member. Protected are:
 * the guild owner;
 * holders of a staff role (:data:`STAFF_ROLE_IDS`, plus any the caller's
   config adds);
-* anyone holding one of :data:`STAFF_PERMISSIONS` through their roles at guild
-  level, or through a permission overwrite in any channel of the guild.
+* anyone one of whose roles (@everyone included) carries one of
+  :data:`STAFF_PERMISSIONS` at guild level.
+
+Channel permission overwrites make nobody staff: one channel's @everyone
+overwrite once made every member staff (#303). A moderator who holds power only
+through overwrites needs a staff role.
 
 What cannot be established counts as protected: an unresolvable role, a
 missing guild or channel list, a lookup that failed. A user Discord reports as
@@ -28,8 +32,16 @@ from collections.abc import Iterable
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-#: The guild's two staff roles. Protected whatever permissions they carry.
-STAFF_ROLE_IDS = frozenset({"644390354157568014", "644301991832453120"})
+#: The guild's staff roles. Protected whatever permissions they carry.
+STAFF_ROLE_IDS = frozenset(
+    {
+        "644301991832453120",  # Admin
+        "644390354157568014",  # mods
+        # staff: its power is only a mod-chat overwrite, which no longer
+        # counts (#303).
+        "720655282115706892",
+    }
+)
 
 # Discord permission bits (https://discord.com/developers/docs/topics/permissions).
 KICK_MEMBERS = 1 << 1
@@ -51,7 +63,7 @@ MANAGE_GUILD_EXPRESSIONS = 1 << 30
 MANAGE_EVENTS = 1 << 33
 MANAGE_THREADS = 1 << 34
 
-#: Holding any of these, at guild level or in any channel, makes a member staff.
+#: A role carrying any of these at guild level makes its holders staff.
 STAFF_PERMISSIONS = (
     ADMINISTRATOR
     | MANAGE_GUILD
@@ -86,7 +98,6 @@ A_BOT = "a bot"
 GUILD_OWNER = "the server owner"
 STAFF_ROLE = "holds a staff role"
 GUILD_STAFF_PERMISSION = "holds a staff permission"
-CHANNEL_STAFF_PERMISSION = "holds a staff permission in a channel"
 UNKNOWN_PREFIX = "could not be checked"
 
 
@@ -127,30 +138,6 @@ class MemberFacts:
     role_ids: tuple[str, ...]
 
 
-def apply_channel_overwrites(
-    base: int,
-    overwrites: Mapping[str, Overwrite],
-    *,
-    everyone_id: str,
-    role_ids: Iterable[str],
-    member_id: str,
-) -> int:
-    """Discord's overwrite order: @everyone, then the member's roles, then them."""
-    permissions = base
-    if everyone := overwrites.get(everyone_id):
-        permissions = (permissions & ~everyone.deny) | everyone.allow
-    allow = 0
-    deny = 0
-    for role_id in role_ids:
-        if role := overwrites.get(str(role_id)):
-            allow |= role.allow
-            deny |= role.deny
-    permissions = (permissions & ~deny) | allow
-    if member := overwrites.get(member_id):
-        permissions = (permissions & ~member.deny) | member.allow
-    return permissions
-
-
 def member_refusal(
     member: MemberFacts,
     guild: GuildFacts,
@@ -184,16 +171,6 @@ def member_refusal(
         permissions |= int(role_permissions)
     if permissions & STAFF_PERMISSIONS:
         return GUILD_STAFF_PERMISSION
-    for overwrites in guild.channel_overwrites:
-        in_channel = apply_channel_overwrites(
-            permissions,
-            overwrites,
-            everyone_id=guild.guild_id,
-            role_ids=role_ids,
-            member_id=member.user_id,
-        )
-        if in_channel & STAFF_PERMISSIONS:
-            return CHANNEL_STAFF_PERMISSION
     return None
 
 
@@ -229,7 +206,9 @@ def role_refusal(
     A role that makes its holder staff under :func:`member_refusal` is never
     changed by automation: granting one would put a member out of moderation's
     reach, and removing one would let a later run punish a moderator (strip the
-    role in one fire, ban in the next). Nor is a role carrying one of
+    role in one fire, ban in the next). Nor is a role whose overwrite grants a
+    staff permission in some channel: it makes nobody staff, but it is a
+    moderator's power there. Nor is a role carrying one of
     :data:`ELEVATED_PERMISSIONS`. The @everyone role, an unknown role and a
     role the guild facts cannot resolve are refused too.
     """
