@@ -10,8 +10,11 @@ and decides what (if anything) to emit. Two shapes:
 - ``has_tools=False`` — a pure text transform: prompt in, plaintext out, no tools.
 
 Model: Claude Haiku 5.5 by default (GPT-6 Luna until 2026-10-17, #199),
-overridable with ``HANDLER_AGENT_MODEL``. A budget cap raised inside a tool propagates
-out of ``agent.run`` and stops the fire loud.
+overridable with ``HANDLER_AGENT_MODEL``. When the fire's web-search or web-read
+pool runs out, the tool answers the model with a short note instead, so the agent
+still decides from what it has (#306); the attempt is still counted. Any other cap
+raised inside a tool (the wall clock) propagates out of ``agent.run`` and stops the
+fire loud.
 
 Each call's usage goes on the ledger as the guild's Discord spend (``handler_agent``,
 and ``handler_media_reader`` for the images and audio its ``web_read`` described),
@@ -38,6 +41,7 @@ from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.web.handler_budget import CapExceeded
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.media_read import media_meter
 from smarter_dev.web.media_read import read_url
@@ -64,6 +68,9 @@ _TRANSFORM_PROMPT = (
     "work solely from the text in the prompt. Your reply is handed back to the "
     "script that called you."
 )
+# What a tool tells the model once the fire's pool for it is spent.
+SEARCH_LIMIT_NOTE = "Search limit reached; decide from what you have."
+READ_LIMIT_NOTE = "Read limit reached; decide from what you have."
 
 
 class _GatherDeps:
@@ -97,9 +104,18 @@ def _catalog_model() -> CatalogModel:
         ) from None
 
 
-async def _web_search(ctx: RunContext[_GatherDeps], query: str) -> list[dict[str, str]]:
+async def _web_search(
+    ctx: RunContext[_GatherDeps], query: str
+) -> list[dict[str, str]] | str:
     """Search the web and return up to 5 result snippets."""
-    ctx.deps.budget.spend_web_search()
+    budget = ctx.deps.budget
+    try:
+        budget.spend_web_search()
+    except CapExceeded as exc:
+        if exc.cap != "web_searches":
+            raise
+        budget.web_searches += 1
+        return SEARCH_LIMIT_NOTE
     async with httpx.AsyncClient(timeout=15.0) as client:
         return await brave_search(client, query, num_results=5)
 
@@ -112,7 +128,14 @@ async def _web_read(ctx: RunContext[_GatherDeps], url: str, instruction: str) ->
     by file content hash + instruction, so the same screenshot posted across many
     messages is only read once.
     """
-    ctx.deps.budget.spend_web_read()
+    budget = ctx.deps.budget
+    try:
+        budget.spend_web_read()
+    except CapExceeded as exc:
+        if exc.cap != "web_reads":
+            raise
+        budget.web_reads += 1
+        return READ_LIMIT_NOTE
     try:
         redis = get_redis_client()
     except Exception:  # noqa: BLE001 — caching is best-effort

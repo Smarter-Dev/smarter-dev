@@ -238,8 +238,9 @@ direct web access from the script — gather only by calling spawn_agent.
 
 ## Hard limits — a script may not exceed, per single firing:
 - 3 messages sent (send_message / add_reaction / post_voice / create_thread / create_post all count)
-- 3 web searches and 3 web reads — these are SHARED with any agents you spawn (an agent that
-  reads 2 pages leaves you 1)
+- 3 web searches and 5 web reads — these are SHARED with any agents you spawn (an agent that
+  reads 2 pages leaves you 3). Once they are spent, an agent's further searches or reads return a
+  "limit reached" note and it answers from what it already has
 - 2 agent calls (spawn_agent)
 - 32 KB of context passed into any single spawn_agent prompt
 - 8192 bytes total script length, including all prompt strings — a hard lint rejects anything

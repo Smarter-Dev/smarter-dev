@@ -5,6 +5,9 @@ builds → the real gathering agent and its real ``_web_read`` tool → the real
 ``media_read`` describe, each agent on a FunctionModel reporting known
 per-request usage, into SQLite ``usage_cost_rows``. A cap raised in a tool
 after the model answered still leaves the billed request on the ledger.
+
+The same path also covers the read cap (#306): reads past it answer the model
+with a note and the fire still ends ``ok``, while action caps stay fatal.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import TextPart
 from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.usage import RequestUsage
@@ -32,8 +36,11 @@ from smarter_dev.web.handler_agent import gathering_agent_for
 from smarter_dev.web.handler_budget import CapExceeded
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.handler_runtime import HandlerExecution
+from smarter_dev.web.handler_runtime import run_handler_script
 from smarter_dev.web.llm_pricing import calc_cost_by_request
 from smarter_dev.web.models import UsageCostRow
+from tests.web.handler_runtime_test import _FakeActor
+from tests.web.handler_runtime_test import _FakeEmitter
 
 HAIKU = "claude-haiku-5-5"
 NIA = "222222222222222222"
@@ -46,9 +53,16 @@ class _Model:
     def __init__(self, *answers):
         self.answers = list(answers)
         self.billed: list[RequestTokens] = []
+        # What each tool call returned to the model, in order.
+        self.tool_returns: list = []
         self.model = FunctionModel(self._respond, model_name=HAIKU)
 
     def _respond(self, messages, info: AgentInfo) -> ModelResponse:
+        self.tool_returns.extend(
+            part.content
+            for part in messages[-1].parts
+            if isinstance(part, ToolReturnPart)
+        )
         part, usage = self.answers.pop(0)
         if part == "read":
             [tool] = [t for t in info.function_tools if t.name.endswith("web_read")]
@@ -194,9 +208,16 @@ async def test_a_cap_raised_in_a_tool_still_records_the_billed_request(
 ):
     gathering = _Model(("read", _usage(3_000, 15)), ("never sent", _usage(1, 1)))
     models(gathering)
+    budget = HandlerBudget()
+
+    def out_of_time():
+        raise CapExceeded("wall_clock", "handler exceeded its wall-clock budget")
+
+    # The wall clock running out mid-read is still fatal inside the tool.
+    budget.spend_web_read = out_of_time
 
     with pytest.raises(CapExceeded):
-        await _execution(session_factory, HandlerBudget(max_web_reads=0))._spawn_agent(
+        await _execution(session_factory, budget)._spawn_agent(
             f"read {IMAGE_URL}", True
         )
 
@@ -224,3 +245,92 @@ async def test_a_fires_second_agent_call_is_its_own_row(
     keys = sorted((await db_session.scalars(select(UsageCostRow.operation_key))).all())
     assert [key.split(":")[2] for key in keys] == ["1", "2"]
     assert all(key.startswith("handler_agent:job-7:") for key in keys)
+
+
+# -- the read cap answers the model instead of stopping the fire (#306) --------
+
+_SCAM_SCRIPT = (
+    'verdict = await spawn_agent("read every image and judge", has_tools=True)\n'
+    "await send_message(verdict)\n"
+)
+
+
+def _reads_then(verdict: str, reads: int) -> _Model:
+    return _Model(*[("read", _usage(100, 5))] * reads, (verdict, _usage(200, 10)))
+
+
+async def _fire(session_factory, script: str, budget: HandlerBudget, **kwargs):
+    emitter = _FakeEmitter()
+    result = await run_handler_script(
+        script,
+        {"trigger_type": "message", "author_id": NIA},
+        channel_id="C1",
+        guild_id="G1",
+        emitter=emitter,
+        limiter=_Limiter(),
+        agent_runner=gathering_agent_for({"author_id": NIA}, session_factory),
+        budget=budget,
+        **kwargs,
+    )
+    return result, emitter
+
+
+async def test_reads_past_the_cap_get_a_note_and_the_agent_still_answers(
+    session_factory, models
+):
+    # Six screenshots against the five-read cap: the sixth read is refused.
+    gathering = _reads_then("SCAM: crypto giveaway", reads=6)
+    media = _Model(*[("A giveaway screenshot.", _usage(50, 5))] * 5)
+    models(gathering, media)
+
+    result, emitter = await _fire(session_factory, _SCAM_SCRIPT, HandlerBudget())
+
+    assert result.outcome == "ok", result.error
+    assert result.cap is None
+    assert emitter.messages == [("C1", "SCAM: crypto giveaway")]
+    # Every attempt is counted, the refused one included.
+    assert result.usage["web_reads"] == 6
+    assert gathering.tool_returns == ["A giveaway screenshot."] * 5 + [
+        handler_agent.READ_LIMIT_NOTE
+    ]
+    assert media.answers == []  # the refused read never reached the reader
+
+
+async def test_the_default_cap_reads_five_images():
+    assert HandlerBudget().max_web_reads == 5
+
+
+async def test_a_mod_action_cap_breach_is_still_fatal(session_factory, models):
+    # The agent overran its reads and answered; the script's kicks then breach
+    # the mod-action cap, which still stops the fire.
+    gathering = _reads_then("SCAM", reads=2)
+    models(gathering, _Model(("A screenshot.", _usage(50, 5))))
+    actor = _FakeActor()
+    script = (
+        'verdict = await spawn_agent("judge", has_tools=True)\n'
+        "for user in ['U1', 'U2', 'U3']:\n"
+        "    await kick_user(user)\n"
+    )
+
+    result, _ = await _fire(
+        session_factory,
+        script,
+        HandlerBudget(max_web_reads=1, max_mod_actions=2, max_messages=5),
+        actor=actor,
+    )
+
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "mod_actions"
+    assert len(actor.calls) == 2
+    assert result.usage["web_reads"] == 2
+    assert gathering.tool_returns[-1] == handler_agent.READ_LIMIT_NOTE
+
+
+async def test_a_search_past_the_cap_gets_a_note_and_is_counted():
+    budget = HandlerBudget(max_web_searches=0)
+    ctx = type("Ctx", (), {"deps": handler_agent._GatherDeps(budget=budget)})()
+
+    out = await handler_agent._web_search(ctx, "is this a scam")
+
+    assert out == handler_agent.SEARCH_LIMIT_NOTE
+    assert budget.web_searches == 1

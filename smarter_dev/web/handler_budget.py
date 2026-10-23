@@ -16,13 +16,15 @@ sent the first two. That is expected: cap breach fails loud, mid-flight.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 
 # Generous preset (see the build plan). These are the per-fire ceilings, shared
-# across the script and every agent it spawns.
+# across the script and every agent it spawns. Reads are 5 so a scam posted with
+# four or five screenshots gets every image described (#306).
 DEFAULT_MAX_MESSAGES = 3
 DEFAULT_MAX_WEB_SEARCHES = 3
-DEFAULT_MAX_WEB_READS = 3
+DEFAULT_MAX_WEB_READS = 5
 DEFAULT_MAX_AGENT_CALLS = 2
 DEFAULT_MAX_AGENT_CONTEXT_BYTES = 32 * 1024
 DEFAULT_WALL_CLOCK_SECONDS = 60.0
@@ -274,7 +276,7 @@ class HandlerBudget:
         }
 
 
-def admin_budget(trigger_type: str) -> "HandlerBudget":
+def admin_budget(trigger_type: str) -> HandlerBudget:
     """A trusted, looser per-fire budget for admin handlers (incl. mod actions).
 
     The loop rail (§3.5, HARD) lives here: a handler triggered BY a moderation
