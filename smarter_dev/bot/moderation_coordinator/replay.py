@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
 
+from pydantic_ai.messages import BinaryContent
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import TextPart
 from pydantic_ai.messages import ToolCallPart
@@ -30,6 +31,7 @@ from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
 
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierBudget
+from smarter_dev.bot.moderation_coordinator.classifier import ImageFetcher
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
@@ -64,6 +66,8 @@ class ModelCalls:
     """What the scripted models were asked: one entry per request."""
 
     haiku: list[str] = field(default_factory=list)
+    #: The images each Haiku request carried, in order.
+    haiku_images: list[list[BinaryContent]] = field(default_factory=list)
     jev: list[dict] = field(default_factory=list)
 
     @property
@@ -77,8 +81,11 @@ def scripted_haiku(
     """Haiku answering every label it knows, as the agreed JSON object."""
 
     def respond(messages, info: AgentInfo) -> ModelResponse:
-        prompt = messages[-1].parts[-1].content
+        content = messages[-1].parts[-1].content
+        parts = [content] if isinstance(content, str) else list(content)
+        prompt = parts[0]
         calls.haiku.append(prompt)
+        calls.haiku_images.append([p for p in parts if isinstance(p, BinaryContent)])
         material = prompt.split("<untrusted>", 1)[-1]
         message = re.split(r"\n(?:AD \(|CONTEXT)", material, maxsplit=1)[0]
         # The message's own labels follow its text; the ring's follow the ad.
@@ -142,6 +149,15 @@ def scripted_jev(
     return FunctionModel(respond, model_name="jev-1.13.0")
 
 
+#: A replayed attachment's bytes: the smallest file that is a PNG by its magic.
+REPLAY_PNG = b"\x89PNG\r\n\x1a\n" + bytes(16)
+
+
+async def replay_image(url: str, limit: int) -> bytes:
+    """Every replayed image loads, as a small PNG: no request leaves the test."""
+    return REPLAY_PNG
+
+
 @dataclass
 class ReplayReads:
     """The reads, answered from the case."""
@@ -196,6 +212,7 @@ class ReplayCase:
     haiku: Callable[..., object] = scripted_haiku
     jev: Callable[..., object] = scripted_jev
     deadline: float = 10.0
+    fetch_image: ImageFetcher = replay_image
 
 
 @dataclass
@@ -218,6 +235,7 @@ async def replay(case: ReplayCase) -> ReplayResult:
         jev_model=case.jev(case.answers, calls, case.answers_by_text),
         deadline=case.deadline,
         clock=lambda: now[0],
+        fetch_image=case.fetch_image,
     )
     coordinator = Coordinator(case.reads, classifier)
     evaluations = []

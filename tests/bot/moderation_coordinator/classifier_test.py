@@ -260,11 +260,11 @@ def test_prompt_fences_untrusted_content_and_bounds_it():
     assert '"participants"' not in prompt
 
 
-def test_the_worst_haiku_request_is_bounded_and_a_day_costs_under_a_dollar():
+def test_the_worst_haiku_request_is_bounded_and_a_day_costs_under_a_dollar_fifty():
     """#255: every field at its limit, in four-byte characters (a token is at
-    least one byte), with 100 candidates and 100 context lines. Haiku 5.5 is
-    $0.10 in and $0.50 out per million tokens; output is capped at
-    HAIKU_MAX_TOKENS, thinking included."""
+    least one byte), with 100 candidates and 100 context lines, and the most
+    images at the most tokens each. Haiku 5.5 is $0.10 in and $0.50 out per
+    million tokens; output is capped at HAIKU_MAX_TOKENS, thinking included."""
     from smarter_dev.bot.moderation_coordinator.model import Attachment
 
     big = "\U0001d41b" * 5000
@@ -288,8 +288,9 @@ def test_the_worst_haiku_request_is_bounded_and_a_day_costs_under_a_dollar():
         haiku_prompt(request).encode()
     )
     assert input_bytes <= 18_000
-    worst = (18_000 * 0.10 + clf.HAIKU_MAX_TOKENS * 0.50) / 1_000_000
-    assert worst * clf.DEFAULT_DAILY_REQUESTS <= 1.0
+    input_tokens = 18_000 + clf.MAX_IMAGES * clf.MAX_IMAGE_TOKENS
+    worst = (input_tokens * 0.10 + clf.HAIKU_MAX_TOKENS * 0.50) / 1_000_000
+    assert worst * clf.DEFAULT_DAILY_REQUESTS <= 1.5
 
 
 def test_the_real_models_are_built_with_retries_off(monkeypatch):

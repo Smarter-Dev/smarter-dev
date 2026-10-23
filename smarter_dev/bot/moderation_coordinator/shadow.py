@@ -124,6 +124,8 @@ def _attachments(message: Any) -> tuple[Attachment, ...]:
             content_type=getattr(item, "media_type", None),
             size=getattr(item, "size", None),
             url=getattr(item, "url", None),
+            width=getattr(item, "width", None),
+            height=getattr(item, "height", None),
         )
         for item in (getattr(message, "attachments", None) or ())
     )

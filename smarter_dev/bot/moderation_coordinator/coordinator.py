@@ -354,7 +354,9 @@ class Coordinator:
             author_id=facts.author_id,
             labels=frozenset(labels),
             content=facts.content,
-            attachments=facts.attachments if SCAM in labels else (),
+            # Images go with any question: a message with one is judged by
+            # Haiku, which sees them (Jev cannot).
+            attachments=facts.attachments,
             ring_context=_ring_context(ring_pending),
             ring_ad=_ring_ad(ring_pending),
             ring_candidates=_ring_candidates(ring_pending),
