@@ -69,7 +69,11 @@ FIRST = AuthorHistory(is_first_message=True, days_since_last_message=None)
 
 def acting(case_policy, generation: int = 1):
     return replace(
-        case_policy, owner=COORDINATOR, generation=generation, report_channel_id=REPORTS
+        case_policy,
+        owner=COORDINATOR,
+        generation=generation,
+        report_channel_id=REPORTS,
+        mass_mention=True,
     )
 
 
@@ -190,10 +194,24 @@ def _slow(model, seconds: float = 0.05):
     return model
 
 
+def held_burst(answers=None):
+    """A cross-channel burst with the spam engine off: the second post is
+    held by the scam gate alone (no spam mute covers the hold first)."""
+    case, victim, posts = scam_burst()
+    case = replace(case, policy=acting(replace(case.policy, spam=None)))
+    if answers is not None:
+        case = replace(case, answers=answers)
+    return case, victim, posts
+
+
 # -- the 17:49 scam, acted on ------------------------------------------------
 
 
-async def test_the_1749_scam_holds_first_then_bans_and_removes_the_post():
+async def test_the_1749_scam_is_muted_and_removed_first_then_banned():
+    """The spam engine's mute and removal (mass mention, nitro, scam link)
+    are carried out before the classifier is asked (#310 item 4). The
+    5-minute hold then finds the member already muted: covered, so no
+    "investigating" notice is posted for a message that is already gone."""
     case, scammer = scam_1749(account_age_days=2)
     case = replace(case, policy=acting(case.policy))
     h = harness(case)
@@ -202,14 +220,11 @@ async def test_the_1749_scam_holds_first_then_bans_and_removes_the_post():
     await h.judge(post)
 
     kinds = [call[0] for call in h.port.calls]
-    # Contained before the verdict: the 5-minute hold, then the ban.
-    assert kinds.index("timeout") < kinds.index("ban")
+    assert kinds == ["timeout", "delete", "ban"]
     assert ("ban", scammer.id) == h.port.calls[kinds.index("ban")][:2]
     assert post.message_id in h.deleted()
-    assert h.messenger.posts[0] == (post.channel_id, INVESTIGATING)
-    assert h.messenger.posts[-1] == (post.channel_id, CLOSED_REMOVED)
+    assert h.messenger.posts == []
     notes = await entries(gw.ENTRY_NOTE)
-    assert any("upgraded to a ban" in note for note in notes)
     assert any(
         note.startswith("History: no earlier moderation actions") for note in notes
     )
@@ -256,21 +271,20 @@ async def test_no_verdict_leaves_the_hold_and_alerts_with_the_cause():
 
 
 async def test_a_failed_evaluation_after_the_hold_is_reported(monkeypatch):
-    case, scammer = scam_1749(account_age_days=30)
-    case = replace(case, policy=acting(case.policy))
+    case, victim, posts = held_burst()
     h = harness(case)
 
     async def broken(request):
         raise RuntimeError("model down")
 
     monkeypatch.setattr(h.shadow.coordinator.classifier, "classify", broken)
-    await h.judge(case.messages[0])
+    await h.judge(posts[0], posts[1])
 
     assert [call[0] for call in h.port.calls] == ["timeout"]  # the hold only
     alerts = await entries(gw.ENTRY_ALERT)
     assert any("failed after the hold" in a and "RuntimeError" in a for a in alerts)
-    assert h.messenger.posts[-1] == (case.messages[0].channel_id, CLOSED_UNKNOWN)
-    assert h.recorder.rows[0].error == "RuntimeError"
+    assert h.messenger.posts[-1] == (posts[1].channel_id, CLOSED_UNKNOWN)
+    assert {row.error for row in h.recorder.rows} == {"RuntimeError"}
 
 
 # -- every copy, and only the author's ----------------------------------------
@@ -298,7 +312,10 @@ async def test_every_copy_of_a_confirmed_scam_goes_and_only_the_authors():
     await h.judge(posts[0], theirs)
     # The second copy is being judged when the third arrives.
     second = asyncio.create_task(h.judge(posts[1]))
-    await asyncio.sleep(0.01)
+    # Until the second copy's check is out (its early spam warning goes
+    # through the gateway first).
+    while not h.shadow.coordinator.verdict_cache._entries:
+        await asyncio.sleep(0.005)
     await h.judge(posts[2])
     await second
 
@@ -392,9 +409,12 @@ async def test_a_replayed_revision_is_not_acted_on_twice(monkeypatch):
 
     monkeypatch.setattr(h.executor, "execute", spy)
     await h.judge(case.messages[0])
+    first_pass = list(executed)
     await h.judge(case.messages[0])
 
-    assert executed == [case.messages[0].message_id]
+    # The deterministic part and then the rest; nothing on the replay.
+    assert first_pass == [case.messages[0].message_id] * 2
+    assert executed == first_pass
 
 
 async def test_accepted_decisions_are_tracked_for_the_handover_drain():
@@ -423,7 +443,8 @@ async def test_an_edited_in_mass_mention_is_removed_with_its_notice():
 
     assert h.deleted() == {edit.message_id}
     assert (edit.channel_id, EDIT_PING_TEXT.format(user=member.id)) in h.messenger.posts
-    assert h.port.posts == []  # not reported, as the handler never was
+    # The handler never reported; the mass-mention rule (#310 item 10) does.
+    assert [p["channel_id"] for p in h.port.posts] == [REPORTS]
 
 
 async def test_a_ring_and_its_followup_are_one_incident_with_a_transcript():
@@ -609,3 +630,352 @@ async def test_no_dm_when_the_gateway_did_not_apply_the_timeout():
     h.port.protected[scammer.id] = "holds a staff role"
     await h.judge(case.messages[0])
     assert h.messenger.dms == []
+
+
+# -- a hold always closes (#310 item 1) ----------------------------------------
+
+
+async def test_a_raise_while_carrying_out_the_decision_still_closes_the_hold(
+    monkeypatch,
+):
+    """No verdict: the decision has a hold to close and nothing to propose,
+    so it opens the incident with ensure_incident. That raising used to leave
+    the hold notice open, with no line for moderators."""
+    case, victim, posts = scam_burst()
+    case = replace(case, policy=acting(case.policy), answers={})
+    h = harness(case)
+    gateway = h.executor._gateway_for(case.policy)
+
+    original = h.executor.contain
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("database gone")
+
+    async def contain_then_break(*args, **kwargs):
+        await original(*args, **kwargs)
+        monkeypatch.setattr(gateway, "ensure_incident", broken)
+
+    h.executor.contain = contain_then_break
+    await h.judge(*posts)
+
+    assert (posts[1].channel_id, INVESTIGATING) in h.messenger.posts
+    assert h.messenger.posts[-1] == (posts[1].channel_id, CLOSED_UNKNOWN)
+    alerts = await entries(gw.ENTRY_ALERT)
+    assert any("stopped before its decision was carried out" in a for a in alerts)
+    assert h.executor._holds == {}
+
+
+async def test_a_rollback_after_the_hold_still_closes_it():
+    """The generation moves between the hold and the decision: nothing more
+    is done to the member, but the notice is closed and moderators told."""
+    case, victim, posts = held_burst()
+    h = harness(case)
+    post = posts[1]
+    original = h.executor.contain
+
+    async def contain_then_roll_back(*args, **kwargs):
+        await original(*args, **kwargs)
+        h.owner["generation"] = 2
+
+    h.executor.contain = contain_then_roll_back
+    await h.judge(posts[0], post)
+
+    assert [call[0] for call in h.port.calls] == ["timeout"]  # the hold only
+    assert h.messenger.posts == [
+        (post.channel_id, INVESTIGATING),
+        (post.channel_id, CLOSED_UNKNOWN),
+    ]
+    alerts = await entries(gw.ENTRY_ALERT)
+    assert any("stopped before its decision was carried out" in a for a in alerts)
+    assert h.executor._holds == {}
+
+
+async def test_a_second_pod_that_lost_the_record_closes_its_own_notice():
+    """#310 item 8: two pods judge the same message in a handover. The one
+    whose hold posted the notice may lose the record race; it still closes
+    its notice (with its own verdict's line) and carries out nothing."""
+    case, victim, posts = held_burst()
+    h = harness(case)
+    await h.judge(posts[0])
+    post = posts[1]
+    executed = []
+    original_record = h.recorder.record
+
+    async def lose_the_race(row):
+        await original_record(row)  # the other pod's row lands first
+        return False
+
+    async def spy(evaluation):
+        executed.append(evaluation)
+
+    h.recorder.record = lose_the_race
+    h.executor.execute = spy
+    await h.judge(post)
+
+    assert executed == []
+    assert h.messenger.posts == [
+        (post.channel_id, INVESTIGATING),
+        (post.channel_id, CLOSED_REMOVED),
+    ]
+    assert h.executor._holds == {}
+
+
+# -- nothing dropped while the coordinator owns the guild (#310 item 4) --------
+
+
+async def _flood(h, spammer, count=12):
+    start = NOW + timedelta(seconds=30)
+    for i in range(count):
+        facts = say(spammer, f"buy now {i}", start + timedelta(seconds=i * 0.3))
+        h.port.post(facts.channel_id, facts.message_id, facts.author_id, facts.content)
+        h.clock[0] = facts.posted_at
+        h.case.reads.now = facts.posted_at
+        h.shadow.submit(facts)
+
+
+async def test_a_spam_flood_behind_a_full_queue_still_gets_the_spam_mute(
+    monkeypatch,
+):
+    """#310 item 4: past the queue, a guild the coordinator owns used to drop
+    messages, so during a raid nobody acted. They are judged on the
+    deterministic rules instead, and the spam mute lands while the queued
+    message is still waiting on the classifier."""
+    from smarter_dev.bot.moderation_coordinator import shadow as shadow_module
+
+    monkeypatch.setattr(shadow_module, "MAX_PENDING", 1)
+    blocker = Member("newbie", 80, NOW - timedelta(days=1), NOW - timedelta(hours=1))
+    spammer = Member("raider", 81, NOW - timedelta(days=400), NOW - timedelta(days=300))
+    slow_post = say(blocker, "free nitro https://nitro-claim.example/x", NOW)
+    case = ReplayCase(
+        name="raid",
+        policy=acting(policy(ring=None)),
+        messages=[slow_post],
+        answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
+        haiku=lambda answers, calls, by_text: _slow(
+            scripted_haiku(answers, calls, by_text), 0.5
+        ),
+        reads=ReplayReads(histories={blocker.id: FIRST}),
+    )
+    h = harness(case)
+    h.port.add_member(spammer.id)
+
+    h.shadow.submit(slow_post)
+    await _flood(h, spammer)
+    await asyncio.sleep(0.2)  # the slow check is still out
+    assert h.port.count("timeout", spammer.id) == 1
+    await h.shadow.drain()
+
+    assert h.shadow.dropped == 0
+    assert h.shadow.backlogged == 12
+
+
+async def test_a_full_queue_in_a_shadow_guild_still_drops(monkeypatch):
+    """The control: a guild still owned by legacy is only compared, so past
+    the queue its messages are dropped and counted, as before."""
+    from smarter_dev.bot.moderation_coordinator import shadow as shadow_module
+
+    monkeypatch.setattr(shadow_module, "MAX_PENDING", 1)
+    spammer = Member("raider", 82, NOW - timedelta(days=400), NOW - timedelta(days=300))
+    first = say(spammer, "hello", NOW)
+    case = ReplayCase(name="shadow raid", policy=policy(ring=None), messages=[first])
+    h = harness(case)
+    await h.shadow.policies.get(GUILD)  # seen before: legacy
+    h.shadow.submit(first)
+    await _flood(h, spammer, count=5)
+    await h.shadow.drain()
+
+    assert h.shadow.dropped == 5
+    assert h.port.calls == []
+
+
+# -- @everyone/@here from members (#310 item 10, Zech Oct 23 22:36) ------------
+
+
+async def _ping_case(*messages, staff=None, histories=None, answers=None, **over):
+    case = ReplayCase(
+        name="mass mention",
+        policy=acting(policy(ring=None, **over)),
+        messages=list(messages),
+        answers=answers or {SCAM: (False, 0.9), ABUSE: (False, 0.9)},
+        reads=ReplayReads(staff=staff or {}, histories=histories or {}),
+    )
+    h = harness(case)
+    await h.judge(*messages)
+    return h
+
+
+async def _actions() -> list[tuple[str, str]]:
+    async with default_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(ModerationAction.action_type, ModerationAction.reason)
+            )
+        ).all()
+    return [(row[0], row[1]) for row in rows]
+
+
+PINGER = Member("pinger", 90, NOW - timedelta(days=400), NOW - timedelta(days=300))
+
+
+async def test_a_members_everyone_is_deleted_and_logged_without_a_sanction():
+    post = say(PINGER, "@everyone check this", NOW)
+    h = await _ping_case(post)
+
+    assert [call[0] for call in h.port.calls] == ["delete"]
+    assert post.message_id in h.deleted()
+    assert [kind for kind, _ in await _actions()] == ["delete"]
+    reports = [p for p in h.port.posts if p["channel_id"] == REPORTS]
+    assert len(reports) == 1  # the mod-log line
+    assert h.calls.total == 0
+
+
+async def test_an_edit_that_adds_here_is_deleted():
+    edit = say(PINGER, "updated: @here look", NOW, is_edit=True)
+    h = await _ping_case(edit, edit_ping=False)  # the new rule on its own
+    assert edit.message_id in h.deleted()
+    assert all(kind == "delete" for kind, _ in await _actions())
+
+
+async def test_staff_may_ping_everyone():
+    mod = Member("mod", 91, NOW - timedelta(days=900), NOW - timedelta(days=800))
+    post = say(mod, "@everyone maintenance tonight", NOW)
+    h = await _ping_case(post, staff={mod.id: "holds a staff role"})
+    assert h.port.calls == []
+    assert h.port.posts == []
+
+
+async def test_everyone_in_code_is_left_alone():
+    posts = [
+        say(PINGER, "the bot replies to `@everyone` literally", NOW),
+        say(
+            PINGER,
+            "```\nif text == '@here':\n    return\n```",
+            NOW + timedelta(seconds=40),
+        ),
+    ]
+    h = await _ping_case(*posts)
+    assert h.deleted() == set()
+    assert await _actions() == []
+
+
+async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_report():
+    # No nitro bait, so the spam engine stays out: the removal, then the
+    # scam gate's hold and verdict.
+    post = say(PINGER, "@everyone claim your crypto https://prize-drop.example/x", NOW)
+    h = await _ping_case(post, answers={SCAM: (True, 0.95), ABUSE: (False, 0.9)})
+
+    assert post.message_id in h.deleted()
+    assert h.calls.total == 1  # reviewed
+    row = h.recorder.rows[0]
+    assert row.decision["targets"][PINGER.id]["sanction"]["kind"] == gw.TIMEOUT
+    timeouts = [call[2] for call in h.port.calls if call[0] == "timeout"]
+    assert h.port.calls[0][0] == "delete"  # removed before the hold
+    assert len(timeouts) == 2  # the 5-minute hold, then the 24 h timeout
+    assert timeouts[1] - timeouts[0] > 3600
+    async with default_session_factory()() as session:
+        incidents = (
+            await session.execute(select(ModerationIncidentLink.incident_id))
+        ).scalars()
+        assert len(set(incidents)) == 1
+    assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
+
+
+async def test_a_ping_removal_is_read_back_as_24_hours_of_risk_not_30_days():
+    """#310 item 10b: the removal persists in moderation_actions, so the
+    author's history (read from the database, as after a restart) carries
+    it for a day; it is not a sanction, so not "moderated in 30 days"."""
+    from datetime import UTC
+    from datetime import datetime
+
+    from smarter_dev.bot.moderation_coordinator import rules
+    from smarter_dev.bot.moderation_coordinator.shadow import BotReads
+
+    post = say(PINGER, "@everyone check this", NOW)
+    await _ping_case(post)
+    async with default_session_factory()() as session:
+        removed_at = (
+            await session.execute(select(ModerationAction.created_at))
+        ).scalar_one()
+    removed_at = removed_at if removed_at.tzinfo else removed_at.replace(tzinfo=UTC)
+
+    reads = BotReads(bot=None)
+    hour = await reads.author_history(GUILD, PINGER.id, removed_at + timedelta(hours=1))
+    later = await reads.author_history(
+        GUILD, PINGER.id, removed_at + timedelta(hours=25)
+    )
+    before = await reads.author_history(
+        GUILD, PINGER.id, removed_at - timedelta(minutes=1)
+    )
+
+    assert hour.pinged_everyone_at is not None and hour.actions == ()
+    assert later.pinged_everyone_at is None
+    assert before.pinged_everyone_at is None
+    facts = say(PINGER, "hi", datetime.fromtimestamp(0, UTC))
+    reasons = rules.scam_risky_author(facts, hour, removed_at + timedelta(hours=1))
+    assert rules.PINGED_EVERYONE in reasons
+    assert "moderated in the last 30 days" not in reasons
+
+
+async def test_an_exhausted_budget_is_reported_once_a_day():
+    """#310 item 5: when the acting ceiling runs out, one WARNING and one
+    line in the moderators' channel, not one per message."""
+    from smarter_dev.bot.moderation_coordinator.shadow import BUDGET_EXHAUSTED_TEXT
+
+    newbie = Member("newbie", 95, NOW - timedelta(days=1), NOW - timedelta(hours=1))
+    posts = [
+        say(
+            newbie,
+            f"free crypto https://claim{i}.example/x",
+            NOW + timedelta(seconds=i),
+        )
+        for i in range(3)
+    ]
+    case = ReplayCase(
+        name="budget",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=posts,
+        answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
+        reads=ReplayReads(histories={newbie.id: FIRST}),
+    )
+    h = harness(case)
+    budget = h.shadow.coordinator.classifier.budget
+    budget.acting_per_guild_day = 0
+    await h.judge(*posts)
+
+    lines = [text for channel, text in h.messenger.posts if channel == REPORTS]
+    assert lines == [BUDGET_EXHAUSTED_TEXT.format(cap=0)]
+    assert h.calls.total == 0
+
+
+async def test_the_spam_mute_lands_before_the_classifier_answers():
+    """#310 item 4: spam timeouts used to wait behind the classifier. A new
+    member flooding links is reviewed on each post (slow model), and the spam
+    engine's mute is carried out while that review is still out."""
+    flooder = Member("flooder", 83, NOW - timedelta(days=1), NOW - timedelta(hours=2))
+    posts = [
+        say(
+            flooder, f"look https://site{i}.example/x", NOW + timedelta(seconds=i * 0.3)
+        )
+        for i in range(12)
+    ]
+    case = ReplayCase(
+        name="flood with links",
+        policy=acting(policy(ring=None)),
+        messages=posts,
+        answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
+        haiku=lambda answers, calls, by_text: _slow(
+            scripted_haiku(answers, calls, by_text), 1.0
+        ),
+        reads=ReplayReads(histories={flooder.id: FIRST}),
+    )
+    h = harness(case)
+    budget = h.shadow.coordinator.classifier.budget
+    budget.per_author = budget.per_guild_minute = 100  # every post is reviewed
+    for facts in posts:
+        h.clock[0] = facts.posted_at
+        h.case.reads.now = facts.posted_at
+        h.shadow.submit(facts)
+    await asyncio.sleep(0.5)
+    assert h.calls.total == 0  # no review has answered yet
+    assert h.port.count("timeout", flooder.id) >= 1
+    await h.shadow.drain()

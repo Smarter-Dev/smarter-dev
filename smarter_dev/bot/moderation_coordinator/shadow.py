@@ -25,9 +25,12 @@ a revision already recorded is not acted on twice. Without that row nothing
 changes: shadow, as before.
 
 Nothing here blocks the bot: each message is judged in its own task, at most
-:data:`MAX_CONCURRENT` decisions at a time (a decision waiting on a busy ring
-channel holds no slot), and one more than :data:`MAX_PENDING` waiting is
-dropped and counted rather than queued. Every task is tracked with
+:data:`MAX_CONCURRENT` label checks at a time (a decision waiting on a busy
+ring channel holds no slot; the deterministic rules hold none and, when
+acting, are carried out before any wait). Past :data:`MAX_PENDING` waiting, a
+guild in shadow drops and counts the message; a guild the coordinator acts
+for still has it judged on the deterministic rules, up to :data:`MAX_BACKLOG`.
+Every task is tracked with
 :func:`smarter_dev.bot.leadership.track`, so a process that stops acting
 finishes the decisions it accepted before it shuts down.
 """
@@ -39,6 +42,7 @@ import logging
 import os
 import time
 from collections.abc import Iterable
+from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -52,6 +56,7 @@ from sqlalchemy.exc import IntegrityError
 from smarter_dev.bot import leadership
 from smarter_dev.bot.moderation_coordinator.act import Executor
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierBudget
+from smarter_dev.bot.moderation_coordinator.classifier import ClassifierResult
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
@@ -65,6 +70,8 @@ from smarter_dev.bot.moderation_coordinator.model import PastAction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
+from smarter_dev.bot.moderation_coordinator.rules import MASS_MENTION_REASON
+from smarter_dev.bot.moderation_coordinator.rules import PINGED_EVERYONE_SECONDS
 from smarter_dev.bot.moderation_coordinator.rules import SANCTION_ACTIONS
 from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.shared.exception_logging import log_exception
@@ -81,6 +88,14 @@ logger = logging.getLogger(__name__)
 GUILDS_ENV_VAR = "MODERATION_SHADOW_GUILD_IDS"
 MAX_CONCURRENT = 4
 MAX_PENDING = 200
+#: Past MAX_PENDING, a guild the coordinator acts for is still judged on the
+#: deterministic rules (cheap: no classifier, no ring), up to this many.
+MAX_BACKLOG = 2000
+BUDGET_EXHAUSTED_TEXT = (
+    "⚠️ The moderation classifier's daily budget ({cap} requests) is used up. "
+    "Until 00:00 UTC, scam and ring checks come back unknown: held posts are "
+    "left for a moderator, and the deterministic rules still act."
+)
 #: The legacy side is read this long after the message: past the comparison
 #: window below, so nothing that window counts can still be on its way.
 LEGACY_SETTLE_SECONDS = 240.0
@@ -268,7 +283,26 @@ class BotReads:
                     .limit(10)
                 )
             ).all()
-        return author_history_from(row, actions, before)
+            # A removed @everyone/@here in the day before this message: the
+            # coordinator's own record, so it holds across a restart. Read
+            # apart from the sanctions above (a delete is not "moderated").
+            pinged_everyone_at = (
+                await session.execute(
+                    select(func.max(ModerationAction.created_at)).where(
+                        ModerationAction.guild_id == guild_id,
+                        ModerationAction.target_user_id == user_id,
+                        ModerationAction.action_type.in_((gw.DELETE, gw.PURGE)),
+                        ModerationAction.reason.contains(MASS_MENTION_REASON),
+                        ModerationAction.created_at
+                        >= before - timedelta(seconds=PINGED_EVERYONE_SECONDS),
+                        ModerationAction.created_at < before,
+                    )
+                )
+            ).scalar_one_or_none()
+        history = author_history_from(row, actions, before)
+        if pinged_everyone_at is None:
+            return history
+        return replace(history, pinged_everyone_at=_utc(pinged_everyone_at))
 
     async def channel_window(
         self,
@@ -726,6 +760,10 @@ class ModerationShadow:
         self._slots = asyncio.Semaphore(MAX_CONCURRENT)
         self._tasks: set[asyncio.Task] = set()
         self.dropped = 0
+        #: Messages past the queue judged on the deterministic rules only.
+        self.backlogged = 0
+        #: (guild, UTC day) whose classifier budget ran out, already reported.
+        self._exhausted: set[tuple[str, int]] = set()
         #: The comparison loop, once started.
         self.background: asyncio.Task | None = None
 
@@ -733,16 +771,36 @@ class ModerationShadow:
         return guild_id is not None and str(guild_id) in self.guild_ids
 
     def submit(self, facts: MessageFacts) -> asyncio.Task | None:
-        """Judge ``facts`` in the background; dropped (and counted) when full."""
+        """Judge ``facts`` in the background.
+
+        Past :data:`MAX_PENDING` a guild the coordinator may own (acting, or
+        not seen yet) is not dropped: nothing else moderates it, so the
+        message is still judged on the deterministic rules (no classifier,
+        no ring), up to :data:`MAX_BACKLOG`. A guild in shadow is dropped
+        and counted, as before."""
+        judge_labels = True
         if len(self._tasks) >= MAX_PENDING:
-            self.dropped += 1
-            if self.dropped == 1 or self.dropped % 100 == 0:
+            known = self.policies.peek(facts.guild_id)
+            may_act = self.executor is not None and (known is None or known.acting)
+            if not may_act or len(self._tasks) >= MAX_BACKLOG:
+                self.dropped += 1
+                if self.dropped == 1 or self.dropped % 100 == 0:
+                    logger.warning(
+                        "Moderation shadow is behind; %d messages not judged so far",
+                        self.dropped,
+                    )
+                return None
+            judge_labels = False
+            self.backlogged += 1
+            if self.backlogged == 1 or self.backlogged % 100 == 0:
                 logger.warning(
-                    "Moderation shadow is behind; %d messages not judged so far",
-                    self.dropped,
+                    "Moderation coordinator is behind; %d messages judged on the "
+                    "deterministic rules only so far",
+                    self.backlogged,
                 )
-            return None
-        task = asyncio.get_running_loop().create_task(self.judge(facts))
+        task = asyncio.get_running_loop().create_task(
+            self.judge(facts, judge_labels=judge_labels)
+        )
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         # A process that stops acting drains these before it shuts down
@@ -751,7 +809,9 @@ class ModerationShadow:
         leadership.track(task)
         return task
 
-    async def judge(self, facts: MessageFacts) -> ModerationShadowDecision | None:
+    async def judge(
+        self, facts: MessageFacts, *, judge_labels: bool = True
+    ) -> ModerationShadowDecision | None:
         policy = None
         evaluation = None
         try:
@@ -770,13 +830,22 @@ class ModerationShadow:
                 )
                 return None
             on_provisional = None
+            on_deterministic = None
             if acting:
 
                 async def on_provisional(facts_, provisional, key):
                     await self.executor.contain(facts_, provisional, key, policy=policy)
 
+                async def on_deterministic(facts_, decision, key):
+                    await self._act_early(facts_, policy, decision, key)
+
             evaluation = await self.coordinator.evaluate(
-                facts, policy, slot=self._slots, on_provisional=on_provisional
+                facts,
+                policy,
+                slot=self._slots,
+                on_provisional=on_provisional,
+                on_deterministic=on_deterministic,
+                judge_labels=judge_labels,
             )
             row = row_from(evaluation)
         except Exception as error:  # noqa: BLE001 — record that it was not judged
@@ -822,13 +891,17 @@ class ModerationShadow:
             and evaluation.policy.acting
         ):
             if not fresh:
-                # Already recorded: a replayed event, already acted on.
+                # Already recorded: a replayed event, already acted on, or
+                # another pod judging the same message during a handover. A
+                # hold notice this pod posted still gets its closing line.
                 logger.info(
                     "Coordinator skipped message %s revision %s: already decided",
                     facts.message_id,
                     facts.revision,
                 )
+                await self.executor.close_hold(evaluation)
             else:
+                await self._budget_exhausted(evaluation)
                 result = None
                 try:
                     result = await self.executor.execute(evaluation)
@@ -841,6 +914,51 @@ class ModerationShadow:
                 self._disarm_missed_mutes(evaluation, result)
         return row
 
+    async def _budget_exhausted(self, evaluation: Evaluation) -> None:
+        """The guild's daily classifier ceiling ran out: one WARNING and one
+        line in the moderators' channel per guild and day (#310 item 5)."""
+        if evaluation.classifier.refused_by != "guild_day":
+            return
+        facts = evaluation.facts
+        day = (facts.guild_id, int(self._clock() // 86400))
+        if day in self._exhausted:
+            return
+        self._exhausted.add(day)
+        for stale in [d for d in self._exhausted if d[1] < day[1]]:
+            self._exhausted.discard(stale)
+        logger.warning(
+            "Moderation classifier budget for guild %s is used up for today; "
+            "scam checks come back unknown until 00:00 UTC",
+            facts.guild_id,
+        )
+        await self.executor.notify(
+            evaluation.policy,
+            BUDGET_EXHAUSTED_TEXT.format(
+                cap=self.coordinator.classifier.budget.day_cap(True)
+            ),
+        )
+
+    async def _act_early(self, facts, policy, decision, key) -> None:
+        """The deterministic rules' decision, carried out before any
+        classifier wait. Never raises: the label checks still follow."""
+        early = Evaluation(
+            facts=facts,
+            policy=policy,
+            decision=decision,
+            classifier=ClassifierResult(),
+            key=key,
+        )
+        result = None
+        try:
+            result = await self.executor.execute(early)
+        except Exception:  # noqa: BLE001 — logged; the gateway reconciles
+            log_exception(
+                logger,
+                "Coordinator could not act on message %s",
+                facts.message_id,
+            )
+        self._disarm_missed_mutes(early, result)
+
     def _disarm_missed_mutes(self, evaluation: Evaluation, result) -> None:
         """A spam mute Discord did not apply leaves the author counted again."""
         applied = {
@@ -848,7 +966,7 @@ class ModerationShadow:
             for outcome in (result.outcomes if result is not None else ())
             if outcome.kind == gw.TIMEOUT and outcome.applied
         }
-        for user_id, target in evaluation.decision.targets.items():
+        for user_id, target in evaluation.to_carry_out.targets.items():
             if (
                 "spam_engine" in target.rules
                 and target.sanction is not None
@@ -902,7 +1020,11 @@ class ModerationShadow:
 async def restore_budget(
     budget: ClassifierBudget, recorder: ShadowRecorder, guild_ids: Iterable[str]
 ) -> None:
-    """Read today's spend back into ``budget``; on failure it stays shut.
+    """Read today's spend back into ``budget``.
+
+    On failure the day opens on a fresh count (fail open, #310 item 5: shut,
+    every scam check in an acting guild would be unknown) and the read is
+    tried again on the next pass and merged in.
 
     App ``StartedEvent`` listeners run once this process acts, so the count
     includes what the previous process recorded before it handed over.
@@ -913,9 +1035,11 @@ async def restore_budget(
     except Exception:  # noqa: BLE001 — retried on the next pass
         log_exception(
             logger,
-            "Moderation shadow could not read today's classifier spend",
+            "Moderation shadow could not read today's classifier spend; "
+            "counting from zero until it can",
             level=logging.WARNING,
         )
+        budget.open_fresh()
         return
     budget.restore(spent, now)
     logger.info(
@@ -954,7 +1078,7 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
 
     async def compare_forever() -> None:
         while True:
-            if not budget.restored:
+            if not budget.restored or budget.restore_pending:
                 await restore_budget(budget, shadow.recorder, guild_ids)
             await asyncio.sleep(SWEEP_SECONDS)
             if not leadership.is_acting():

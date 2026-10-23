@@ -87,6 +87,8 @@ class GuildPolicy:
     scam_gate_channel_ids: frozenset[str] = frozenset()
     edit_ping_channel_ids: frozenset[str] = frozenset()
     bump_channel_ids: frozenset[str] = frozenset()
+    #: A member's ``@everyone``/``@here`` is removed; only while acting.
+    mass_mention: bool = False
     staff_exempt_role_ids: tuple[str, ...] = ()
     #: Who moderates the guild. The coordinator acts only as ``coordinator``,
     #: and only while the generation it decided under is still current.
@@ -111,6 +113,7 @@ class GuildPolicy:
             "scam_banner_matches_reference": self.scam_banner_matches_reference,
             "edit_ping": self.edit_ping,
             "bump_channel": bool(self.bump_channel_ids),
+            "mass_mention": self.mass_mention,
         }
 
 
@@ -201,6 +204,7 @@ async def load_policy(guild_id: str) -> GuildPolicy:
         )
         if bump is not None and bump.enabled and (on(own.BUMP_CHANNEL) if on else True)
         else frozenset(),
+        mass_mention=bool(on and on(own.MASS_MENTION)),
         staff_exempt_role_ids=staff_roles,
         owner=ownership.owner,
         generation=ownership.generation,
@@ -252,6 +256,10 @@ class PolicyCache:
         self._ttl = ttl
         self._ownership = ownership
         self._policies: dict[str, GuildPolicy] = {}
+
+    def peek(self, guild_id: str) -> GuildPolicy | None:
+        """The last snapshot, however old; None before the first load."""
+        return self._policies.get(guild_id)
 
     async def get(self, guild_id: str, now: float | None = None) -> GuildPolicy:
         now = time.time() if now is None else now

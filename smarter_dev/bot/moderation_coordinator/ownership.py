@@ -32,7 +32,18 @@ SPAM_RING = "spam_ring"
 SCAM_GATE = "scam_gate"
 EDIT_PING = "edit_ping"
 BUMP_CHANNEL = "bump_channel"
-RULES = (SPAM_ENGINE, ATTACHMENT_FILTER, SPAM_RING, SCAM_GATE, EDIT_PING, BUMP_CHANNEL)
+#: New with the coordinator (Zech, Oct 23 22:36), no legacy actor behind it:
+#: a member's ``@everyone``/``@here`` is removed.
+MASS_MENTION = "mass_mention"
+RULES = (
+    SPAM_ENGINE,
+    ATTACHMENT_FILTER,
+    SPAM_RING,
+    SCAM_GATE,
+    EDIT_PING,
+    BUMP_CHANNEL,
+    MASS_MENTION,
+)
 
 
 @dataclass(frozen=True, slots=True)

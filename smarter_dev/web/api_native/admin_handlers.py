@@ -291,8 +291,17 @@ class AdminHandlerController(Controller):
             data.script, existing_script=record.script, handler_name=record.name
         )
 
+        # Judged on the name the row had before this write: a switched-off
+        # replaced handler renamed in the same save would otherwise come back.
+        retired = not record.enabled and record.name in COORDINATOR_REPLACED
         if data.name is not None:
             name = _normalized_name(data.name)
+            if retired and name != record.name:
+                raise plain_error(
+                    422,
+                    f"{record.name!r} was replaced by the moderation coordinator "
+                    "and cannot be renamed",
+                )
             reason = rename_refusal(data.script, name=record.name, new_name=name)
             if reason is not None:
                 raise plain_error(422, reason)
@@ -312,9 +321,7 @@ class AdminHandlerController(Controller):
         # Every write enables, except a frozen punisher or a handler the
         # coordinator replaced (scam-banner, edit-ping-catch) that was switched
         # off: saving it must not re-arm it next to the coordinator.
-        if record.enabled or not (
-            sanction_calls(data.script) or record.name in COORDINATOR_REPLACED
-        ):
+        if record.enabled or not (sanction_calls(data.script) or retired):
             record.enabled = True
 
         if record.trigger_type in _TIME_TRIGGERS:

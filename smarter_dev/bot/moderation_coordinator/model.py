@@ -222,6 +222,10 @@ class AuthorHistory:
     is_first_message: bool | None
     days_since_last_message: int | None
     actions: tuple[PastAction, ...] = ()
+    #: When the coordinator last removed this author's ``@everyone``/``@here``
+    #: (a ``delete`` in ``moderation_actions``, read back within a day). Not
+    #: a sanction: it never counts as "moderated in the last 30 days".
+    pinged_everyone_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -282,7 +282,22 @@ class Executor:
         self, facts: MessageFacts, key: str, policy: GuildPolicy, error: BaseException
     ) -> None:
         """The decision never came after a hold was placed: say so (#302)."""
-        hold = self._holds.pop((facts.guild_id, facts.author_id, key), None)
+        await self._close_unfinished(
+            facts,
+            key,
+            policy,
+            f"failed after the hold was placed ({type(error).__name__})",
+        )
+
+    async def _close_unfinished(
+        self, facts: MessageFacts, key: str, policy: GuildPolicy, cause: str
+    ) -> None:
+        """A hold whose decision did not finish: a line for moderators and a
+        closing notice, then the hold is forgotten. Never raises. It runs
+        after the guild was handed back too: it only closes what this
+        process already posted."""
+        hold_key = (facts.guild_id, facts.author_id, key)
+        hold = self._holds.get(hold_key)
         if hold is None:
             return
         try:
@@ -295,20 +310,67 @@ class Executor:
                         (
                             gw.ENTRY_ALERT,
                             f"The scam check on <@{facts.author_id}>'s message "
-                            f"({jump_link(facts)}) failed after the hold was placed "
-                            f"({type(error).__name__}). The 5-minute hold lapses on "
-                            "its own; a moderator should look.",
+                            f"({jump_link(facts)}) {cause}. The 5-minute hold "
+                            "lapses on its own; a moderator should look.",
                         )
                     ],
                     report_channel_id=policy.report_channel_id,
                     target_user_id=facts.author_id,
                 )
+        except Exception:  # noqa: BLE001
+            log_exception(
+                logger,
+                "Coordinator could not report the unfinished check on message %s",
+                facts.message_id,
+                level=logging.WARNING,
+            )
+        try:
             if hold.noticed:
                 await self.messenger.post(hold.channel_id, CLOSED_UNKNOWN)
         except Exception:  # noqa: BLE001
             log_exception(
                 logger,
-                "Coordinator could not report the failed check on message %s",
+                "Coordinator could not close the hold notice for message %s",
+                facts.message_id,
+                level=logging.WARNING,
+            )
+        finally:
+            if self._holds.get(hold_key) is hold:
+                del self._holds[hold_key]
+
+    async def notify(self, policy: GuildPolicy, text: str) -> None:
+        """One line in the moderators' channel; never raises."""
+        if policy.report_channel_id is None or not await self.still_owner(policy):
+            return
+        try:
+            await self.messenger.post(policy.report_channel_id, text)
+        except Exception:  # noqa: BLE001
+            log_exception(
+                logger,
+                "Coordinator could not post to guild %s's report channel",
+                policy.guild_id,
+                level=logging.WARNING,
+            )
+
+    async def close_hold(self, evaluation: Evaluation) -> None:
+        """Close this process's hold notice without acting: another process
+        recorded (and carries out) the decision for the same message."""
+        if evaluation.to_carry_out.provisional is None:
+            return
+        facts = evaluation.facts
+        hold_key = (facts.guild_id, facts.author_id, evaluation.key)
+        hold = self._holds.pop(hold_key, None)
+        if hold is None or not hold.noticed:
+            return
+        try:
+            await self.messenger.post(
+                hold.channel_id,
+                _closing(evaluation.to_carry_out.provisional, evaluation),
+            )
+        except Exception:  # noqa: BLE001
+            log_exception(
+                logger,
+                "Coordinator could not close the hold notice for message %s",
                 facts.message_id,
                 level=logging.WARNING,
             )
@@ -319,24 +381,49 @@ class Executor:
 
     async def execute(self, evaluation: Evaluation) -> gw.ActResult | None:
         """Carry out one decision. Returns the gateway's result, or None when
-        there was nothing to do or the coordinator no longer owns the guild."""
+        there was nothing to do or the coordinator no longer owns the guild.
+
+        A hold this decision owns is always closed: by its closing line when
+        the decision finishes, otherwise (a raise, or the guild handed back
+        mid-decision) by an "incomplete" line and a note for moderators."""
         facts = evaluation.facts
         policy = evaluation.policy
-        decision = evaluation.decision
+        provisional = evaluation.to_carry_out.provisional
+        # The hold belongs to the post and its copies; a decision with a
+        # provisional outcome of its own closes it (a copy without one, still
+        # waiting on the post's verdict, must not close it as "incomplete").
+        hold_key = (facts.guild_id, facts.author_id, evaluation.key)
+        hold = self._holds.get(hold_key) if provisional is not None else None
+        closed = False
+        try:
+            result, closed = await self._execute(evaluation, hold)
+            return result
+        finally:
+            if hold is not None:
+                if closed:
+                    if self._holds.get(hold_key) is hold:
+                        del self._holds[hold_key]
+                else:
+                    await self._close_unfinished(
+                        facts,
+                        evaluation.key,
+                        policy,
+                        "stopped before its decision was carried out",
+                    )
+
+    async def _execute(
+        self, evaluation: Evaluation, hold: _Hold | None
+    ) -> tuple[gw.ActResult | None, bool]:
+        """The decision, and whether its hold (if any) got its closing line."""
+        facts = evaluation.facts
+        policy = evaluation.policy
+        decision = evaluation.to_carry_out
         targets = [
             target
             for _, target in sorted(decision.targets.items())
             if target.sanction is not None or target.cleanup or target.notices
         ]
         provisional = decision.provisional
-        # The hold belongs to the post and its copies; a decision with a
-        # provisional outcome of its own closes it (a copy without one, still
-        # waiting on the post's verdict, must not close it as "incomplete").
-        hold = (
-            self._holds.pop((facts.guild_id, facts.author_id, evaluation.key), None)
-            if provisional is not None
-            else None
-        )
         lines = self._report_lines(evaluation)
         if not targets and provisional is None and hold is None:
             # Nothing to do: review lines alone (an unread history, a skipped
@@ -347,15 +434,16 @@ class Executor:
                     facts.message_id,
                     " | ".join(text for _, text in lines),
                 )
-            return None
+            return None, False
         if not await self.still_owner(policy):
-            return None
+            return None, False
 
         gateway = self._gateway_for(policy)
         reportable = bool(lines) or any(
             (t.sanction is not None and t.sanction.kind != gw.WARN)
             or rules.SPAM_RING in t.rules
             or rules.SCAM_GATE in t.rules
+            or rules.MASS_MENTION in t.rules
             for t in targets
         )
         trigger = self._trigger(
@@ -446,7 +534,7 @@ class Executor:
             await self.messenger.post(
                 hold.channel_id, _closing(provisional, evaluation)
             )
-        return result
+        return result, True
 
     # ------------------------------------------------------------------
     # Member-facing messages
@@ -611,7 +699,7 @@ class Executor:
     # ------------------------------------------------------------------
 
     def _report_lines(self, evaluation: Evaluation) -> list[tuple[str, str]]:
-        decision = evaluation.decision
+        decision = evaluation.to_carry_out
         facts = evaluation.facts
         lines: list[tuple[str, str]] = []
         provisional = decision.provisional
@@ -761,7 +849,7 @@ def _provisional_line(
 ) -> tuple[str, str]:
     user = f"<@{provisional.user_id}>"
     if provisional.resolution == UPGRADED:
-        target = evaluation.decision.targets.get(provisional.user_id)
+        target = evaluation.to_carry_out.targets.get(provisional.user_id)
         sanction = target.sanction if target is not None else None
         what = (
             "a ban"

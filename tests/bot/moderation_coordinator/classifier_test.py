@@ -341,3 +341,41 @@ async def test_a_providers_own_http_timeout_is_recorded_as_a_timeout():
     )
     result = await classifier.classify(_request({SCAM}))
     assert result.outcome == TIMEOUT
+
+
+def test_an_acting_guild_has_its_own_larger_day_cap(monkeypatch):
+    """#310 item 5: the shadow's 300/day is not the acting ceiling."""
+    budget = ClassifierBudget(per_guild_day=2, acting_per_guild_day=3)
+    now = 1_000_000.0
+    for i in range(2):
+        assert budget.try_spend("G", f"a{i}", now) is None
+    assert budget.try_spend("G", "x", now) == "guild_day"  # the shadow cap
+    assert budget.try_spend("G", "y", now, acting=True) is None
+    assert budget.try_spend("G", "z", now, acting=True) == "guild_day"
+    assert ClassifierBudget().acting_per_guild_day == 1500
+    monkeypatch.setenv(clf.ACTING_DAILY_REQUESTS_ENV_VAR, "9")
+    assert ClassifierBudget().acting_per_guild_day == 9
+
+
+def test_an_acting_day_costs_under_eight_dollars():
+    input_tokens = 18_000 + clf.MAX_IMAGES * clf.MAX_IMAGE_TOKENS
+    worst = (input_tokens * 0.10 + clf.HAIKU_MAX_TOKENS * 0.50) / 1_000_000
+    assert worst * clf.DEFAULT_ACTING_DAILY_REQUESTS <= 8.0
+
+
+async def test_an_acting_request_is_metered_as_moderation(monkeypatch):
+    seen = []
+
+    from contextlib import asynccontextmanager
+
+    from smarter_dev.shared.usage_meter import UsageMeter
+
+    @asynccontextmanager
+    async def metered(operation_type, **fields):
+        seen.append(operation_type)
+        yield UsageMeter()
+
+    monkeypatch.setattr(clf, "metered", metered)
+    calls = ModelCalls()
+    await _classifier({}, calls).classify(_request({SCAM}, acting=True))
+    assert seen == ["moderation_classifier"]

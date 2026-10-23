@@ -129,14 +129,23 @@ MAX_MATERIAL_BYTES = 16_000
 #: out) costs a tenth of that, and an image adds at most $0.0005. The day's count is
 #: read back from the shadow's own rows at startup (:meth:`ClassifierBudget.
 #: restore_day`), so a restart does not reset it.
+#:
+#: A guild the coordinator acts for has its own, larger ceiling (#310 item 5):
+#: there the classifier is the scam check itself, and an empty budget leaves
+#: every scam check unknown for the rest of the day. 1500 requests bound a
+#: day at about $7.20 worst case.
 PER_AUTHOR = 2
 AUTHOR_WINDOW_SECONDS = 600.0
 PER_GUILD_MINUTE = 20
 DAILY_REQUESTS_ENV_VAR = "MODERATION_SHADOW_DAILY_REQUESTS"
 DEFAULT_DAILY_REQUESTS = 300
+ACTING_DAILY_REQUESTS_ENV_VAR = "MODERATION_ACTING_DAILY_REQUESTS"
+DEFAULT_ACTING_DAILY_REQUESTS = 1500
 MAX_TRACKED_AUTHORS = 4096
 
 METER_OPERATION = "moderation_shadow_classifier"
+#: The acting coordinator's requests: moderation spend, not a trial's.
+ACTING_METER_OPERATION = "moderation_classifier"
 
 
 def _is_timeout(error: BaseException) -> bool:
@@ -159,12 +168,20 @@ def choose_backend(labels: frozenset[str], *, images: bool = False) -> str | Non
 # ---------------------------------------------------------------------------
 
 
-def daily_request_cap() -> int:
-    raw = os.getenv(DAILY_REQUESTS_ENV_VAR, "").strip()
+def _cap(env_var: str, default: int) -> int:
+    raw = os.getenv(env_var, "").strip()
     try:
-        return max(0, int(raw)) if raw else DEFAULT_DAILY_REQUESTS
+        return max(0, int(raw)) if raw else default
     except ValueError:
-        return DEFAULT_DAILY_REQUESTS
+        return default
+
+
+def daily_request_cap() -> int:
+    return _cap(DAILY_REQUESTS_ENV_VAR, DEFAULT_DAILY_REQUESTS)
+
+
+def acting_daily_request_cap() -> int:
+    return _cap(ACTING_DAILY_REQUESTS_ENV_VAR, DEFAULT_ACTING_DAILY_REQUESTS)
 
 
 class ClassifierBudget:
@@ -181,6 +198,7 @@ class ClassifierBudget:
         author_window: float = AUTHOR_WINDOW_SECONDS,
         per_guild_minute: int = PER_GUILD_MINUTE,
         per_guild_day: int | None = None,
+        acting_per_guild_day: int | None = None,
         restored: bool = True,
     ) -> None:
         self.per_author = per_author
@@ -189,19 +207,37 @@ class ClassifierBudget:
         self.per_guild_day = (
             daily_request_cap() if per_guild_day is None else per_guild_day
         )
+        self.acting_per_guild_day = (
+            acting_daily_request_cap()
+            if acting_per_guild_day is None
+            else acting_per_guild_day
+        )
         self._authors: dict[tuple[str, str], deque[float]] = {}
         self._minutes: dict[str, deque[float]] = {}
         self._days: dict[tuple[str, int], int] = {}
         #: False until :meth:`restore` has read today's spend back: until
         #: then every request is refused, so a restart never resets the day.
         self.restored = restored
+        #: The read failed and the day was opened on a fresh count instead
+        #: (:meth:`open_fresh`); the read is tried again and merged.
+        self.restore_pending = False
 
     @staticmethod
     def _trim(calls: deque[float], horizon: float) -> None:
         while calls and calls[0] <= horizon:
             calls.popleft()
 
-    def refusal(self, guild_id: str, author_id: str | None, now: float) -> str | None:
+    def day_cap(self, acting: bool) -> int:
+        return self.acting_per_guild_day if acting else self.per_guild_day
+
+    def refusal(
+        self,
+        guild_id: str,
+        author_id: str | None,
+        now: float,
+        *,
+        acting: bool = False,
+    ) -> str | None:
         """The cap that would refuse a request now, or None; charges nothing.
 
         Asked before work that only a request would use (the ring's history
@@ -210,7 +246,7 @@ class ClassifierBudget:
         """
         if not self.restored:
             return "not_restored"
-        if self._days.get((guild_id, int(now // 86400)), 0) >= self.per_guild_day:
+        if self._days.get((guild_id, int(now // 86400)), 0) >= self.day_cap(acting):
             return "guild_day"
         if author_id is not None:
             author_calls = self._authors.get((guild_id, author_id))
@@ -225,9 +261,16 @@ class ClassifierBudget:
                 return "guild_minute"
         return None
 
-    def try_spend(self, guild_id: str, author_id: str | None, now: float) -> str | None:
+    def try_spend(
+        self,
+        guild_id: str,
+        author_id: str | None,
+        now: float,
+        *,
+        acting: bool = False,
+    ) -> str | None:
         """Charge one request and return None, or name the cap that refused it."""
-        refused = self.refusal(guild_id, author_id, now)
+        refused = self.refusal(guild_id, author_id, now, acting=acting)
         if refused is not None:
             return refused
         day = (guild_id, int(now // 86400))
@@ -251,6 +294,14 @@ class ClassifierBudget:
             key = (guild_id, day)
             self._days[key] = max(self._days.get(key, 0), int(requests))
         self.restored = True
+        self.restore_pending = False
+
+    def open_fresh(self) -> None:
+        """The day's spend could not be read: open on what this process
+        counted (fail open, #310 item 5); a later read is merged in."""
+        if not self.restored:
+            self.restored = True
+            self.restore_pending = True
 
     def spent_today(self, guild_id: str, now: float) -> int:
         return self._days.get((guild_id, int(now // 86400)), 0)
@@ -280,6 +331,8 @@ class ClassifierRequest:
     ring_ad: str | None = None
     ring_candidates: tuple[RingCandidate, ...] = ()
     charge_author: bool = True
+    #: The coordinator acts for the guild: its daily ceiling and its meter.
+    acting: bool = False
     #: Show the model this many of the images, chosen at random, instead of
     #: the first :data:`MAX_IMAGES` (Zech, Oct 23: an established member's
     #: image post is checked on one image). The rest are named, not unseen.
@@ -828,7 +881,9 @@ class ModerationClassifier:
     """Answers one :class:`ClassifierRequest` with at most one model request.
 
     ``haiku_model`` / ``jev_model`` are built on first use; tests pass
-    stand-ins, and a stand-in for ``fetch_image``. Usage is metered into the ledger as ``moderation_shadow_classifier``.
+    stand-ins, and a stand-in for ``fetch_image``. Usage is metered into the
+    ledger as ``moderation_shadow_classifier``, or ``moderation_classifier``
+    for a guild the coordinator acts for.
     """
 
     def __init__(
@@ -860,9 +915,11 @@ class ModerationClassifier:
             setattr(self, attr, model)
         return model
 
-    def budget_refusal(self, guild_id: str, author_id: str | None) -> str | None:
+    def budget_refusal(
+        self, guild_id: str, author_id: str | None, *, acting: bool = False
+    ) -> str | None:
         """The budget cap a request would meet now (:meth:`ClassifierBudget.refusal`)."""
-        return self.budget.refusal(guild_id, author_id, self._clock())
+        return self.budget.refusal(guild_id, author_id, self._clock(), acting=acting)
 
     async def classify(self, request: ClassifierRequest) -> ClassifierResult:
         labels = sorted(request.labels)
@@ -874,6 +931,7 @@ class ModerationClassifier:
             request.guild_id,
             request.author_id if request.charge_author else None,
             self._clock(),
+            acting=request.acting,
         )
         if refused is not None:
             return unknown_result(labels, BUDGET, backend=backend, refused_by=refused)
@@ -881,7 +939,7 @@ class ModerationClassifier:
         started = time.monotonic()
         result = ClassifierResult(backend=backend, model=model_name, requests=1)
         async with metered(
-            self.operation_type,
+            ACTING_METER_OPERATION if request.acting else self.operation_type,
             guild_id=request.guild_id,
             channel_id=request.channel_id,
         ) as meter:

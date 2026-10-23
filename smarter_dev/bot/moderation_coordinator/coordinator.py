@@ -135,6 +135,14 @@ class Evaluation:
     #: ad and follow-ups share in the gateway.
     ring_context: tuple[str, ...] = ()
     ring_alias: str | None = None
+    #: When the deterministic rules were already carried out (before any
+    #: classifier wait), what is left to carry out; ``decision`` stays the
+    #: whole decision, for the record.
+    remaining: Decision | None = None
+
+    @property
+    def to_carry_out(self) -> Decision:
+        return self.decision if self.remaining is None else self.remaining
 
 
 class _Slot:
@@ -198,19 +206,36 @@ class Coordinator:
         slot: asyncio.Semaphore | None = None,
         on_provisional: Callable[[MessageFacts, Provisional, str], Awaitable[None]]
         | None = None,
+        on_deterministic: Callable[[MessageFacts, Decision, str], Awaitable[None]]
+        | None = None,
+        judge_labels: bool = True,
     ) -> Evaluation:
         """Judge one revision.
 
-        ``slot`` bounds how many decisions run at once; it is held for the
-        decision except while waiting on a busy ring channel. ``on_provisional``
-        places the provisional timeout (with the post's key) before the
-        classifier is asked, when the coordinator acts.
+        The deterministic rules (spam engine, attachment filter, edit-ping,
+        mass mention, bump channel) run first and hold no slot: under load
+        they are never queued behind classifier requests. When the
+        coordinator acts, ``on_deterministic`` carries their decision out
+        right away, before anything waits on the classifier or a ring lock.
+
+        ``slot`` then bounds how many label checks run at once; it is held
+        except while waiting on a busy ring channel. ``on_provisional`` places
+        the provisional timeout (with the post's key) before the classifier is
+        asked. ``judge_labels=False`` (a backlog past the queue) judges the
+        deterministic rules only.
         """
         held = _Slot(slot)
         async with contextlib.AsyncExitStack() as stack:
-            await held.take()
             stack.callback(held.give)
-            return await self._evaluate(facts, policy, stack, held, on_provisional)
+            return await self._evaluate(
+                facts,
+                policy,
+                stack,
+                held,
+                on_provisional,
+                on_deterministic=on_deterministic,
+                judge_labels=judge_labels,
+            )
 
     async def _staff_refusal(
         self,
@@ -261,6 +286,9 @@ class Coordinator:
         stack: contextlib.AsyncExitStack,
         held: _Slot,
         on_provisional,
+        *,
+        on_deterministic=None,
+        judge_labels: bool = True,
     ) -> Evaluation:
         started = time.monotonic()
         now = facts.posted_at
@@ -287,7 +315,9 @@ class Coordinator:
         # 1. Deterministic rules.
         spam_obs = None
         if policy.spam is not None and not facts.is_edit:
-            spam_obs = self.spam.observe(facts, policy.spam, now)
+            spam_obs = self.spam.observe(
+                facts, policy.spam, now, mass_mention_rule=policy.mass_mention
+            )
             hits += rules.spam_engine_hits(
                 facts,
                 spam_obs.decision,
@@ -306,9 +336,29 @@ class Coordinator:
             hits += rules.edit_ping_hits(facts)
         if policy.bump_channel_ids:
             hits += rules.bump_channel_hits(facts, policy.bump_channel_ids)
+        if policy.mass_mention:
+            hits += rules.mass_mention_hits(facts)
+
+        key = facts_hash(facts)
+        early_hits = 0
+        if on_deterministic is not None and hits:
+            # Carried out now, not after a classifier wait: a raid's spam
+            # mutes and removals land while the label checks queue.
+            await author_is_staff()
+            early_hits = len(hits)
+            await on_deterministic(
+                facts,
+                decide(
+                    hits,
+                    refusals=await self._refusals(
+                        facts, hits, author_refusal, refusal_known, extra_roles
+                    ),
+                ),
+                key,
+            )
+        await held.take()
 
         # 2. Rules that need labels, and what they read first.
-        key = facts_hash(facts)
         earlier_posts = self.recent.read(facts.guild_id, facts.author_id, now)
         if not facts.is_edit:
             self.recent.record(
@@ -319,8 +369,10 @@ class Coordinator:
         scam_review = None
         history = None
         known_copy = False
+        escalated = False
         if (
-            policy.scam_gate
+            judge_labels
+            and policy.scam_gate
             and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
             and not facts.is_edit
             and rules.scam_gate_content(facts)
@@ -342,6 +394,13 @@ class Coordinator:
                     suspect, rules.scam_risky_author(facts, history, now_dt)
                 ),
             )
+            # A copy with a burst or other high-signal reason its post was not
+            # judged under (an established member's 4+ images: no hold, one
+            # sampled image) is held and asked again with every image.
+            escalated = known_copy and self.verdict_cache.escalates(
+                facts.guild_id, facts.author_id, key, high_signal, now
+            )
+            known_copy = known_copy and not escalated
             scam_review = rules.scam_gate_review(
                 facts,
                 key=key,
@@ -355,7 +414,8 @@ class Coordinator:
         ring_pending = None
         ring = policy.ring
         if (
-            ring is not None
+            judge_labels
+            and ring is not None
             and not facts.is_edit
             and not facts.author_is_bot
             and (
@@ -412,7 +472,9 @@ class Coordinator:
                 # request is refused anyway and the read would be wasted.
                 window = None
                 if (
-                    self.classifier.budget_refusal(facts.guild_id, facts.author_id)
+                    self.classifier.budget_refusal(
+                        facts.guild_id, facts.author_id, acting=policy.acting
+                    )
                     is None
                 ):
                     window = await self.reads.channel_window(
@@ -468,7 +530,12 @@ class Coordinator:
         first_asker = None
         if scam_review is not None:
             first, future = self.verdict_cache.claim(
-                facts.guild_id, facts.author_id, key, now
+                facts.guild_id,
+                facts.author_id,
+                key,
+                now,
+                reasons=scam_review.high_signal,
+                replace=escalated,
             )
             if first:
                 first_asker = future
@@ -500,6 +567,7 @@ class Coordinator:
             charge_author=not isinstance(ring_pending, rules.RingFollowup)
             or bool(labels & {SCAM, ABUSE}),
             sampled_images=_image_sample(facts, scam_review),
+            acting=policy.acting,
         )
         try:
             result = await self.classifier.classify(request)
@@ -602,6 +670,17 @@ class Coordinator:
             scam_outcome=scam_outcome,
             review=review,
         )
+        remaining = (
+            decide(
+                hits[early_hits:],
+                refusals=refusals,
+                provisional=provisional,
+                scam_outcome=scam_outcome,
+                review=review,
+            )
+            if early_hits
+            else None
+        )
         return Evaluation(
             facts=facts,
             policy=policy,
@@ -617,6 +696,7 @@ class Coordinator:
             history=history,
             ring_context=ring_context,
             ring_alias=ring_alias,
+            remaining=remaining,
         )
 
     async def _refusals(

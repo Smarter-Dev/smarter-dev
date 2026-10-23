@@ -66,6 +66,7 @@ data:
   # Its classifier makes at most this many requests per guild per day.
   MODERATION_SHADOW_GUILD_IDS: "644299523686006834"
   MODERATION_SHADOW_DAILY_REQUESTS: "300"
+  MODERATION_ACTING_DAILY_REQUESTS: "1500"
 
   # Discord voice message configuration
   VOICE_TTS_MODEL: "gemini-2.5-flash-preview-tts"

@@ -41,7 +41,7 @@ from smarter_dev.extensions.schema import ExtensionManifest
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError, first_fire_at
-from smarter_dev.web.models import AdminHandler, ExtensionInstall
+from smarter_dev.web.models import AdminHandler, ExtensionInstall, ModerationOwnership
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,16 @@ RETIRED_CONFIG_REFUSAL = (
 RETIRED_ENABLE_REFUSAL = (
     "This extension has moved into the moderation system, so it can no longer "
     "be enabled. You can still uninstall it."
+)
+
+
+#: Refusal for rendering Disboard's handler while the moderation coordinator
+#: owns the guild: a fresh render restores the bump-channel restriction the
+#: cutover moved into the coordinator, and both would delete chatter.
+DISBOARD_COORDINATOR_REFUSAL = (
+    "The moderation coordinator now keeps the bump channel clear in this "
+    "guild, so Disboard bumping can't be reconfigured, updated or reinstalled "
+    "until the guild is handed back to the old moderation."
 )
 
 
@@ -125,6 +135,7 @@ async def install_extension(
     manifest = loaded.manifest
     if manifest.moved_to_moderation:
         raise ExtensionInstallError(manifest.moved_to_moderation)
+    await _refuse_disboard_under_coordinator(session, guild_id, slug)
     cleaned = _validate(manifest, raw_config)
     rendered = _render(manifest, cleaned, loaded.scripts)
 
@@ -256,6 +267,9 @@ async def _apply(
     # Re-rendering would rewrite a frozen punisher (new keywords, a harsher
     # allowed action) past the handler API's freeze.
     _refuse_retired(loaded)
+    await _refuse_disboard_under_coordinator(
+        session, install.guild_id, install.extension_slug
+    )
     rendered = _render(loaded.manifest, cleaned, loaded.scripts)
     try:
         await _sync_handler_rows(session, install, loaded, rendered)
@@ -440,6 +454,24 @@ async def _arm_time_trigger(record: AdminHandler) -> None:
         record.trigger_type, record.settings or {}, datetime.now(timezone.utc)
     )
     await _recurring_chain.arm_occurrence(record, fire_at)
+
+
+async def _refuse_disboard_under_coordinator(
+    session: AsyncSession, guild_id: str, slug: str
+) -> None:
+    from smarter_dev.web.moderation_cutover import DISBOARD_SLUG
+
+    if slug != DISBOARD_SLUG:
+        return
+    owner = (
+        await session.execute(
+            select(ModerationOwnership.owner).where(
+                ModerationOwnership.guild_id == guild_id
+            )
+        )
+    ).scalar_one_or_none()
+    if owner == "coordinator":
+        raise ExtensionInstallError(DISBOARD_COORDINATOR_REFUSAL)
 
 
 def _refuse_retired(loaded: LoadedExtension) -> None:

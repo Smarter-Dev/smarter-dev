@@ -350,3 +350,58 @@ def test_settle_bounds():
     assert settle("x", None, 0.9).outcome == "invalid_output"
     assert settle("x", False, None).outcome == "low_confidence"
     assert not settle(ABUSE, True, 0.2).yes
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@everyone logger.info(msg) is broken",
+        "@here self.store.get(key) returns None",
+        "@everyone check github.com",
+        "@here foo.bar(1)",
+    ],
+)
+def test_a_mass_mention_next_to_code_or_a_bare_domain_is_not_high_signal(text):
+    """#310 item 7: a bare domain or a dotted name is not a link for the
+    mention+link check, so a staff-style @everyone with code is not held."""
+    message = say(REGULAR, text, NOW)
+    assert "mass mention with a link" not in rules.high_signal_reasons(
+        message, metrics=_metrics(), scam_link_domains=()
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@everyone join discord.gg/x",
+        "@here https://scam.ru/claim",
+        "@everyone www.x.io",
+    ],
+)
+def test_a_mass_mention_with_a_scheme_link_or_invite_is_high_signal(text):
+    message = say(REGULAR, text, NOW)
+    assert "mass mention with a link" in rules.high_signal_reasons(
+        message, metrics=_metrics(), scam_link_domains=()
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "logger.info(msg) is broken",
+        "call self.store.get(key)",
+        "`self.store`",
+        "foo.bar(1)",
+        "the app.run() call",
+    ],
+)
+def test_code_snippets_do_not_open_the_scam_gate(text):
+    assert not rules.scam_gate_content(say(REGULAR, text, NOW))
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["discord.gg/x", "claim it scam.ru/claim", "go to scam.ru", "github.com is up"],
+)
+def test_a_known_tld_before_a_slash_space_or_the_end_opens_the_scam_gate(text):
+    assert rules.scam_gate_content(say(REGULAR, text, NOW))

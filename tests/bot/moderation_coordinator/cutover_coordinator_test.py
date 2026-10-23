@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from datetime import UTC
+from datetime import datetime
 from datetime import timedelta
 
 import pytest
@@ -17,6 +19,7 @@ from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
+from smarter_dev.bot.moderation_coordinator.model import PastAction
 from smarter_dev.bot.moderation_coordinator.replay import ModelCalls
 from smarter_dev.bot.moderation_coordinator.replay import ReplayCase
 from smarter_dev.bot.moderation_coordinator.replay import ReplayReads
@@ -33,6 +36,7 @@ from tests.bot.moderation_coordinator.replay_cases import THIRD
 from tests.bot.moderation_coordinator.replay_cases import Member
 from tests.bot.moderation_coordinator.replay_cases import policy
 from tests.bot.moderation_coordinator.replay_cases import say
+from tests.bot.moderation_coordinator.replay_cases import scam_burst
 from tests.bot.moderation_coordinator.replay_cases import staged_ring
 
 NEWBIE = Member("newbie", 21, NOW - timedelta(days=3), NOW - timedelta(hours=2))
@@ -158,7 +162,7 @@ async def test_the_ring_lock_wait_is_bounded(monkeypatch):
         "join us discord.gg/abcd1234",
         "discord.com/invite/abcd1234",
         "free stuff at steamgift.ru",
-        "claim at nitro-drop.example/claim",
+        "claim at nitro-drop.ru/claim",
     ],
 )
 def test_links_without_a_scheme_open_the_scam_gate(text):
@@ -461,3 +465,127 @@ async def test_a_scam_in_the_chosen_image_is_caught_and_cleaned_up():
     # The control: the same scam in an image not chosen is not seen.
     missed, _, _ = await _sampled(ESTABLISHED, pick=0, scam_in="shot3.png")
     assert missed.evaluations[0].scam_outcome == "clean"
+
+
+# -- copies after the review of #240 (#310 items 2 and 3) ---------------------
+
+
+async def test_a_burst_copy_of_a_sampled_image_post_is_held_and_asked_on_every_image():
+    """#310 item 2: an established member's 4+ image post is checked on one
+    sampled image, unheld. The same post in another channel 2 s later is a
+    burst the first check never saw: it is held and asked again on the first
+    four images, which finds the scam the sample missed; both posts go."""
+    from smarter_dev.bot.moderation_coordinator.replay import REPLAY_PNG
+
+    member = Member("desk", 71, NOW - timedelta(days=900), NOW - timedelta(days=800))
+    first = _five_images(member)
+    burst = replace(
+        first,
+        message_id=str(int(first.message_id) + 1),
+        channel_id=OTHER,
+        posted_at=first.posted_at + 2,
+    )
+
+    async def fetch(url, limit):
+        return REPLAY_PNG + b"SCAM" if url.endswith("shot0.png") else REPLAY_PNG
+
+    case = ReplayCase(
+        name="burst copy of a sampled post",
+        policy=policy(ring=None),
+        messages=[first, burst],
+        reads=ReplayReads(histories={member.id: ESTABLISHED}),
+        haiku=lambda answers, calls, by_text: _image_haiku(calls),
+        fetch_image=fetch,
+        choose_images=lambda items, count: [items[3]][:count],
+    )
+    result = await replay(case)
+
+    sampled, full = result.calls.haiku_images
+    assert len(sampled) == 1 and len(full) == 4
+    original, copy = result.evaluations
+    assert original.scam_outcome == "clean"
+    assert original.decision.provisional is None
+    assert copy.decision.provisional is not None  # held while asked again
+    assert copy.scam_outcome == "violation"
+    target = copy.decision.targets[member.id]
+    assert target.sanction.kind == gw.TIMEOUT  # a held high-signal scam
+    assert {item.message_id for item in target.cleanup} == {
+        first.message_id,
+        burst.message_id,
+    }
+
+
+async def test_a_copy_with_no_new_reason_reuses_the_verdict_without_asking():
+    """The control for item 2: a third copy in yet another channel brings the
+    same burst reason the second was judged under, so it asks nothing."""
+    case, victim, posts = scam_burst()
+    case = replace(case, answers={SCAM: (False, 0.95), ABUSE: (False, 0.95)})
+    result = await replay(case)
+    assert result.calls.total == 1
+    assert result.evaluations[2].decision.provisional is None
+
+
+async def test_a_copy_of_a_confirmed_scam_is_removed_but_not_punished_again():
+    """#310 item 3: the copy reused the violation verdict and went through
+    the sanction again: a second warn, or with a recent warn on record, a
+    second 24 h timeout. A copy is removed only (by the scam gate)."""
+    warned = AuthorHistory(
+        is_first_message=False,
+        days_since_last_message=0,
+        actions=(
+            PastAction(
+                "warn",
+                datetime.fromtimestamp(NOW.timestamp(), UTC) - timedelta(days=10),
+            ),
+        ),
+    )
+    member = Member("again", 72, NOW - timedelta(days=300), NOW - timedelta(days=200))
+    lure = "grab the free crypto airdrop https://airdrop-claim.example/now"
+    posts = [say(member, lure, NOW), say(member, lure, NOW + timedelta(seconds=19))]
+    case = ReplayCase(
+        name="copy of a confirmed scam",
+        policy=policy(ring=None),
+        messages=posts,
+        answers={SCAM: (True, 0.9), ABUSE: (False, 0.9)},
+        reads=ReplayReads(histories={member.id: warned}),
+    )
+    result = await replay(case)
+
+    assert result.calls.total == 1
+    original, copy = (e.decision.targets[member.id] for e in result.evaluations)
+    assert original.sanction.kind == gw.TIMEOUT  # the repeat
+    # No second repeat timeout and no scam notice; what is left is the spam
+    # engine's own duplicate-message warning, which legacy gives too.
+    assert copy.sanction.kind == gw.WARN
+    assert copy.notices == ["spam_warning"]
+    assert posts[1].message_id in {item.message_id for item in copy.cleanup}
+
+
+# -- a removed @everyone makes the author high risk for a day (#310 item 10b) --
+
+
+def _pinged(hours_ago: float) -> AuthorHistory:
+    return AuthorHistory(
+        is_first_message=False,
+        days_since_last_message=0,
+        pinged_everyone_at=datetime.fromtimestamp(NOW.timestamp(), UTC)
+        - timedelta(hours=hours_ago),
+    )
+
+
+async def test_four_images_an_hour_after_a_removed_ping_are_held_on_every_image():
+    result, _, _ = await _sampled(_pinged(1), pick=3)
+    [shown] = result.calls.haiku_images
+    assert len(shown) == 4
+    evaluation = result.evaluations[0]
+    assert evaluation.decision.provisional is not None
+    assert evaluation.classifier.as_record()["images"]["sampled"] is False
+
+
+async def test_the_same_post_25_hours_later_is_sampled_and_not_held():
+    result, _, _ = await _sampled(_pinged(25), pick=3)
+    [shown] = result.calls.haiku_images
+    assert len(shown) == 1
+    evaluation = result.evaluations[0]
+    assert evaluation.decision.provisional is None
+    assert evaluation.classifier.as_record()["images"]["sampled"] is True

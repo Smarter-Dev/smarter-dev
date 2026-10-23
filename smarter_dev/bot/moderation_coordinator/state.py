@@ -16,7 +16,9 @@ import contextlib
 import time
 from collections import deque
 from collections.abc import AsyncIterator
+from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 
 from smarter_dev.bot.moderation_coordinator.model import LabelVerdict
 from smarter_dev.bot.moderation_coordinator.model import MessageFacts
@@ -77,8 +79,19 @@ class SpamTracker:
         return state
 
     def observe(
-        self, facts: MessageFacts, settings: SpamEngineSettings, now: float
+        self,
+        facts: MessageFacts,
+        settings: SpamEngineSettings,
+        now: float,
+        *,
+        mass_mention_rule: bool = False,
     ) -> SpamObservation:
+        """The engine's decision on this message.
+
+        ``mass_mention_rule``: the coordinator's own ``@everyone``/``@here``
+        rule (delete only, code exempt; Zech, Oct 23 22:36) is on, so the
+        engine's plain mass-mention metric (a warning and a delete by itself)
+        is left to it. Nitro bait with a mass mention still mutes."""
         state = self._state(facts.guild_id, settings)
         thresholds = settings.thresholds
         state.prune(now, thresholds)
@@ -99,6 +112,10 @@ class SpamTracker:
             thresholds,
             last_warned_at=state.last_warned_at(facts.author_id),
         )
+        if mass_mention_rule:
+            metrics = replace(
+                metrics, mass_mention=False, current_message_mass_mention=False
+            )
         decision = decide_spam_response(
             metrics,
             warned_recently=state.was_warned_recently(facts.author_id, now, thresholds),
@@ -226,25 +243,39 @@ class VerdictCache:
     """
 
     def __init__(self) -> None:
-        self._entries: dict[tuple[str, str, str], tuple[float, asyncio.Future]] = {}
+        self._entries: dict[
+            tuple[str, str, str], tuple[float, asyncio.Future, frozenset[str]]
+        ] = {}
 
     def _prune(self, now: float) -> None:
-        for key, (at, _) in list(self._entries.items()):
+        for key, (at, _, _) in list(self._entries.items()):
             if now - at > VERDICT_TTL_SECONDS:
                 del self._entries[key]
 
     def claim(
-        self, guild_id: str, author_id: str, key: str, now: float | None = None
+        self,
+        guild_id: str,
+        author_id: str,
+        key: str,
+        now: float | None = None,
+        *,
+        reasons: Sequence[str] = (),
+        replace: bool = False,
     ) -> tuple[bool, asyncio.Future]:
         """``(True, future)`` for the first asker, who must settle the future;
-        ``(False, future)`` for a copy, which awaits it."""
+        ``(False, future)`` for a copy, which awaits it.
+
+        ``reasons`` are the high-signal reasons the asker was judged (and
+        held) under. ``replace`` makes this asker the first again: a copy
+        that :meth:`escalates` asks with its stronger reasons, and later
+        copies wait for that answer instead."""
         now = time.time() if now is None else now
         self._prune(now)
         entry = self._entries.get((guild_id, author_id, key))
-        if entry is not None:
+        if entry is not None and not replace:
             return False, entry[1]
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._entries[(guild_id, author_id, key)] = (now, future)
+        self._entries[(guild_id, author_id, key)] = (now, future, frozenset(reasons))
         return True, future
 
     def known(
@@ -254,6 +285,30 @@ class VerdictCache:
         now = time.time() if now is None else now
         self._prune(now)
         return (guild_id, author_id, key) in self._entries
+
+    def escalates(
+        self,
+        guild_id: str,
+        author_id: str,
+        key: str,
+        reasons: Sequence[str],
+        now: float | None = None,
+    ) -> bool:
+        """Whether a copy brings high-signal reasons (a burst, a mass mention
+        with a link) its post was not judged under: the earlier verdict (no
+        hold, perhaps one sampled image) does not cover it. A post already
+        found to be a violation covers every copy: it is removed, not asked
+        about again."""
+        now = time.time() if now is None else now
+        self._prune(now)
+        entry = self._entries.get((guild_id, author_id, key))
+        if entry is None or not set(reasons) - entry[2]:
+            return False
+        future = entry[1]
+        if future.done() and not future.cancelled():
+            if any(verdict.yes for verdict in future.result().values()):
+                return False
+        return True
 
     @staticmethod
     def settle(future: asyncio.Future, verdicts: dict[str, LabelVerdict]) -> None:

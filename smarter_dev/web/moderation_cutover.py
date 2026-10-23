@@ -224,6 +224,8 @@ async def switch(session, guild_id: str, *, by: str) -> dict[str, Any]:
         raise CutoverRefused(
             f"no legacy moderation is on in guild {guild_id}; nothing to hand over"
         )
+    # Not a hand-over: a rule only the coordinator has, on with it.
+    rules.append(own.MASS_MENTION)
 
     disboard: dict[str, Any] | None = None
     if own.BUMP_CHANNEL in rules:

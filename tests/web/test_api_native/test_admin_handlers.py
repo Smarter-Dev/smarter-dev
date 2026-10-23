@@ -491,6 +491,47 @@ async def test_saving_a_switched_off_edit_ping_catch_does_not_re_arm_it(
     assert record.enabled is False
 
 
+async def test_a_switched_off_edit_ping_catch_cannot_be_renamed_back_on(
+    db_session, submitted, no_guards
+):
+    """#310 item 6: renaming edit-ping-catch in the save that enables it used
+    to dodge the guard, which read the new name. The rename is refused and the
+    row stays off; a plain save without a rename is still accepted."""
+    record = AdminHandler(
+        guild_id="G1",
+        name="edit-ping-catch",
+        trigger_type="message_edit",
+        settings={},
+        channel_ids=[],
+        description="edit pings",
+        script="x = 1\n",
+        created_by_admin="extension",
+        enabled=False,
+    )
+    db_session.add(record)
+    await db_session.commit()
+    body = {
+        "description": "saved",
+        "script": record.script,
+        "settings": {},
+        "channel_ids": [],
+    }
+    async with _async_client(db_session) as client:
+        renamed = await client.put(
+            f"/api/admin/handlers/{record.id}", json={**body, "name": "pings"}
+        )
+        same_name = await client.put(
+            f"/api/admin/handlers/{record.id}",
+            json={**body, "name": "edit-ping-catch"},
+        )
+    assert renamed.status_code == 422, renamed.text
+    assert "replaced by the moderation coordinator" in renamed.text
+    assert same_name.status_code == 200, same_name.text
+    await db_session.refresh(record)
+    assert record.name == "edit-ping-catch"
+    assert record.enabled is False
+
+
 def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
     """#255: rename a handler with no sanction to scam-banner, then put the
     reference script on it. Only the original row may take that copy."""
