@@ -213,6 +213,9 @@ class ReplayCase:
     jev: Callable[..., object] = scripted_jev
     deadline: float = 10.0
     fetch_image: ImageFetcher = replay_image
+    #: How a sampled review picks its images; replays take the first ones,
+    #: so a case knows which image was shown.
+    choose_images: Callable[[list, int], list] = lambda items, count: items[:count]
 
 
 @dataclass
@@ -236,6 +239,7 @@ async def replay(case: ReplayCase) -> ReplayResult:
         deadline=case.deadline,
         clock=lambda: now[0],
         fetch_image=case.fetch_image,
+        choose_images=case.choose_images,
     )
     coordinator = Coordinator(case.reads, classifier)
     evaluations = []

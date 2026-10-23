@@ -408,6 +408,89 @@ async def test_a_live_punishing_script_is_frozen_but_scam_banner_can_be_reapplie
     assert disarmed.status_code == 200
 
 
+async def test_saving_a_switched_off_punisher_does_not_re_arm_it(
+    db_session, submitted, no_guards
+):
+    """#240: the cutover disables scam-banner. The full update enables on
+    every write, so saving the frozen script unchanged must leave it off; a
+    handler without sanctions is still enabled by a save, as before."""
+    punisher = AdminHandler(
+        guild_id="G1",
+        name="scam-banner",
+        trigger_type="message",
+        settings={},
+        channel_ids=[],
+        description="bans scammers",
+        script=BANNING,
+        created_by_admin="A1",
+        enabled=False,
+    )
+    harmless = AdminHandler(
+        guild_id="G1",
+        name="greeter",
+        trigger_type="message",
+        settings={},
+        channel_ids=[],
+        description="says hi",
+        script="x = 1\n",
+        created_by_admin="A1",
+        enabled=False,
+    )
+    db_session.add_all([punisher, harmless])
+    await db_session.commit()
+
+    async with _async_client(db_session) as client:
+        for record in (punisher, harmless):
+            response = await client.put(
+                f"/api/admin/handlers/{record.id}",
+                json={
+                    "description": "saved",
+                    "script": record.script,
+                    "settings": {},
+                    "channel_ids": [],
+                },
+            )
+            assert response.status_code == 200, response.text
+
+    await db_session.refresh(punisher)
+    await db_session.refresh(harmless)
+    assert punisher.enabled is False
+    assert harmless.enabled is True
+
+
+async def test_saving_a_switched_off_edit_ping_catch_does_not_re_arm_it(
+    db_session, submitted, no_guards
+):
+    """edit-ping-catch has no sanction call, but the coordinator replaced it:
+    a save after the cutover leaves it off."""
+    record = AdminHandler(
+        guild_id="G1",
+        name="edit-ping-catch",
+        trigger_type="message_edit",
+        settings={},
+        channel_ids=[],
+        description="edit pings",
+        script="x = 1\n",
+        created_by_admin="extension",
+        enabled=False,
+    )
+    db_session.add(record)
+    await db_session.commit()
+    async with _async_client(db_session) as client:
+        response = await client.put(
+            f"/api/admin/handlers/{record.id}",
+            json={
+                "description": "saved",
+                "script": record.script,
+                "settings": {},
+                "channel_ids": [],
+            },
+        )
+    assert response.status_code == 200, response.text
+    await db_session.refresh(record)
+    assert record.enabled is False
+
+
 def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
     """#255: rename a handler with no sanction to scam-banner, then put the
     reference script on it. Only the original row may take that copy."""

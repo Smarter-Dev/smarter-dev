@@ -28,9 +28,12 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Awaitable
+from collections.abc import Callable
 from collections.abc import Mapping
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from typing import Protocol
@@ -64,6 +67,17 @@ from smarter_dev.bot.spam_ring import TranscriptMessage
 from smarter_dev.web.handler_recent_messages import content_hash
 
 logger = logging.getLogger(__name__)
+
+#: Every wait in a decision is bounded, so a decision is made once and soon
+#: (#240): the staff check (unanswered refuses, as an unknown standing always
+#: does), the author's history (unread is an empty history), and the wait for
+#: a ring channel whose ad is being judged (one ad's history read, staff
+#: checks and classifier deadline fit inside it).
+STAFF_CHECK_SECONDS = 5.0
+HISTORY_READ_SECONDS = 5.0
+RING_LOCK_SECONDS = 20.0
+STAFF_CHECK_TIMED_OUT = "the staff check did not answer in time"
+STAFF_CHECK_FAILED = "the staff check failed"
 
 
 class CoordinatorReads(Protocol):
@@ -113,6 +127,33 @@ class Evaluation:
     #: Milliseconds from intake to the provisional timeout, and to the decision.
     provisional_ms: int | None = None
     latency_ms: int = 0
+    #: The post's content hash (the scam gate's key for its copies).
+    key: str = ""
+    #: The author's history, when the scam gate read it (the report's note).
+    history: AuthorHistory | None = None
+    #: A ring's conversation, for the report's transcript, and the alias its
+    #: ad and follow-ups share in the gateway.
+    ring_context: tuple[str, ...] = ()
+    ring_alias: str | None = None
+
+
+class _Slot:
+    """A concurrency slot that can be put down while waiting on something
+    else (a ring channel's lock), so lock waiters never hold every slot."""
+
+    def __init__(self, semaphore: asyncio.Semaphore | None) -> None:
+        self._semaphore = semaphore
+        self._held = False
+
+    async def take(self) -> None:
+        if self._semaphore is not None and not self._held:
+            await self._semaphore.acquire()
+            self._held = True
+
+    def give(self) -> None:
+        if self._semaphore is not None and self._held:
+            self._semaphore.release()
+            self._held = False
 
 
 def facts_hash(facts: MessageFacts) -> str:
@@ -149,12 +190,77 @@ class Coordinator:
         self.rings = rings or RingRegistry()
         self.verdict_cache = verdicts or VerdictCache()
 
-    async def evaluate(self, facts: MessageFacts, policy: GuildPolicy) -> Evaluation:
+    async def evaluate(
+        self,
+        facts: MessageFacts,
+        policy: GuildPolicy,
+        *,
+        slot: asyncio.Semaphore | None = None,
+        on_provisional: Callable[[MessageFacts, Provisional, str], Awaitable[None]]
+        | None = None,
+    ) -> Evaluation:
+        """Judge one revision.
+
+        ``slot`` bounds how many decisions run at once; it is held for the
+        decision except while waiting on a busy ring channel. ``on_provisional``
+        places the provisional timeout (with the post's key) before the
+        classifier is asked, when the coordinator acts.
+        """
+        held = _Slot(slot)
         async with contextlib.AsyncExitStack() as stack:
-            return await self._evaluate(facts, policy, stack)
+            await held.take()
+            stack.callback(held.give)
+            return await self._evaluate(facts, policy, stack, held, on_provisional)
+
+    async def _staff_refusal(
+        self,
+        guild_id: str,
+        user_id: str,
+        *,
+        is_bot: bool | None,
+        extra_role_ids: tuple[str, ...],
+    ) -> str:
+        try:
+            return await asyncio.wait_for(
+                self.reads.staff_refusal(
+                    guild_id, user_id, is_bot=is_bot, extra_role_ids=extra_role_ids
+                ),
+                STAFF_CHECK_SECONDS,
+            )
+        except TimeoutError:
+            logger.warning("Coordinator staff check on %s timed out", user_id)
+            return STAFF_CHECK_TIMED_OUT
+        except Exception:  # noqa: BLE001 — an unknown standing refuses
+            logger.warning("Coordinator staff check on %s failed", user_id)
+            return STAFF_CHECK_FAILED
+
+    async def _author_history(
+        self, facts: MessageFacts, before: datetime, review: list[str]
+    ) -> AuthorHistory:
+        try:
+            return await asyncio.wait_for(
+                self.reads.author_history(facts.guild_id, facts.author_id, before),
+                HISTORY_READ_SECONDS,
+            )
+        except Exception as error:  # noqa: BLE001 — judged without it
+            logger.warning(
+                "Coordinator could not read %s's history (%s)",
+                facts.author_id,
+                type(error).__name__,
+            )
+            review.append(
+                f"<@{facts.author_id}>'s history could not be read; judged as if "
+                "they had none (not new, not silent, no earlier actions)."
+            )
+            return AuthorHistory(is_first_message=None, days_since_last_message=None)
 
     async def _evaluate(
-        self, facts: MessageFacts, policy: GuildPolicy, stack: contextlib.AsyncExitStack
+        self,
+        facts: MessageFacts,
+        policy: GuildPolicy,
+        stack: contextlib.AsyncExitStack,
+        held: _Slot,
+        on_provisional,
     ) -> Evaluation:
         started = time.monotonic()
         now = facts.posted_at
@@ -169,7 +275,7 @@ class Coordinator:
         async def author_is_staff() -> bool:
             nonlocal author_refusal, refusal_known
             if not refusal_known:
-                author_refusal = await self.reads.staff_refusal(
+                author_refusal = await self._staff_refusal(
                     facts.guild_id,
                     facts.author_id,
                     is_bot=facts.author_is_bot,
@@ -211,6 +317,8 @@ class Coordinator:
                 RecentPost(facts.channel_id, facts.message_id, now, key),
             )
         scam_review = None
+        history = None
+        known_copy = False
         if (
             policy.scam_gate
             and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
@@ -218,8 +326,9 @@ class Coordinator:
             and rules.scam_gate_content(facts)
             and not await author_is_staff()
         ):
-            history = await self.reads.author_history(
-                facts.guild_id, facts.author_id, now_dt
+            history = await self._author_history(facts, now_dt, review)
+            known_copy = self.verdict_cache.known(
+                facts.guild_id, facts.author_id, key, now
             )
             _, burst = rules.burst_copies(facts, key, earlier_posts)
             suspect = rules.scam_suspect_reasons(facts, burst)
@@ -229,7 +338,9 @@ class Coordinator:
                 scam_link_domains=policy.spam.scam_link_domains
                 if policy.spam is not None
                 else (),
-                suspect=suspect,
+                suspect=rules.hold_reasons(
+                    suspect, rules.scam_risky_author(facts, history, now_dt)
+                ),
             )
             scam_review = rules.scam_gate_review(
                 facts,
@@ -238,6 +349,7 @@ class Coordinator:
                 recent=earlier_posts,
                 high_signal=high_signal,
                 now=now_dt,
+                known_copy=known_copy,
             )
 
         ring_pending = None
@@ -255,11 +367,30 @@ class Coordinator:
             )
         ):
             # Held to the end: the ad's sweep finishes (and opens its
-            # incident) before a ring message behind it is judged.
-            await stack.enter_async_context(
-                self.rings.channel(facts.guild_id, facts.channel_id)
+            # incident) before a ring message behind it is judged. The wait
+            # is bounded and holds no concurrency slot: a busy ring channel
+            # never stalls the other channels.
+            held.give()
+            locked = False
+            try:
+                async with asyncio.timeout(RING_LOCK_SECONDS):
+                    await stack.enter_async_context(
+                        self.rings.channel(facts.guild_id, facts.channel_id)
+                    )
+                locked = True
+            except TimeoutError:
+                review.append(
+                    f"Ring check on <@{facts.author_id}>'s message skipped: the "
+                    f"channel's ring check was still running after "
+                    f"{RING_LOCK_SECONDS:.0f} s."
+                )
+            finally:
+                await held.take()
+            incident = (
+                self.rings.active(facts.guild_id, facts.channel_id, now)
+                if locked
+                else None
             )
-            incident = self.rings.active(facts.guild_id, facts.channel_id, now)
             if incident is not None and rules.ring_followup_applies(
                 facts, incident, new_member_window=ring.new_member_window, now=now_dt
             ):
@@ -270,7 +401,8 @@ class Coordinator:
                         known_participant=facts.author_id in incident.participants,
                     )
             elif (
-                rules.ring_may_start(
+                locked
+                and rules.ring_may_start(
                     facts, new_member_window=ring.new_member_window, now=now_dt
                 )
                 and not await author_is_staff()
@@ -317,12 +449,17 @@ class Coordinator:
         # 4. Provisional containment for a high-signal scam under review.
         provisional = None
         provisional_ms = None
-        if scam_review is not None and scam_review.high_signal:
+        # A copy of a post already judged (or being judged) is covered by
+        # that post's hold and verdict: it is not held again.
+        if scam_review is not None and scam_review.high_signal and not known_copy:
             provisional = Provisional(
                 user_id=facts.author_id,
                 duration_seconds=PROVISIONAL_SECONDS,
                 reasons=scam_review.high_signal,
             )
+            if on_provisional is not None:
+                # Contain first: the verdict is up to 10 s away.
+                await on_provisional(facts, provisional, key)
             provisional_ms = int((time.monotonic() - started) * 1000)
 
         # 5. One request for the union of labels.
@@ -362,6 +499,7 @@ class Coordinator:
             ring_candidates=_ring_candidates(ring_pending),
             charge_author=not isinstance(ring_pending, rules.RingFollowup)
             or bool(labels & {SCAM, ABUSE}),
+            sampled_images=_image_sample(facts, scam_review),
         )
         try:
             result = await self.classifier.classify(request)
@@ -377,6 +515,21 @@ class Coordinator:
         # 6. Resolve and decide.
         scam_outcome = None
         if scam_review is not None:
+            # Read the copies again: the verdict outlasts a burst, so a copy
+            # posted while it was asked is removed with the rest (as
+            # scam-banner re-read them after its review). The same author's
+            # same post only.
+            later, _ = rules.burst_copies(
+                facts,
+                key,
+                self.recent.read(facts.guild_id, facts.author_id, now),
+            )
+            known = {post.message_id for post in scam_review.copies}
+            scam_review = replace(
+                scam_review,
+                copies=scam_review.copies
+                + tuple(post for post in later if post.message_id not in known),
+            )
             scam_hits, scam_outcome, lines = scam_review.resolve(verdicts)
             hits += scam_hits
             review += lines
@@ -409,6 +562,7 @@ class Coordinator:
                             for m in ring_pending.messages
                             if m.author_id in participants
                         },
+                        ad_message_id=facts.message_id,
                     )
                 )
         elif isinstance(ring_pending, rules.RingFollowup):
@@ -424,6 +578,19 @@ class Coordinator:
                 incident.participants.add(facts.author_id)
             else:
                 incident.spared.add(facts.author_id)
+
+        ring_context: tuple[str, ...] = ()
+        ring_alias = None
+        if isinstance(ring_pending, rules.RingSweep) and any(
+            hit.rule == rules.SPAM_RING for hit in hits
+        ):
+            ring_context = ring_pending.context
+            ring_alias = _ring_alias(facts.guild_id, facts.channel_id, facts.message_id)
+        elif isinstance(ring_pending, rules.RingFollowup):
+            ring_context = tuple(ring_pending.incident.context)
+            ring_alias = _ring_alias(
+                facts.guild_id, facts.channel_id, ring_pending.incident.ad_message_id
+            )
 
         refusals = await self._refusals(
             facts, hits, author_refusal, refusal_known, extra_roles
@@ -446,6 +613,10 @@ class Coordinator:
             reused_labels=sorted(reused),
             provisional_ms=provisional_ms,
             latency_ms=int((time.monotonic() - started) * 1000),
+            key=key,
+            history=history,
+            ring_context=ring_context,
+            ring_alias=ring_alias,
         )
 
     async def _refusals(
@@ -464,7 +635,7 @@ class Coordinator:
             user_id = hit.target_user_id
             if user_id in refusals:
                 continue
-            refusals[user_id] = await self.reads.staff_refusal(
+            refusals[user_id] = await self._staff_refusal(
                 facts.guild_id, user_id, is_bot=False, extra_role_ids=extra_roles
             )
         return refusals
@@ -472,6 +643,29 @@ class Coordinator:
 
 #: The ring's sweep cap (``spam_ring.MAX_SWEEP_MESSAGES``).
 MAX_RING_MESSAGES = 100
+
+
+#: Images an established member's unheld image post is checked on.
+SAMPLED_IMAGES = 1
+
+
+def _image_sample(facts: MessageFacts, review: rules.ScamReview | None) -> int | None:
+    """Zech, Oct 23: when a member who is not high risk posts four or more
+    images and is not held, the review sees one of them at random. A
+    high-risk author, a held post and everything else show up to four."""
+    if (
+        review is None
+        or len(facts.images) < 4
+        or review.risky_author
+        or review.high_signal
+    ):
+        return None
+    return SAMPLED_IMAGES
+
+
+def _ring_alias(guild_id: str, channel_id: str, ad_message_id: str) -> str:
+    """One gateway incident for a ring's ad and its follow-ups."""
+    return f"coordinator_ring:{guild_id}:{channel_id}:{ad_message_id}"
 
 
 def _share(future, verdicts: Verdicts, labels: frozenset[str]) -> None:

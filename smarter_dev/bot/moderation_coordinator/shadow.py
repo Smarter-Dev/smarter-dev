@@ -1,4 +1,5 @@
-"""The coordinator in shadow: it judges live traffic and records, nothing else.
+"""The coordinator on live traffic: it judges, records, and (once a guild is
+switched to it) acts.
 
 For every human message (and every edit that changed the text) in a guild
 listed in ``MODERATION_SHADOW_GUILD_IDS``, the coordinator makes its one
@@ -8,15 +9,27 @@ actors actually did to the same message, from the moderation gateway's own
 records (the incident linked to ``msg:<id>``, its operations), and stores it
 next to the decision with an agreement class.
 
-**It cannot touch Discord.** It holds no gateway, no port and no handler
-runtime; :class:`BotReads` is the only thing it is given, and every method on
-it reads (the cache, the staff rule's REST lookups, one channel-history read
-for a possible ring). Its classifier requests are real and metered as
-``moderation_shadow_classifier``, inside the budget (:mod:`.classifier`).
+**In shadow it cannot touch Discord.** The coordinator itself holds no
+gateway, no port and no handler runtime; :class:`BotReads` is the only thing
+it is given, and every method on it reads (the cache, the staff rule's REST
+lookups, one channel-history read for a possible ring). Its classifier
+requests are real and metered as ``moderation_shadow_classifier``, inside the
+budget (:mod:`.classifier`).
+
+**Acting (#240).** For a guild whose ownership row names the coordinator
+(:mod:`.ownership`, written by ``scripts/moderation_cutover.py``), the
+decision is recorded first and then handed to :class:`~.act.Executor`, which
+carries it out through the moderation gateway. Recording first makes a
+replayed event (a handover replays what the old pod may have seen) a no-op:
+a revision already recorded is not acted on twice. Without that row nothing
+changes: shadow, as before.
 
 Nothing here blocks the bot: each message is judged in its own task, at most
-:data:`MAX_CONCURRENT` at a time, and one more than :data:`MAX_PENDING`
-waiting is dropped and counted rather than queued.
+:data:`MAX_CONCURRENT` decisions at a time (a decision waiting on a busy ring
+channel holds no slot), and one more than :data:`MAX_PENDING` waiting is
+dropped and counted rather than queued. Every task is tracked with
+:func:`smarter_dev.bot.leadership.track`, so a process that stops acting
+finishes the decisions it accepted before it shuts down.
 """
 
 from __future__ import annotations
@@ -37,16 +50,20 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from smarter_dev.bot import leadership
+from smarter_dev.bot.moderation_coordinator.act import Executor
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierBudget
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
+from smarter_dev.bot.moderation_coordinator.coordinator import facts_hash
 from smarter_dev.bot.moderation_coordinator.decide import PROVISIONAL_SECONDS
 from smarter_dev.bot.moderation_coordinator.model import ACTION_RANK
 from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import MessageFacts
 from smarter_dev.bot.moderation_coordinator.model import PastAction
+from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
+from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
 from smarter_dev.bot.moderation_coordinator.rules import SANCTION_ACTIONS
 from smarter_dev.bot.purge_core import snowflake_to_datetime
@@ -237,7 +254,11 @@ class BotReads:
             ).first()
             actions = (
                 await session.execute(
-                    select(ModerationAction.action_type, ModerationAction.created_at)
+                    select(
+                        ModerationAction.action_type,
+                        ModerationAction.created_at,
+                        ModerationAction.reason,
+                    )
                     .where(
                         ModerationAction.guild_id == guild_id,
                         ModerationAction.target_user_id == user_id,
@@ -303,8 +324,12 @@ def author_history_from(row, actions: Iterable, before: datetime) -> AuthorHisto
     be told (None: not counted as long-silent).
     """
     past = tuple(
-        PastAction(action_type=action_type, created_at=_utc(created_at))
-        for action_type, created_at in actions
+        PastAction(
+            action_type=action[0],
+            created_at=_utc(action[1]),
+            reason=action[2] if len(action) > 2 else None,
+        )
+        for action in actions
     )
     if row is None:
         return AuthorHistory(
@@ -398,6 +423,18 @@ class ShadowRecorder:
             )
             return {guild_id: int(total) for guild_id, total in rows}
 
+    async def recorded(self, guild_id: str, message_id: str, revision: str) -> bool:
+        """Whether this revision was already judged (a replayed event)."""
+        async with default_session_factory()() as session:
+            found = await session.execute(
+                select(ModerationShadowDecision.id).where(
+                    ModerationShadowDecision.guild_id == guild_id,
+                    ModerationShadowDecision.message_id == message_id,
+                    ModerationShadowDecision.revision == revision,
+                )
+            )
+            return found.first() is not None
+
     async def record(self, row: ModerationShadowDecision) -> bool:
         """Insert one row; a revision already recorded (a replayed event) is kept."""
         async with default_session_factory()() as session:
@@ -415,6 +452,8 @@ class ShadowRecorder:
 # ---------------------------------------------------------------------------
 
 APPLIED = (gw.CONFIRMED, gw.COVERED)
+#: The agreement of a revision the coordinator decided as the guild's owner.
+ACTING = "acting"
 
 
 def _is_provisional_hold(op: ModerationOperation) -> bool:
@@ -577,6 +616,9 @@ class LegacyComparer:
                 row.agreement = (
                     "not_judged"
                     if row.error
+                    # The coordinator acted itself: there is no legacy side.
+                    else ACTING
+                    if (row.policy or {}).get("owner") == COORDINATOR
                     else agreement(
                         row.strongest_action,
                         row.target_ids or [],
@@ -671,12 +713,15 @@ class ModerationShadow:
         guild_ids: frozenset[str],
         policies: PolicyCache | None = None,
         recorder: ShadowRecorder | None = None,
+        executor: Executor | None = None,
         clock=time.time,
     ) -> None:
         self.coordinator = coordinator
         self.guild_ids = guild_ids
-        self.policies = policies or PolicyCache()
+        self.policies = policies or PolicyCache(ownership=load_ownership)
         self.recorder = recorder or ShadowRecorder()
+        #: Carries out decisions for guilds the coordinator owns; None never acts.
+        self.executor = executor
         self._clock = clock
         self._slots = asyncio.Semaphore(MAX_CONCURRENT)
         self._tasks: set[asyncio.Task] = set()
@@ -700,42 +745,117 @@ class ModerationShadow:
         task = asyncio.get_running_loop().create_task(self.judge(facts))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        # A process that stops acting drains these before it shuts down
+        # (client.drain_accepted_work), so an accepted decision is finished,
+        # not dropped, at a handover.
+        leadership.track(task)
         return task
 
     async def judge(self, facts: MessageFacts) -> ModerationShadowDecision | None:
-        async with self._slots:
-            try:
-                policy = await self.policies.get(facts.guild_id, facts.posted_at)
-                evaluation = await self.coordinator.evaluate(facts, policy)
-                row = row_from(evaluation)
-            except Exception as error:  # noqa: BLE001 — record that it was not judged
-                log_exception(
-                    logger,
-                    "Moderation shadow could not judge message %s",
+        policy = None
+        evaluation = None
+        try:
+            policy = await self.policies.get(facts.guild_id, facts.posted_at)
+            acting = self.executor is not None and policy.acting
+            if acting and await self.recorder.recorded(
+                facts.guild_id, facts.message_id, facts.revision
+            ):
+                # A replayed event (a handover replays what the old pod may
+                # have handled): judged and acted on already. Not judged
+                # again, so no second hold either.
+                logger.info(
+                    "Coordinator skipped message %s revision %s: already decided",
                     facts.message_id,
-                    level=logging.WARNING,
-                )
-                row = ModerationShadowDecision(
-                    guild_id=facts.guild_id,
-                    channel_id=facts.channel_id,
-                    message_id=facts.message_id,
-                    revision=facts.revision,
-                    is_edit=facts.is_edit,
-                    author_id=facts.author_id,
-                    message_at=datetime.fromtimestamp(facts.posted_at, UTC),
-                    error=type(error).__name__,
-                )
-            try:
-                await self.recorder.record(row)
-            except Exception:  # noqa: BLE001 — a lost row, never a lost message
-                log_exception(
-                    logger,
-                    "Moderation shadow could not record message %s",
-                    facts.message_id,
-                    level=logging.WARNING,
+                    facts.revision,
                 )
                 return None
-            return row
+            on_provisional = None
+            if acting:
+
+                async def on_provisional(facts_, provisional, key):
+                    await self.executor.contain(facts_, provisional, key, policy=policy)
+
+            evaluation = await self.coordinator.evaluate(
+                facts, policy, slot=self._slots, on_provisional=on_provisional
+            )
+            row = row_from(evaluation)
+        except Exception as error:  # noqa: BLE001 — record that it was not judged
+            log_exception(
+                logger,
+                "Moderation shadow could not judge message %s",
+                facts.message_id,
+                level=logging.WARNING,
+            )
+            if (
+                self.executor is not None
+                and policy is not None
+                and policy.acting
+                and evaluation is None
+            ):
+                await self.executor.evaluation_failed(
+                    facts, facts_hash(facts), policy, error
+                )
+            row = ModerationShadowDecision(
+                guild_id=facts.guild_id,
+                channel_id=facts.channel_id,
+                message_id=facts.message_id,
+                revision=facts.revision,
+                is_edit=facts.is_edit,
+                author_id=facts.author_id,
+                message_at=datetime.fromtimestamp(facts.posted_at, UTC),
+                error=type(error).__name__,
+            )
+        fresh = True
+        try:
+            fresh = await self.recorder.record(row)
+        except Exception:  # noqa: BLE001 — a lost row, never a lost message
+            log_exception(
+                logger,
+                "Moderation shadow could not record message %s",
+                facts.message_id,
+                level=logging.WARNING,
+            )
+            row = None
+        if (
+            evaluation is not None
+            and self.executor is not None
+            and evaluation.policy.acting
+        ):
+            if not fresh:
+                # Already recorded: a replayed event, already acted on.
+                logger.info(
+                    "Coordinator skipped message %s revision %s: already decided",
+                    facts.message_id,
+                    facts.revision,
+                )
+            else:
+                result = None
+                try:
+                    result = await self.executor.execute(evaluation)
+                except Exception:  # noqa: BLE001 — logged; the gateway reconciles
+                    log_exception(
+                        logger,
+                        "Coordinator could not act on message %s",
+                        facts.message_id,
+                    )
+                self._disarm_missed_mutes(evaluation, result)
+        return row
+
+    def _disarm_missed_mutes(self, evaluation: Evaluation, result) -> None:
+        """A spam mute Discord did not apply leaves the author counted again."""
+        applied = {
+            outcome.target_user_id
+            for outcome in (result.outcomes if result is not None else ())
+            if outcome.kind == gw.TIMEOUT and outcome.applied
+        }
+        for user_id, target in evaluation.decision.targets.items():
+            if (
+                "spam_engine" in target.rules
+                and target.sanction is not None
+                and target.sanction.kind == gw.TIMEOUT
+                and user_id not in applied
+            ):
+                self.coordinator.spam.disarm(evaluation.facts.guild_id, user_id)
 
     async def on_create(self, event: hikari.GuildMessageCreateEvent) -> None:
         if not self.wants(event.guild_id) or not event.is_human:
@@ -814,6 +934,8 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
     shadow = ModerationShadow(
         Coordinator(BotReads(bot), ModerationClassifier(budget=budget)),
         guild_ids=guild_ids,
+        # Acts only in a guild whose ownership row names the coordinator.
+        executor=Executor.for_bot(bot),
     )
 
     @bot.listen()
@@ -848,6 +970,8 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
         shadow.background = asyncio.get_running_loop().create_task(compare_forever())
 
     logger.info(
-        "Moderation coordinator shadow on for guild(s) %s", ", ".join(sorted(guild_ids))
+        "Moderation coordinator on for guild(s) %s (shadow unless a guild is "
+        "switched to it)",
+        ", ".join(sorted(guild_ids)),
     )
     return shadow

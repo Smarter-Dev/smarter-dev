@@ -51,6 +51,12 @@ from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.model import Verdicts
 from smarter_dev.bot.moderation_coordinator.model import participant_label
+from smarter_dev.bot.moderation_coordinator.ownership import ATTACHMENT_FILTER
+from smarter_dev.bot.moderation_coordinator.ownership import BUMP_CHANNEL
+from smarter_dev.bot.moderation_coordinator.ownership import EDIT_PING
+from smarter_dev.bot.moderation_coordinator.ownership import SCAM_GATE
+from smarter_dev.bot.moderation_coordinator.ownership import SPAM_ENGINE
+from smarter_dev.bot.moderation_coordinator.ownership import SPAM_RING
 from smarter_dev.bot.moderation_coordinator.policy import AttachmentPolicy
 from smarter_dev.bot.spam_engine import SPAM_ACTION_MUTE
 from smarter_dev.bot.spam_engine import SPAM_ACTION_NONE
@@ -66,14 +72,6 @@ from smarter_dev.bot.spam_ring import joined_near_participant
 from smarter_dev.bot.spam_ring import passes_prefilter
 from smarter_dev.bot.spam_ring import select_candidates
 from smarter_dev.web.moderation_gateway import types as gw
-
-# Rule names, as decisions and the shadow record name them.
-SPAM_ENGINE = "spam_engine"
-ATTACHMENT_FILTER = "attachment_filter"
-SPAM_RING = "spam_ring"
-SCAM_GATE = "scam_gate"
-EDIT_PING = "edit_ping"
-BUMP_CHANNEL = "bump_channel"
 
 DAY = 86400
 
@@ -225,8 +223,20 @@ def bump_channel_hits(
 # High signal
 # ---------------------------------------------------------------------------
 
-#: scam-banner's link test (scheme or www required, unlike the spam engine's).
-_SCAM_GATE_LINK = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+#: scam-banner's link test, widened to links written without a scheme: a bare
+#: invite (``discord.gg/x``, ``discord.com/invite/x``), any ``host.tld/path``,
+#: and a bare domain on a commonly abused TLD (#301: ferryloy's bare invites
+#: passed scam-banner as plain text). A host right after ``@`` or a word
+#: character (an email address, ``node.js``) is not a link.
+_SCAM_GATE_LINK = re.compile(
+    r"(?:https?://|www\.)\S+"
+    r"|(?<![\w@.-])(?:discord(?:app)?\.(?:gg|com/invite)|dsc\.gg)/\S+"
+    r"|(?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}/\S*"
+    r"|(?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+"
+    r"(?:com|net|org|gg|io|xyz|ru|ly|me|app|gift|link|click|shop|site|online|top"
+    r"|live|co|cc|tk|ml|ga|cf|gq|pw|info|biz|store|fun|win|vip)\b(?![.\w-])",
+    re.IGNORECASE,
+)
 _RISKY_WORDS = re.compile(
     r"\b(?:crypto|bitcoin|ethereum|eth|wallet|seed phrase|airdrop|giveaway|nitro|claim"
     r"|fag(?:got)?|nigg(?:er|a)|kike|spic|chink|tranny)\b",
@@ -340,6 +350,17 @@ def scam_suspect_reasons(facts: MessageFacts, burst: bool) -> tuple[str, ...]:
     return tuple(reasons)
 
 
+def hold_reasons(suspect: Sequence[str], risky: Sequence[str]) -> tuple[str, ...]:
+    """Which suspect reasons hold the author while the post is judged.
+
+    Zech, Oct 23: four or more images hold only a high-risk author (new,
+    first-time, silent 30 days, or moderated in the last 30 days:
+    :func:`scam_risky_author`); an established member's image post is still
+    reviewed, without a hold. A cross-channel burst always holds.
+    """
+    return tuple(reason for reason in suspect if reason != HIGH_SIGNAL_IMAGES or risky)
+
+
 def scam_risky_author(
     facts: MessageFacts, history: AuthorHistory, now: datetime
 ) -> tuple[str, ...]:
@@ -446,6 +467,7 @@ def scam_gate_review(
     recent: Sequence[RecentPost],
     high_signal: Sequence[str],
     now: datetime,
+    known_copy: bool = False,
 ) -> ScamReview | None:
     """Whether scam-banner would have reviewed this message, and with what.
 
@@ -453,13 +475,19 @@ def scam_gate_review(
     images, or a cross-channel burst), a risky author, or a high-signal
     event. The last is new: a scam lure from an established account (a
     compromised one) is judged instead of only being muted.
+
+    ``known_copy``: the same author's same post was judged (or is being
+    judged) within the last two minutes. The copy reuses that verdict, so a
+    confirmed scam's later copy is removed even when its own gates no longer
+    fire (the author's second post is no longer a first message), as
+    scam-banner's ``bad:`` claim removed it unreviewed.
     """
     if facts.is_edit or not scam_gate_content(facts):
         return None
     copies, burst = burst_copies(facts, key, recent)
     suspect = scam_suspect_reasons(facts, burst)
     risky = scam_risky_author(facts, history, now)
-    if not (suspect or risky or high_signal):
+    if not (suspect or risky or high_signal or known_copy):
         return None
     return ScamReview(
         facts=facts,
@@ -650,6 +678,8 @@ class RingIncident:
     context: list[str]
     spared: set[str] = field(default_factory=set)
     handled_message_ids: set[str] = field(default_factory=set)
+    #: The ad's message: its follow-ups join the ad's gateway incident.
+    ad_message_id: str = ""
 
 
 def ring_followup_applies(

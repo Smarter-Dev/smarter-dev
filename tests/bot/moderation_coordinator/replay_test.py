@@ -197,10 +197,11 @@ async def test_established_members_are_never_actioned():
 
     assert [e.decision.strongest for e in result.evaluations] == [None] * len(messages)
     # Only the image dump needed a check (scam-banner's 4+ images); it came
-    # back clean and its hold was released.
+    # back clean. An established member is not held while it is asked
+    # (Zech, Oct 23: the image hold is for high-risk authors only).
     asked = [e for e in result.evaluations if e.classifier.requests]
     assert [e.facts.message_id for e in asked] == [messages[2].message_id]
-    assert asked[0].decision.provisional.resolution == "released"
+    assert asked[0].decision.provisional is None
     # The moderator's @here is the spam engine's, refused on staff grounds.
     mod = result.by_message(messages[3].message_id)
     assert mod.decision.staff_excluded
@@ -212,25 +213,30 @@ async def test_established_members_are_never_actioned():
 # ---------------------------------------------------------------------------
 
 
-async def test_2030_every_image_is_shown_and_a_clean_answer_releases_the_hold():
+async def test_2030_every_image_is_shown_and_a_clean_answer_ends_it():
     case, _, posts = images_2030()
     result = await replay(case)
 
     first = result.by_message(posts[0].message_id)
     assert first.classifier.backend == "haiku"
     assert first.scam_outcome == "clean"
-    assert first.decision.provisional.resolution == "released"
-    assert [len(images) for images in result.calls.haiku_images] == [4] * len(
+    # An account of two years: reviewed, not held (Zech, Oct 23).
+    assert first.decision.provisional is None
+    # Not high risk and not held: each post is checked on one image chosen
+    # at random (Zech, Oct 23); the other three are named, not unseen.
+    assert [len(images) for images in result.calls.haiku_images] == [1] * len(
         result.calls.haiku
     )
-    assert first.classifier.as_record()["images"]["sent"] == 4
+    record = first.classifier.as_record()["images"]
+    assert (record["sent"], record["not_sampled"], record["sampled"]) == (1, 3, True)
+    assert record["unseen"] == 0
 
 
-async def test_2030_one_image_not_loaded_keeps_the_hold_until_it_expires():
+async def test_2030_one_image_not_loaded_is_unknown_and_said():
     from smarter_dev.bot.moderation_coordinator.replay import replay_image
 
     async def one_fails(url, limit):
-        if url.endswith("/p0_2.png"):
+        if url.endswith("/p0_0.png"):  # the one the replay samples
             raise ConnectionError("cdn refused")
         return await replay_image(url, limit)
 
@@ -240,7 +246,8 @@ async def test_2030_one_image_not_loaded_keeps_the_hold_until_it_expires():
     first = result.by_message(posts[0].message_id)
     assert first.verdicts[SCAM].outcome == UNSEEN_IMAGES
     assert first.scam_outcome == "unknown"
-    assert first.decision.provisional.resolution == "expired"
+    assert first.decision.provisional is None  # not a high-risk author
+    assert first.decision.strongest is None
     assert any("came back unknown" in line for line in first.decision.review)
 
 

@@ -1,0 +1,73 @@
+"""Who moderates a guild: the legacy actors or the coordinator.
+
+One row per switched guild (``moderation_ownership``), written only by
+``scripts/moderation_cutover.py``. No row means legacy: the coordinator
+judges in shadow and acts on nothing.
+
+``generation`` goes up on every switch. The coordinator reads it with the
+guild's policy and reads it again just before acting; a decision made under
+an older generation (a rollback landed while it was being judged) does not
+act. That is the fence: a rollback changes the owner for new events, and
+what the coordinator already did is left to the gateway's reconciliation.
+
+Nothing here imports the bot runtime, so the cutover script can use it.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from sqlalchemy import select
+
+from smarter_dev.web.models import ModerationOwnership
+from smarter_dev.web.moderation_gateway.gateway import default_session_factory
+
+LEGACY = "legacy"
+COORDINATOR = "coordinator"
+
+# The coordinator's rules, by the names its decisions use (``rules.py``).
+SPAM_ENGINE = "spam_engine"
+ATTACHMENT_FILTER = "attachment_filter"
+SPAM_RING = "spam_ring"
+SCAM_GATE = "scam_gate"
+EDIT_PING = "edit_ping"
+BUMP_CHANNEL = "bump_channel"
+RULES = (SPAM_ENGINE, ATTACHMENT_FILTER, SPAM_RING, SCAM_GATE, EDIT_PING, BUMP_CHANNEL)
+
+
+@dataclass(frozen=True, slots=True)
+class Ownership:
+    guild_id: str
+    owner: str = LEGACY
+    generation: int = 0
+    rules: frozenset[str] = frozenset()
+
+    @property
+    def coordinator_acts(self) -> bool:
+        return self.owner == COORDINATOR
+
+
+def ownership_from(row: ModerationOwnership | None, guild_id: str) -> Ownership:
+    if row is None:
+        return Ownership(guild_id=guild_id)
+    return Ownership(
+        guild_id=guild_id,
+        owner=row.owner,
+        generation=int(row.generation or 0),
+        rules=frozenset(str(rule) for rule in (row.rules or ()) if rule in RULES),
+    )
+
+
+async def read_ownership(session, guild_id: str) -> Ownership:
+    row = (
+        await session.execute(
+            select(ModerationOwnership).where(ModerationOwnership.guild_id == guild_id)
+        )
+    ).scalar_one_or_none()
+    return ownership_from(row, guild_id)
+
+
+async def load_ownership(guild_id: str) -> Ownership:
+    """The guild's ownership now; raises when the database cannot be read."""
+    async with default_session_factory()() as session:
+        return await read_ownership(session, guild_id)

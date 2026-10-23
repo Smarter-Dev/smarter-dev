@@ -13,6 +13,11 @@ off here too: a disabled or missing policy never silently activates.
   handlers are installed and enabled, and the bump channel from the last
   one's scope.
 
+Once a guild is switched to the coordinator (:mod:`.ownership`), those legacy
+toggles are off: the cutover turned them off. The rules then run from the
+ownership row's rule list, still with each actor's own settings (thresholds,
+file tiers, the ring's windows, the handlers' scopes).
+
 The scam gate is a port of the reference copy of scam-banner
 (``scripts/handler_scripts/scam-banner.monty``). The live script is a database
 row that can drift from that copy, so its sha256 is compared with
@@ -30,6 +35,9 @@ from dataclasses import replace
 
 from sqlalchemy import select
 
+from smarter_dev.bot.moderation_coordinator import ownership as own
+from smarter_dev.bot.moderation_coordinator.ownership import Ownership
+from smarter_dev.bot.moderation_coordinator.ownership import read_ownership
 from smarter_dev.bot.spam_engine import SpamEngineSettings
 from smarter_dev.bot.spam_ring import SpamRingSettings
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
@@ -39,6 +47,7 @@ from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_REFERENCE_SHA2
 from smarter_dev.web.handler_moderation_policy import script_sha256
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.web.moderation_gateway.config import load_report_channel
 from smarter_dev.web.moderation_gateway.gateway import default_session_factory
 
 logger = logging.getLogger(__name__)
@@ -55,6 +64,10 @@ POLICY_TTL_SECONDS = 60.0
 class AttachmentPolicy:
     ignored_extensions: tuple[str, ...]
     warn_extensions: tuple[str, ...]
+    #: The guild's own notice texts (``{user}``, ``{extension}``,
+    #: ``{filename}``); None uses the filter's defaults.
+    delete_message: str | None = None
+    warn_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,10 +88,22 @@ class GuildPolicy:
     edit_ping_channel_ids: frozenset[str] = frozenset()
     bump_channel_ids: frozenset[str] = frozenset()
     staff_exempt_role_ids: tuple[str, ...] = ()
+    #: Who moderates the guild. The coordinator acts only as ``coordinator``,
+    #: and only while the generation it decided under is still current.
+    owner: str = own.LEGACY
+    generation: int = 0
+    #: Where incident reports go, and the role a spam mute pings.
+    report_channel_id: str | None = None
     loaded_at: float = field(default=0.0, compare=False)
+
+    @property
+    def acting(self) -> bool:
+        return self.owner == own.COORDINATOR
 
     def as_record(self) -> dict:
         return {
+            "owner": self.owner,
+            "generation": self.generation,
             "spam_engine": self.spam is not None,
             "attachment_filter": self.attachments is not None,
             "spam_ring": self.ring is not None,
@@ -92,6 +117,7 @@ class GuildPolicy:
 async def load_policy(guild_id: str) -> GuildPolicy:
     """Read the guild's policy; raises when the database cannot be read."""
     async with default_session_factory()() as session:
+        ownership = await read_ownership(session, guild_id)
         config = await ModerationFilterConfigOperations().get_config(session, guild_id)
         attachment_config = await AttachmentFilterConfigOperations().get_config(
             session, guild_id
@@ -117,29 +143,38 @@ async def load_policy(guild_id: str) -> GuildPolicy:
                 )
             ).all()
         )
+        acting = ownership.coordinator_acts
+        on = _switched_on(ownership) if acting else None
         spam = (
             SpamEngineSettings.from_config(config)
-            if config is not None and config.spam_engine_enabled
+            if config is not None
+            and (on(own.SPAM_ENGINE) if on else config.spam_engine_enabled)
             else None
         )
         # The ring runs on the model defaults without a row (spam_ring.py).
         ring_config = config or ModerationFilterConfig.get_defaults(guild_id)
         ring = (
             SpamRingSettings.from_config(ring_config)
-            if ring_config.spam_ring_enabled
+            if (on(own.SPAM_RING) if on else ring_config.spam_ring_enabled)
             else None
         )
         attachments = (
             AttachmentPolicy(
                 ignored_extensions=tuple(attachment_config.ignored_extensions or ()),
                 warn_extensions=tuple(attachment_config.warn_extensions or ()),
+                delete_message=attachment_config.delete_message,
+                warn_message=attachment_config.warn_message,
             )
-            if attachment_config is not None and attachment_config.is_active
+            if attachment_config is not None
+            and (on(own.ATTACHMENT_FILTER) if on else attachment_config.is_active)
             else None
         )
         staff_roles = tuple(
             str(role_id)
             for role_id in ((config.staff_exempt_role_ids or []) if config else [])
+        )
+        report_channel_id = (
+            await load_report_channel(session, guild_id, config) if acting else None
         )
     by_name = {row.name: row for row in handlers}
     scam = by_name.get(SCAM_BANNER_HANDLER)
@@ -150,23 +185,32 @@ async def load_policy(guild_id: str) -> GuildPolicy:
         spam=spam,
         attachments=attachments,
         ring=ring,
-        scam_gate=bool(scam and scam.enabled),
+        scam_gate=on(own.SCAM_GATE) if on else bool(scam and scam.enabled),
         scam_banner_matches_reference=(
             script_sha256(scam.script) == SCAM_BANNER_REFERENCE_SHA256
             if scam is not None
             else None
         ),
-        edit_ping=bool(edit and edit.enabled),
+        edit_ping=on(own.EDIT_PING) if on else bool(edit and edit.enabled),
         scam_gate_channel_ids=_scope(scam),
         edit_ping_channel_ids=_scope(edit),
+        # Disboard keeps its handler (scoring, crown, reminders), so its row
+        # stays enabled and still names the channel.
         bump_channel_ids=frozenset(
             str(channel_id) for channel_id in (bump.channel_ids or [])
         )
-        if bump is not None and bump.enabled
+        if bump is not None and bump.enabled and (on(own.BUMP_CHANNEL) if on else True)
         else frozenset(),
         staff_exempt_role_ids=staff_roles,
+        owner=ownership.owner,
+        generation=ownership.generation,
+        report_channel_id=report_channel_id,
         loaded_at=time.time(),
     )
+
+
+def _switched_on(ownership: Ownership):
+    return lambda rule: rule in ownership.rules
 
 
 def _scope(handler) -> frozenset[str]:
@@ -188,20 +232,39 @@ def in_scope(channel_ids: frozenset[str], channel_id: str) -> bool:
 class PolicyCache:
     """One snapshot per guild, reloaded after :data:`POLICY_TTL_SECONDS`.
 
+    With ``ownership`` (:func:`.ownership.load_ownership`, as the bot runs it)
+    the guild's ownership is read on every message (one primary-key read), and
+    a snapshot from another generation is reloaded at once: the moment the
+    cutover turns the legacy actors off, the coordinator is already acting,
+    with no TTL-long gap where neither moderates.
+
     A failed reload keeps no stale snapshot: it raises, and the message is
     recorded as not evaluated rather than judged under old settings.
     """
 
-    def __init__(self, loader=load_policy, ttl: float = POLICY_TTL_SECONDS) -> None:
+    def __init__(
+        self,
+        loader=load_policy,
+        ttl: float = POLICY_TTL_SECONDS,
+        ownership=None,
+    ) -> None:
         self._loader = loader
         self._ttl = ttl
+        self._ownership = ownership
         self._policies: dict[str, GuildPolicy] = {}
 
     async def get(self, guild_id: str, now: float | None = None) -> GuildPolicy:
         now = time.time() if now is None else now
         cached = self._policies.get(guild_id)
         if cached is not None and now - cached.loaded_at < self._ttl:
-            return cached
+            if self._ownership is None:
+                return cached
+            current = await self._ownership(guild_id)
+            if (current.owner, current.generation) == (
+                cached.owner,
+                cached.generation,
+            ):
+                return cached
         self._policies.pop(guild_id, None)
         policy = await self._loader(guild_id)
         if not policy.loaded_at:

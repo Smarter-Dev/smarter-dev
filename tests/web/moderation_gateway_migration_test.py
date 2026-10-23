@@ -76,6 +76,10 @@ SHADOW_MIGRATION = (
     REPO_ROOT
     / "alembic/main/versions/20261020_010000_b7d2e5a8c3f4_moderation_shadow_decisions.py"
 )
+OWNERSHIP_MIGRATION = (
+    REPO_ROOT
+    / "alembic/main/versions/20261023_220000_f2b6d9c4a1e7_moderation_ownership.py"
+)
 CREATED = (
     "moderation_incidents",
     "moderation_incident_links",
@@ -158,9 +162,20 @@ def test_the_shadow_migration_creates_every_column_the_model_has():
     )
 
 
+def test_the_ownership_migration_creates_every_column_the_model_has():
+    recorded = _run(OWNERSHIP_MIGRATION)
+    table = "moderation_ownership"
+    assert set(recorded.created) == {table}
+    assert _shape(recorded.created[table].values()) == _shape(
+        Base.metadata.tables[table].columns
+    )
+
+
 @pytest.mark.parametrize("step", ["upgrade", "downgrade"])
 @pytest.mark.parametrize(
-    "path", [MIGRATION, SPAM_RING_MIGRATION, SHADOW_MIGRATION], ids=lambda p: p.stem
+    "path",
+    [MIGRATION, SPAM_RING_MIGRATION, SHADOW_MIGRATION, OWNERSHIP_MIGRATION],
+    ids=lambda p: p.stem,
 )
 def test_lock_waits_are_bounded_before_any_change(path, step):
     calls = _run(path, step, dialect="postgresql").calls
@@ -500,3 +515,57 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
         assert await prune_moderation_shadow_decisions(session, now, now) == 0
         assert await prune_moderation_shadow_decisions(session, far, far) == 1
         await session.commit()
+
+
+@needs_postgres
+async def test_the_cutover_switch_runs_on_the_migrated_postgres_schema(
+    migrated, monkeypatch
+):
+    """#240: the switch and its rollback in one transaction each on Postgres
+    (row locks, JSON columns), and the policy and the fence read the row."""
+    from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
+    from smarter_dev.bot.moderation_coordinator.policy import load_policy
+    from smarter_dev.web import moderation_cutover as cutover
+    from smarter_dev.web.models import AdminHandler
+    from smarter_dev.web.models import AttachmentFilterConfig
+    from smarter_dev.web.models import ModerationFilterConfig
+    from smarter_dev.web.moderation_gateway import gateway as gateway_module
+
+    db = async_sessionmaker(migrated, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", db)
+    async with db() as session:
+        session.add(ModerationFilterConfig(guild_id=GUILD, spam_engine_enabled=True))
+        session.add(AttachmentFilterConfig(guild_id=GUILD, is_active=True))
+        session.add(
+            AdminHandler(
+                guild_id=GUILD,
+                name="scam-banner",
+                trigger_type="message",
+                settings={},
+                channel_ids=[],
+                description="d",
+                script="pass\n",
+                created_by_admin="A",
+                enabled=True,
+            )
+        )
+        await session.commit()
+
+    async with db() as session:
+        switched = await cutover.switch(session, GUILD, by="test")
+    assert switched["owner"] == "coordinator" and switched["generation"] == 1
+    assert switched["handlers"]["scam-banner"]["enabled"] is False
+    assert (await load_ownership(GUILD)).coordinator_acts
+    policy = await load_policy(GUILD)
+    assert policy.acting and policy.scam_gate and policy.spam is not None
+
+    async with db() as session:
+        with pytest.raises(cutover.CutoverRefused):
+            await cutover.switch(session, GUILD, by="again")
+        await session.rollback()
+    async with db() as session:
+        back = await cutover.rollback(session, GUILD, by="test")
+    assert back["owner"] == "legacy" and back["generation"] == 2
+    assert back["spam_engine_enabled"] is True
+    assert back["attachment_filter_active"] is True
+    assert back["handlers"]["scam-banner"]["enabled"] is True

@@ -34,6 +34,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import time
 from collections import deque
@@ -279,6 +280,10 @@ class ClassifierRequest:
     ring_ad: str | None = None
     ring_candidates: tuple[RingCandidate, ...] = ()
     charge_author: bool = True
+    #: Show the model this many of the images, chosen at random, instead of
+    #: the first :data:`MAX_IMAGES` (Zech, Oct 23: an established member's
+    #: image post is checked on one image). The rest are named, not unseen.
+    sampled_images: int | None = None
 
 
 @dataclass(slots=True)
@@ -384,6 +389,10 @@ class ImageCounts:
     over_limit: int = 0
     #: Attachments that are not images (listed by name only).
     other_files: int = 0
+    #: Shown a random sample; the images not chosen are named and are not
+    #: unseen (a "no" stays a no).
+    sampled: bool = False
+    not_sampled: int = 0
 
     def as_record(self) -> dict:
         return {
@@ -391,6 +400,8 @@ class ImageCounts:
             "unseen": self.unseen,
             "over_limit": self.over_limit,
             "other_files": self.other_files,
+            "sampled": self.sampled,
+            "not_sampled": self.not_sampled,
         }
 
 
@@ -405,18 +416,34 @@ class LoadedImages:
 
 
 async def load_images(
-    attachments: Sequence[Attachment], fetch: ImageFetcher
+    attachments: Sequence[Attachment],
+    fetch: ImageFetcher,
+    *,
+    sample: int | None = None,
+    choose: Callable[[list, int], list] = random.sample,
 ) -> LoadedImages:
-    """The first :data:`MAX_IMAGES` images, loaded in parallel and checked.
+    """The first :data:`MAX_IMAGES` images (or ``sample`` of them chosen at
+    random), loaded in parallel and checked.
 
     An image is what its bytes say, not its name or declared type; one that
-    cannot be loaded within :data:`IMAGE_FETCH_SECONDS` is unseen.
+    cannot be loaded within :data:`IMAGE_FETCH_SECONDS` is unseen. An image
+    left out of a sample is only named: not seen, and not unseen either.
     """
     images = [(index, item) for index, item in enumerate(attachments) if item.is_image]
-    shown = images[:MAX_IMAGES]
-    notes = {
-        index: "not shown: over the image limit" for index, _ in images[MAX_IMAGES:]
-    }
+    notes: dict[int, str] = {}
+    not_sampled = 0
+    if sample is not None and len(images) > sample:
+        chosen = {index for index, _ in choose(images, sample)}
+        shown = [(index, item) for index, item in images if index in chosen]
+        for index, _ in images:
+            if index not in chosen:
+                notes[index] = "not shown: not sampled"
+        not_sampled = len(images) - len(shown)
+    else:
+        shown = images[:MAX_IMAGES]
+        notes = {
+            index: "not shown: over the image limit" for index, _ in images[MAX_IMAGES:]
+        }
     unseen = 0
 
     async def one(item: Attachment) -> bytes | None:
@@ -448,8 +475,10 @@ async def load_images(
         counts=ImageCounts(
             sent=len(contents),
             unseen=unseen,
-            over_limit=len(images) - len(shown),
+            over_limit=len(images) - len(shown) - not_sampled,
             other_files=len(attachments) - len(images),
+            sampled=sample is not None,
+            not_sampled=not_sampled,
         ),
     )
 
@@ -812,9 +841,11 @@ class ModerationClassifier:
         operation_type: str = METER_OPERATION,
         clock: Callable[[], float] = time.time,
         fetch_image: ImageFetcher = fetch_image,
+        choose_images: Callable[[list, int], list] = random.sample,
     ) -> None:
         self.budget = budget or ClassifierBudget()
         self.fetch_image = fetch_image
+        self.choose_images = choose_images
         self._haiku = haiku_model or build_haiku_model
         self._jev = jev_model or build_jev_model
         self.deadline = deadline
@@ -859,7 +890,10 @@ class ModerationClassifier:
                 async with asyncio.timeout(self.deadline):
                     if backend == HAIKU:
                         images = await load_images(
-                            request.attachments, self.fetch_image
+                            request.attachments,
+                            self.fetch_image,
+                            sample=request.sampled_images,
+                            choose=self.choose_images,
                         )
                         result.images = images.counts
                         verdicts = await self._ask_haiku(model, request, images)

@@ -123,6 +123,14 @@ class SpamTracker:
         else:
             state.record_warning(facts.author_id, now)
 
+    def disarm(self, guild_id: str, author_id: str) -> None:
+        """Undo :meth:`commit`'s mute when the timeout did not take effect,
+        as the engine arms its guard only once the author is timed out: an
+        author the timeout missed is not let off for its whole length."""
+        state = self._states.get(guild_id)
+        if state is not None:
+            state.clear_mute(author_id)
+
 
 class RecentPosts:
     """Each author's posts in the last two minutes, for burst detection.
@@ -238,6 +246,14 @@ class VerdictCache:
         future: asyncio.Future = asyncio.get_running_loop().create_future()
         self._entries[(guild_id, author_id, key)] = (now, future)
         return True, future
+
+    def known(
+        self, guild_id: str, author_id: str, key: str, now: float | None = None
+    ) -> bool:
+        """Whether this author's post was judged, or is being judged, lately."""
+        now = time.time() if now is None else now
+        self._prune(now)
+        return (guild_id, author_id, key) in self._entries
 
     @staticmethod
     def settle(future: asyncio.Future, verdicts: dict[str, LabelVerdict]) -> None:

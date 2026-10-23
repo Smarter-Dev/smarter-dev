@@ -61,6 +61,13 @@ RETIRED_CONFIG_REFUSAL = (
 )
 
 
+#: Refusal for enabling an install of such a template again.
+RETIRED_ENABLE_REFUSAL = (
+    "This extension has moved into the moderation system, so it can no longer "
+    "be enabled. You can still uninstall it."
+)
+
+
 class ExtensionInstallError(Exception):
     """A domain failure of an extension operation; ``str(exc)`` is flash-ready."""
 
@@ -168,6 +175,9 @@ async def edit_extension_config(
     catalog version — the registry only holds the newest templates)."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
+    # The refusal first: a config error on a template that can no longer be
+    # configured at all would point the admin the wrong way.
+    _refuse_retired(loaded)
     cleaned = _validate(loaded.manifest, raw_config)
     return await _apply(session, install, loaded, cleaned)
 
@@ -181,6 +191,7 @@ async def update_extension(
     newer schema dropped is discarded rather than blocking the update."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
+    _refuse_retired(loaded)
     try:
         cleaned = validate_stored_config(loaded.manifest, install.config)
     except RenderError as exc:
@@ -194,8 +205,17 @@ async def update_extension(
 async def set_extension_enabled(
     session: AsyncSession, *, guild_id: str, slug: str, enabled: bool
 ) -> ExtensionInstall:
-    """Flip the install and every owned row's ``enabled``; cancel/re-arm schedules."""
+    """Flip the install and every owned row's ``enabled``; cancel/re-arm schedules.
+
+    A template that moved into the moderation system can be disabled but not
+    enabled again: enabling would re-arm its frozen punisher next to the
+    coordinator that replaced it.
+    """
     install = await _locked_install(session, guild_id, slug)
+    if enabled:
+        loaded = _get_loaded(slug)
+        if loaded.manifest.moved_to_moderation:
+            raise ExtensionInstallError(RETIRED_ENABLE_REFUSAL)
     install.enabled = enabled
     for row in await _owned_rows(session, install):
         row.enabled = enabled
@@ -233,10 +253,9 @@ async def _apply(
     cleaned: dict,
 ) -> ExtensionInstall:
     """Render + reconcile rows for a new config, then advance the install."""
-    if loaded.manifest.moved_to_moderation:
-        # Re-rendering would rewrite a frozen punisher (new keywords, a
-        # harsher allowed action) past the handler API's freeze.
-        raise ExtensionInstallError(RETIRED_CONFIG_REFUSAL)
+    # Re-rendering would rewrite a frozen punisher (new keywords, a harsher
+    # allowed action) past the handler API's freeze.
+    _refuse_retired(loaded)
     rendered = _render(loaded.manifest, cleaned, loaded.scripts)
     try:
         await _sync_handler_rows(session, install, loaded, rendered)
@@ -421,6 +440,11 @@ async def _arm_time_trigger(record: AdminHandler) -> None:
         record.trigger_type, record.settings or {}, datetime.now(timezone.utc)
     )
     await _recurring_chain.arm_occurrence(record, fire_at)
+
+
+def _refuse_retired(loaded: LoadedExtension) -> None:
+    if loaded.manifest.moved_to_moderation:
+        raise ExtensionInstallError(RETIRED_CONFIG_REFUSAL)
 
 
 def _get_loaded(slug: str) -> LoadedExtension:

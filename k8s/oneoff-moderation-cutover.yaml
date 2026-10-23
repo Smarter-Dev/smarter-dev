@@ -1,0 +1,39 @@
+# One-off Job: scripts/moderation_cutover.py (#240). Not applied by the deploy
+# workflow; run by hand with the deployed website tag, one command per Job:
+#   <ARGS> = "status --guild 644299523686006834"           (read only)
+#   <ARGS> = "switch --guild 644299523686006834 --by <who>"
+#   <ARGS> = "rollback --guild 644299523686006834 --by <who>"
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<NAME>|status|' -e 's|<ARGS>|status --guild 644299523686006834|' \
+#     k8s/oneoff-moderation-cutover.yaml | kubectl apply -f -
+#   kubectl -n smarter-dev wait --for=condition=complete --timeout=120s job/smarter-dev-moderation-cutover-status
+#   kubectl -n smarter-dev logs job/smarter-dev-moderation-cutover-status
+#   kubectl -n smarter-dev delete job smarter-dev-moderation-cutover-status
+# Exit status 2 (the Job fails) means refused: nothing was changed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-moderation-cutover-<NAME>
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-moderation-cutover
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: moderation-cutover
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/moderation_cutover.py <ARGS>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url

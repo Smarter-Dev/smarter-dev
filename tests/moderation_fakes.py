@@ -56,6 +56,10 @@ GATEWAY_TABLES = [
     models.ModerationFilterConfig.__table__,
     models.AttachmentFilterConfig.__table__,
     models.AdminHandler.__table__,
+    # The cutover: who owns the guild, and what the switch turns off.
+    models.ModerationOwnership.__table__,
+    models.ExtensionInstall.__table__,
+    models.ModerationConfig.__table__,
 ]
 
 

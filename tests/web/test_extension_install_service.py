@@ -321,6 +321,68 @@ async def test_an_install_of_a_moved_template_cannot_be_reconfigured(
     assert await get_install(db_session, GUILD, "keyword-watch") is None
 
 
+async def test_a_moved_template_is_refused_before_its_config_is_checked(
+    db_session, worker_stub, monkeypatch
+):
+    """#257: a direct POST with an invalid config got a config error instead
+    of the refusal. The refusal comes first."""
+    from smarter_dev.extensions.registry import get_registry
+
+    retired = get_registry().get("keyword-watch")
+    before = _loaded(
+        retired.manifest.model_copy(update={"moved_to_moderation": None}),
+        retired.scripts,
+    )
+    _use_registry(monkeypatch, before)
+    await install_extension(
+        db_session,
+        guild_id=GUILD,
+        slug="keyword-watch",
+        raw_config=dict(retired.manifest.example_config),
+        installed_by="admin",
+    )
+    _use_registry(monkeypatch, retired)
+
+    with pytest.raises(ExtensionInstallError, match="moderation system"):
+        await edit_extension_config(
+            db_session, guild_id=GUILD, slug="keyword-watch", raw_config={}
+        )
+
+
+async def test_a_disabled_install_of_a_moved_template_cannot_be_enabled(
+    db_session, worker_stub, monkeypatch
+):
+    """#240: enabling would re-arm the frozen punisher next to the coordinator."""
+    from smarter_dev.extensions.registry import get_registry
+
+    retired = get_registry().get("keyword-watch")
+    before = _loaded(
+        retired.manifest.model_copy(update={"moved_to_moderation": None}),
+        retired.scripts,
+    )
+    _use_registry(monkeypatch, before)
+    install = await install_extension(
+        db_session,
+        guild_id=GUILD,
+        slug="keyword-watch",
+        raw_config=dict(retired.manifest.example_config),
+        installed_by="admin",
+    )
+    _use_registry(monkeypatch, retired)
+    await set_extension_enabled(
+        db_session, guild_id=GUILD, slug="keyword-watch", enabled=False
+    )
+
+    with pytest.raises(ExtensionInstallError, match="can no longer be enabled"):
+        await set_extension_enabled(
+            db_session, guild_id=GUILD, slug="keyword-watch", enabled=True
+        )
+    await db_session.rollback()
+    stored = await get_install(db_session, GUILD, "keyword-watch")
+    assert stored.enabled is False
+    assert all(not row.enabled for row in await _owned(db_session, install.id))
+
+
 # -- config edit ---------------------------------------------------------------
 
 

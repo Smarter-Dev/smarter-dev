@@ -206,6 +206,8 @@ class PastAction:
 
     action_type: str
     created_at: datetime
+    #: The moderator's or actor's reason, for the report's history note.
+    reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
