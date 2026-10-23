@@ -206,6 +206,12 @@ def test_scam_gate_needs_content_and_a_reason_to_look():
     images = tuple(Attachment(f"{i}.png", "image/png") for i in range(4))
     review, _ = _review(REGULAR, "", attachments=images)
     assert review.suspect == ("four or more images",)
+    # An image the uploader's client left unlabelled still counts.
+    unlabelled = tuple(Attachment(f"{i}.png") for i in range(3)) + (
+        Attachment("blob", width=640, height=480),
+    )
+    review, _ = _review(REGULAR, "", attachments=unlabelled)
+    assert review.suspect == ("four or more images",)
     # High signal alone opens a review of an established account.
     assert (
         _review(REGULAR, "https://x.example", high_signal=("scam link",))[0] is not None

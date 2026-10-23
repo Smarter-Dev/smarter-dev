@@ -138,16 +138,36 @@ class Verdicts(Mapping[str, LabelVerdict]):
 # ---------------------------------------------------------------------------
 
 
+#: Names that say an attachment is an image, or a video (which is not).
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp")
+VIDEO_EXTENSIONS = (".mp4", ".mov", ".webm")
+
+
 @dataclass(frozen=True, slots=True)
 class Attachment:
     filename: str
     content_type: str | None = None
     size: int | None = None
     url: str | None = None
+    #: Discord's dimensions: only images and videos have them.
+    width: int | None = None
+    height: int | None = None
 
     @property
     def is_image(self) -> bool:
-        return (self.content_type or "").lower().startswith("image/")
+        """An image by its type, its name, or (not a video) its dimensions.
+
+        The uploader's client sets the type, and can leave it out; an
+        unlabelled image still counts. Whether it really is one is for its
+        bytes to say (:func:`~.classifier.image_type`).
+        """
+        content_type = (self.content_type or "").lower()
+        name = self.filename.lower()
+        if content_type.startswith("image/") or name.endswith(IMAGE_EXTENSIONS):
+            return True
+        if content_type.startswith("video/") or name.endswith(VIDEO_EXTENSIONS):
+            return False
+        return self.width is not None or self.height is not None
 
 
 @dataclass(frozen=True, slots=True)

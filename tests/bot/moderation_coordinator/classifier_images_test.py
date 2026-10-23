@@ -380,3 +380,80 @@ async def test_fetch_never_follows_a_redirect(served):
     with pytest.raises(httpx.HTTPStatusError):
         await fetch_image(f"{CDN}/a.png", 1000)
     assert seen == [f"{CDN}/a.png"]
+
+
+# -- images Discord does not label ------------------------------------------------
+
+
+def test_an_image_is_known_by_its_type_name_or_dimensions_and_a_video_is_not():
+    assert Attachment("a.png", "image/png").is_image
+    assert Attachment("a.PNG").is_image
+    assert Attachment("photo.jpeg", "application/octet-stream").is_image
+    assert Attachment("blob", width=640).is_image
+    assert Attachment("blob", height=480).is_image
+    assert not Attachment("clip.mp4", width=640, height=480).is_image
+    assert not Attachment("clip.MOV", width=640).is_image
+    assert not Attachment("blob", "video/webm", width=640, height=480).is_image
+    assert not Attachment("notes.txt").is_image
+    assert not Attachment("blob").is_image
+
+
+UNLABELLED = (
+    Attachment("shot0.png", None, 50_000, f"{CDN}/shot0.png"),
+    Attachment("blob", None, 50_000, f"{CDN}/blob", width=800, height=600),
+)
+
+
+async def test_unlabelled_images_are_loaded_and_shown():
+    haiku, fetches = Haiku(), Fetches()
+    result = await _classifier(haiku, fetches).classify(_request(UNLABELLED))
+    assert fetches.urls == [f"{CDN}/shot0.png", f"{CDN}/blob"]
+    assert len(haiku.images[0]) == 2
+    assert result.as_record()["images"]["sent"] == 2
+    assert result.verdicts[SCAM].no
+
+
+@pytest.mark.parametrize("name", ["shot0.png", "blob"])
+async def test_an_unlabelled_image_not_loaded_makes_no_unknown(name):
+    haiku, fetches = Haiku(), Fetches(fail={name})
+    result = await _classifier(haiku, fetches).classify(_request(UNLABELLED))
+    assert len(haiku.images[0]) == 1
+    assert result.verdicts[SCAM].outcome == UNSEEN_IMAGES
+
+
+async def test_an_unlabelled_image_that_is_not_one_makes_no_unknown():
+    haiku, fetches = Haiku(), Fetches(not_image={"blob"})
+    result = await _classifier(haiku, fetches).classify(_request(UNLABELLED))
+    assert result.verdicts[SCAM].outcome == UNSEEN_IMAGES
+
+
+async def test_a_video_is_listed_and_never_loaded():
+    haiku, fetches = Haiku(), Fetches()
+    clip = Attachment("clip.mp4", None, 50_000, f"{CDN}/clip.mp4", 1280, 720)
+    result = await _classifier(haiku, fetches).classify(_request((clip,)))
+    assert fetches.urls == []
+    assert "clip.mp4" in haiku.prompts[0]
+    assert result.as_record()["images"]["other_files"] == 1
+    assert result.verdicts[SCAM].no
+
+
+def test_the_shadow_carries_discords_dimensions():
+    from types import SimpleNamespace
+
+    from smarter_dev.bot.moderation_coordinator.shadow import _attachments
+
+    message = SimpleNamespace(
+        attachments=[
+            SimpleNamespace(
+                filename="blob",
+                media_type=None,
+                size=10,
+                url=f"{CDN}/blob",
+                width=800,
+                height=600,
+            )
+        ]
+    )
+    (item,) = _attachments(message)
+    assert (item.width, item.height) == (800, 600)
+    assert item.is_image
