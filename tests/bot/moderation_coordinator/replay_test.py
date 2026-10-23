@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 
+from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
+from smarter_dev.bot.moderation_coordinator.model import UNSEEN_IMAGES
 from smarter_dev.bot.moderation_coordinator.replay import replay
 from smarter_dev.web.moderation_gateway import types as gw
 from tests.bot.moderation_coordinator.replay_cases import ALICE
@@ -21,6 +23,7 @@ from tests.bot.moderation_coordinator.replay_cases import DAVE
 from tests.bot.moderation_coordinator.replay_cases import NED
 from tests.bot.moderation_coordinator.replay_cases import SAM
 from tests.bot.moderation_coordinator.replay_cases import established_negatives
+from tests.bot.moderation_coordinator.replay_cases import images_2030
 from tests.bot.moderation_coordinator.replay_cases import scam_1749
 from tests.bot.moderation_coordinator.replay_cases import scam_burst
 from tests.bot.moderation_coordinator.replay_cases import staged_ring
@@ -202,3 +205,67 @@ async def test_established_members_are_never_actioned():
     mod = result.by_message(messages[3].message_id)
     assert mod.decision.staff_excluded
     assert mod.classifier.requests == 0
+
+
+# ---------------------------------------------------------------------------
+# 20:30 Oct 23: four posts of four images
+# ---------------------------------------------------------------------------
+
+
+async def test_2030_every_image_is_shown_and_a_clean_answer_releases_the_hold():
+    case, _, posts = images_2030()
+    result = await replay(case)
+
+    first = result.by_message(posts[0].message_id)
+    assert first.classifier.backend == "haiku"
+    assert first.scam_outcome == "clean"
+    assert first.decision.provisional.resolution == "released"
+    assert [len(images) for images in result.calls.haiku_images] == [4] * len(
+        result.calls.haiku
+    )
+    assert first.classifier.as_record()["images"]["sent"] == 4
+
+
+async def test_2030_one_image_not_loaded_keeps_the_hold_until_it_expires():
+    from smarter_dev.bot.moderation_coordinator.replay import replay_image
+
+    async def one_fails(url, limit):
+        if url.endswith("/p0_2.png"):
+            raise ConnectionError("cdn refused")
+        return await replay_image(url, limit)
+
+    case, _, posts = images_2030(fetch_image=one_fails)
+    result = await replay(case)
+
+    first = result.by_message(posts[0].message_id)
+    assert first.verdicts[SCAM].outcome == UNSEEN_IMAGES
+    assert first.scam_outcome == "unknown"
+    assert first.decision.provisional.resolution == "expired"
+    assert any("came back unknown" in line for line in first.decision.review)
+
+
+async def test_a_ring_ad_with_an_image_is_judged_by_haiku_with_the_image():
+    """Jev cannot see images: the ring's questions on an ad with one go to
+    Haiku, image included, and reach the same decision."""
+    from dataclasses import replace
+
+    from smarter_dev.bot.moderation_coordinator.model import Attachment
+
+    case, m = staged_ring()
+    flyer = Attachment(
+        "flyer.png", "image/png", 90_000, "https://cdn.discordapp.com/a/1/flyer.png"
+    )
+    ad = replace(m["ad"], attachments=(flyer,))
+    case.messages = [ad if f is m["ad"] else f for f in case.messages]
+    result = await replay(case)
+
+    judged = result.by_message(ad.message_id)
+    assert judged.scam_outcome is None  # no scam check: the ring's questions only
+    assert judged.classifier.backend == "haiku"
+    assert [len(images) for images in result.calls.haiku_images] == [1]
+    acted = {
+        user_id
+        for user_id, target in judged.decision.targets.items()
+        if target.sanction is not None
+    }
+    assert acted == {CAROL.id, ALICE.id, BOB.id}

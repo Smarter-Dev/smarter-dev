@@ -48,7 +48,16 @@ ERROR = "error"
 INVALID_OUTPUT = "invalid_output"
 BUDGET = "budget"
 NOT_ASKED = "not_asked"
-UNKNOWN_OUTCOMES = (LOW_CONFIDENCE, TIMEOUT, ERROR, INVALID_OUTPUT, BUDGET)
+#: A "no" given without every image of the message in view: never clean.
+UNSEEN_IMAGES = "unseen_images"
+UNKNOWN_OUTCOMES = (
+    LOW_CONFIDENCE,
+    TIMEOUT,
+    ERROR,
+    INVALID_OUTPUT,
+    BUDGET,
+    UNSEEN_IMAGES,
+)
 
 #: A yes or a no is acted on only this sure (the ring's deployed bar: under
 #: Jev's 0.5 threshold it means a probability of at least 0.85).
@@ -82,6 +91,8 @@ class LabelVerdict:
             if self.confidence is not None:
                 text += f", confidence {self.confidence:.2f}"
             return text if self.outcome == ANSWERED else f"{text} (too unsure)"
+        if self.outcome == UNSEEN_IMAGES:
+            return "no, but not every image was seen"
         return self.outcome.replace("_", " ")
 
     def as_record(self) -> dict:

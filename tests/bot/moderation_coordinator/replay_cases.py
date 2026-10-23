@@ -212,6 +212,51 @@ def scam_burst() -> tuple[ReplayCase, Member, list[MessageFacts]]:
     return case, victim, posts
 
 
+def images_2030(
+    *, answers=None, fetch_image=None
+) -> tuple[ReplayCase, Member, list[MessageFacts]]:
+    """20:30 Oct 23 2026: the same short, harmless-looking text with four
+    images, posted four times across channels within seconds by an account of
+    over two years. What the images show is the whole case."""
+    poster = Member(
+        "poster_2030", 12, NOW - timedelta(days=950), NOW - timedelta(days=200)
+    )
+    text = "selling my old setup, pics below. dm me if keen"
+
+    def images(post: int) -> tuple[Attachment, ...]:
+        return tuple(
+            Attachment(
+                f"p{post}_{i}.png",
+                "image/png",
+                400_000,
+                f"https://cdn.discordapp.com/attachments/1/{post}/p{post}_{i}.png",
+            )
+            for i in range(4)
+        )
+
+    channels = [GENERAL, OTHER, GENERAL, THIRD]
+    posts = [
+        say(
+            poster,
+            text,
+            NOW + timedelta(seconds=post * 2),
+            channel=channels[post],
+            attachments=images(post),
+        )
+        for post in range(4)
+    ]
+    extra = {} if fetch_image is None else {"fetch_image": fetch_image}
+    case = ReplayCase(
+        name="20:30 four posts of four images",
+        policy=policy(),
+        messages=posts,
+        answers=answers or {SCAM: (False, 0.7), ABUSE: (False, 0.9)},
+        reads=ReplayReads(histories={poster.id: ESTABLISHED}),
+        **extra,
+    )
+    return case, poster, posts
+
+
 # ---------------------------------------------------------------------------
 # The staged hackathon ring
 # ---------------------------------------------------------------------------
