@@ -46,6 +46,34 @@ COLORS = {
     "role_change": hikari.Color.from_rgb(102, 153, 255),  # Blue
 }
 
+#: Discord refuses (400) an embed whose field value is longer than this.
+FIELD_VALUE_LIMIT = 1024
+
+DIFF_OPEN = "```diff\n"
+DIFF_CLOSE = "\n```"
+UNCACHED_OPEN = "**New Content:**\n"
+UNCACHED_CLOSE = "\n\n*Original content not available (message not cached)*"
+
+
+def clip(text: str, limit: int = FIELD_VALUE_LIMIT) -> str:
+    """``text`` cut to ``limit`` characters, ending in "..." when cut."""
+    if len(text) > limit:
+        return text[: limit - 3] + "..."
+    return text
+
+
+def join_within(items: Sequence[str], limit: int = FIELD_VALUE_LIMIT) -> str:
+    """``items`` space-joined, whole items only, with "and N more" when cut."""
+    whole = " ".join(items)
+    if len(whole) <= limit:
+        return whole
+    shown: list[str] = []
+    for index, item in enumerate(items):
+        if len(" ".join([*shown, item, f"and {len(items) - index - 1} more"])) > limit:
+            break
+        shown.append(item)
+    return " ".join([*shown, f"and {len(items) - len(shown)} more"])
+
 
 def format_diff(old_text: str, new_text: str, max_length: int = 1024) -> str:
     """Format a diff between two texts in Discord markdown.
@@ -90,11 +118,7 @@ def format_diff(old_text: str, new_text: str, max_length: int = 1024) -> str:
     else:
         diff_text = "\n".join(diff_lines)
 
-    # Truncate if too long
-    if len(diff_text) > max_length:
-        diff_text = diff_text[:max_length - 3] + "..."
-
-    return diff_text
+    return clip(diff_text, max_length)
 
 
 async def send_audit_log(
@@ -519,15 +543,20 @@ async def log_message_edit(
         if event.old_message.content == event.message.content:
             return
 
-        # Create diff showing before/after
-        diff = format_diff(event.old_message.content or "", event.message.content or "")
-        changes_value = f"```diff\n{diff}\n```"
+        # Create diff showing before/after; the fence counts toward the limit.
+        diff = format_diff(
+            event.old_message.content or "",
+            event.message.content or "",
+            max_length=FIELD_VALUE_LIMIT - len(DIFF_OPEN) - len(DIFF_CLOSE),
+        )
+        changes_value = f"{DIFF_OPEN}{diff}{DIFF_CLOSE}"
     else:
         # Message wasn't cached - show current content only
-        current_content = event.message.content or ""
-        if len(current_content) > 1000:
-            current_content = current_content[:997] + "..."
-        changes_value = f"**New Content:**\n{current_content}\n\n*Original content not available (message not cached)*"
+        current_content = clip(
+            event.message.content or "",
+            FIELD_VALUE_LIMIT - len(UNCACHED_OPEN) - len(UNCACHED_CLOSE),
+        )
+        changes_value = f"{UNCACHED_OPEN}{current_content}{UNCACHED_CLOSE}"
 
     embed = hikari.Embed(
         title="Message Edited",
@@ -576,10 +605,9 @@ async def log_message_delete(
         embed.add_field(name="Author ID", value=str(author.id), inline=True)
 
         if old_message.content:
-            content = old_message.content
-            if len(content) > 1024:
-                content = content[:1021] + "..."
-            embed.add_field(name="Content", value=content, inline=False)
+            embed.add_field(
+                name="Content", value=clip(old_message.content), inline=False
+            )
 
         if author.avatar_url:
             embed.set_thumbnail(author.avatar_url)
@@ -742,11 +770,11 @@ async def log_member_update(
             embed.add_field(name="User ID", value=str(member.id), inline=True)
 
             if added_roles:
-                roles_str = " ".join([f"<@&{role_id}>" for role_id in added_roles])
+                roles_str = join_within([f"<@&{role_id}>" for role_id in added_roles])
                 embed.add_field(name="Roles Added", value=roles_str, inline=False)
 
             if removed_roles:
-                roles_str = " ".join([f"<@&{role_id}>" for role_id in removed_roles])
+                roles_str = join_within([f"<@&{role_id}>" for role_id in removed_roles])
                 embed.add_field(name="Roles Removed", value=roles_str, inline=False)
 
             if member.avatar_url:
