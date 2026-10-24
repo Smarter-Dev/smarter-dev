@@ -54,6 +54,7 @@ SITE_ROUTES = {
     ("POST", "/api/site/resources/search"): "site-corpus-search",
     ("POST", "/api/site/resources/sources"): "site-resources",
     ("GET", "/api/site/search/anonymous-runs/{search_id:str}"): "site-search",
+    ("POST", "/api/site/search/previews/resolve"): "site-search-previews",
     ("GET", "/api/site/search/users/{owner_id:str}/link-owner"): "site-search",
     ("POST", "/api/site/search/users/{owner_id:str}/anonymous-runs"): "site-search",
     ("POST", "/api/site/search/users/{user_id:str}/runs"): "site-search",
@@ -74,6 +75,7 @@ FAMILY_LIMITS = {
     "site-resources": [(600, 60.0)],
     "site-corpus-search": [(240, 60.0)],
     "site-corpus-read": [(120, 60.0), (3000, 3600.0)],
+    "site-search-previews": [(1200, 60.0)],
     "site-search": [(3000, 60.0)],
     "site-billing": [(1200, 60.0)],
     "site-memory": [(600, 60.0)],
@@ -87,6 +89,7 @@ FAMILY_REQUESTS = {
     "site-resources": [("POST", "/api/site/resources/sources")],
     "site-corpus-search": [("POST", "/api/site/resources/search")],
     "site-corpus-read": [("POST", "/api/site/resources/read")],
+    "site-search-previews": [("POST", "/api/site/search/previews/resolve")],
     "site-search": [("GET", f"/api/site/search/users/{SAMPLE_ID}/runs/r1")],
     "site-billing": [("GET", f"/api/site/billing/users/{SAMPLE_ID}/membership")],
     "site-memory": [

@@ -11,10 +11,20 @@ A signed-out visitor using a member's search link gets an anonymous search
 (``web_search.anonymous``): never saved, kept in Redis for 30 minutes, billed
 to the link's owner, under the anonymous limits. The Worker names the visitor
 by an opaque key it derives; Python never sees the visitor's address.
+
+The Discord agent's web-search previews (``/ai/search/<token>``) resolve here
+too, so the site can serve the links the bot has posted: the same result
+views the page renders, read-only. The token travels in the body, never a
+URL, so no path log along the way ever holds it.
 """
 
 from __future__ import annotations
 
+import json
+import logging
+import re
+from datetime import UTC
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -26,6 +36,7 @@ from litestar import get
 from litestar import post
 from litestar.exceptions import HTTPException
 from litestar.exceptions.responses import create_exception_response
+from litestar.serialization import encode_json
 from litestar.status_codes import HTTP_201_CREATED
 from litestar.status_codes import HTTP_204_NO_CONTENT
 from pydantic import BaseModel
@@ -45,6 +56,8 @@ from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
 from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.search_preview_controller import result_view
+from smarter_dev.web.search_previews import find_search_preview
 from smarter_dev.web.user_content import StillRunning
 from smarter_dev.web.user_content import delete_search
 from smarter_dev.web.user_content import mark_search_key_forgotten
@@ -53,6 +66,33 @@ from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import structured as site_snapshot
 
 SITE_SEARCH_GUARDS = [*SITE_API_GUARDS, Permission("site-search")]
+
+logger = logging.getLogger(__name__)
+
+# ``secrets.token_urlsafe(32)``, the only tokens a preview link carries.
+PREVIEW_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
+# The Worker's visitor key: HMAC-SHA-256, base64url, unpadded.
+PREVIEW_VISITOR = re.compile(r"[A-Za-z0-9_-]{43}")
+# A request body is two of those and their JSON; anything longer isn't one.
+MAX_PREVIEW_REQUEST_BYTES = 512
+# A pending page reloads every 2 s: 30 a minute per open tab. (Skrift's
+# app.yaml rule bounds each Worker egress address; this bounds a visitor.)
+PREVIEW_READS_PER_MINUTE = 120
+PREVIEW_LIMITED = "Too many search previews opened. Try again in a minute."
+PREVIEW_MISSING = "This search preview doesn't exist."
+PREVIEW_EXPIRED = "This search preview has expired."
+PREVIEW_INVALID = "Invalid search preview request."
+# Bounds on what one answer carries, around what the page shows: Brave
+# answers 5 results, a query is at most what the bot's status line holds.
+# A longer field is cut, a longer URL shown unlinked.
+MAX_PREVIEW_RESULTS = 20
+MAX_PREVIEW_QUERY = 2_000
+MAX_PREVIEW_TITLE = 500
+MAX_PREVIEW_URL = 2_048
+MAX_PREVIEW_DESCRIPTION = 1_000
+# And on the whole answer, encoded: results past it are left out, counted
+# in ``omitted``. One result at every cut always fits.
+MAX_PREVIEW_BYTES = 65_536
 
 
 class StartSearch(BaseModel):
@@ -159,6 +199,102 @@ def _error_response(request: Request, exc: Exception) -> Response:
     if isinstance(exc, BotApiException) and exc.body.get("wait"):
         response.headers["Retry-After"] = str(exc.body["wait"])
     return response
+
+
+def _preview_result(result: dict) -> dict[str, str | None]:
+    """The page's view of one result, from fields cut to the API's bounds."""
+    url = str(result.get("url", "") or "")
+    view = result_view(
+        {
+            "title": str(result.get("title", "") or "")[:MAX_PREVIEW_TITLE],
+            "url": url[:MAX_PREVIEW_URL],
+            "description": str(result.get("description", "") or "")[
+                :MAX_PREVIEW_DESCRIPTION
+            ],
+        }
+    )
+    if len(url) > MAX_PREVIEW_URL:
+        view["safe_url"] = None
+        view["domain"] = ""
+        view["display_url"] = ""
+    return view
+
+
+def _parsed_preview_request(body: bytes) -> tuple[str, str] | None:
+    """The token and visitor key a resolve body names, or None. Nothing is
+    raised from here: a decode error holds the body (a UnicodeDecodeError
+    its bytes), and an exception raised while handling it would keep it as
+    ``__context__``, ``from None`` or not."""
+    if len(body) > MAX_PREVIEW_REQUEST_BYTES:
+        return None
+    try:
+        asked = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(asked, dict) or set(asked) != {"token", "visitor"}:
+        return None
+    token, visitor = asked["token"], asked["visitor"]
+    if not isinstance(token, str) or not isinstance(visitor, str):
+        return None
+    if not PREVIEW_VISITOR.fullmatch(visitor):
+        return None
+    return token, visitor
+
+
+async def _preview_request(request: Request) -> tuple[str, str]:
+    """The token and visitor key a resolve names. Read by hand, never by a
+    model whose validation error would quote the input: a refusal says only
+    that the request is invalid, and carries nothing the caller sent, nor
+    any exception that did (it is raised outside every handler)."""
+    parsed = _parsed_preview_request(await request.body())
+    if parsed is None:
+        raise plain_error(422, PREVIEW_INVALID)
+    return parsed
+
+
+async def _admit_preview_read(visitor: str) -> None:
+    """Count one read against the visitor's minute, keyed by the visitor
+    key's HMAC, never the key itself. This limiter's own Redis failure lets
+    the read through (a read is one indexed lookup, and the page never had a
+    limit); Skrift's global middleware still needs Redis first (#332)."""
+    try:
+        wait = await anonymous.wait_seconds(
+            get_redis_client(),
+            anonymous.visitor_limit_key("search_preview:visitor", visitor),
+            PREVIEW_READS_PER_MINUTE,
+            60,
+        )
+    except Exception:  # noqa: BLE001 - limiter outage, not the request's fault
+        logger.warning("search preview limiter unavailable; read admitted")
+        return
+    if wait:
+        raise BotApiException(429, {"detail": PREVIEW_LIMITED, "wait": wait})
+
+
+def _bounded_results(query: str, results: list[dict]) -> tuple[list[dict], int]:
+    """The views that fit MAX_PREVIEW_BYTES once encoded, in order, and how
+    many were left out (past the count or the size)."""
+    views: list[dict] = []
+    size = len(
+        encode_json(
+            {
+                "preview": {
+                    "status": "ready",
+                    "query": query,
+                    "results": [],
+                    "omitted": 0,
+                }
+            }
+        )
+    ) + len(str(len(results)))
+    for result in results[:MAX_PREVIEW_RESULTS]:
+        view = _preview_result(result)
+        cost = len(encode_json(view)) + 1
+        if size + cost > MAX_PREVIEW_BYTES:
+            break
+        views.append(view)
+        size += cost
+    return views, len(results) - len(views)
 
 
 def _detail(exc: HTTPException) -> str:
@@ -341,6 +477,39 @@ class SiteSearchController(Controller):
             redis, owner_user_id=owner, nid=None, request=text
         )
         return {"search": entry["site"]}
+
+    @post("/previews/resolve", guards=SITE_SEARCH_GUARDS, status_code=200)
+    async def resolve_preview(
+        self, request: Request, db_session: AsyncSession
+    ) -> dict[str, Any]:
+        """What ``/ai/search/<token>`` shows: 200 with its status (pending,
+        ready or failed), query, result views and how many were left out;
+        410 once expired, until the sweep deletes it (the page's 404 either
+        way); 404 for a token that names no preview."""
+        token, visitor = await _preview_request(request)
+        await _admit_preview_read(visitor)
+        if not PREVIEW_TOKEN.fullmatch(token):
+            raise plain_error(404, PREVIEW_MISSING)
+        preview = await find_search_preview(db_session, token)
+        if preview is None:
+            raise plain_error(404, PREVIEW_MISSING)
+        expires_at = preview.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        if expires_at <= datetime.now(UTC):
+            raise plain_error(410, PREVIEW_EXPIRED)
+        query = preview.query[:MAX_PREVIEW_QUERY]
+        results, omitted = _bounded_results(
+            query, [r for r in (preview.results or []) if isinstance(r, dict)]
+        )
+        return {
+            "preview": {
+                "status": preview.status,
+                "query": query,
+                "results": results,
+                "omitted": omitted,
+            }
+        }
 
     @get("/anonymous-runs/{search_id:str}", guards=SITE_SEARCH_GUARDS)
     async def read_anonymous(self, search_id: str) -> dict[str, Any]:

@@ -47,7 +47,7 @@ def _snippet_html(value: str) -> str:
     )
 
 
-def _result_view(result: dict) -> dict[str, str | None]:
+def result_view(result: dict) -> dict[str, str | None]:
     url = str(result.get("url", "") or "")
     safe_url = _safe_external_url(url)
     parsed = urlparse(safe_url) if safe_url else None
@@ -81,7 +81,7 @@ async def search_preview_view(
         raise NotFoundException()
 
     results = [
-        _result_view(result)
+        result_view(result)
         for result in (preview.results or [])
         if isinstance(result, dict)
     ]
