@@ -234,18 +234,24 @@ spec:
                         name: smarter-dev-secrets
                         key: media-api-key
                   # The web pod runs no sandbox budget's worth of code: only
-                  # the handler linter's parse (16 MiB cap, outside it). Kept
-                  # small so nothing run here by mistake can fill the pod
-                  # (384Mi, ~352Mi in use on 2026-10-24).
+                  # the handler linter's parse (16 MiB cap plus ~10 MiB of
+                  # Monty worker, outside it). Kept small so nothing run here
+                  # by mistake can fill the pod (512Mi; 345-378Mi in use
+                  # two hours after the 2026-10-24 19:49Z roll).
                   - name: CODE_SANDBOX_BUDGET_MIB
                     value: "32"
+                # Limit 512Mi: the busier pod read 378Mi (343Mi RSS) two
+                # hours after a roll, gaining ~5Mi an hour; with a lint parse
+                # (~26Mi) and the budget (32Mi) at once that's ~436Mi, ~76Mi
+                # under the limit (~15 h more growth). 384Mi left 6Mi. The
+                # request stays 192Mi so scheduling is unchanged.
                 resources:
                     requests:
                         cpu: 75m
                         memory: 192Mi
                     limits:
                         cpu: 300m
-                        memory: 384Mi
+                        memory: 512Mi
                 # A fresh pod needs ~100s to import the app at the 300m CPU
                 # limit; without a startup budget the liveness probe kills it
                 # at ~90s and the rollout flaps. The startup probe allows up
