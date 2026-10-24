@@ -586,9 +586,47 @@ async def test_delete_all_without_keep_is_the_account_pages_rule(
     }
 
 
+async def test_delete_all_keeps_the_runs_of_replies_by_their_search_keys(
+    client, member, db_session
+):
+    """A reply whose start's answer was lost has no run id on the site yet:
+    it names the run by its search key, and the run is kept, finished or not."""
+    tc, _ = client
+    other = await _other_member(db_session)
+    member_id = member.id
+    rejoined, gone, foreign = [
+        await db_session.get(WebSearchRun, await _run(db_session, owner))
+        for owner in (member, member, other)
+    ]
+    key = hashlib.sha256(b"a reply still being written").hexdigest()
+    rejoined.submission_key = key
+    gone.submission_key = hashlib.sha256(b"a finished reply").hexdigest()
+    foreign.submission_key = hashlib.sha256(b"another member's reply").hexdigest()
+    ids = rejoined.id, foreign.id
+    foreign_key = foreign.submission_key
+    await db_session.flush()
+
+    response = tc.post(
+        f"{ROOT}/users/{member_id}/runs/delete-all",
+        json={"keep_keys": [key, key, foreign_key]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": 1, "running": 1, "kept": [str(ids[0])]}
+    db_session.expire_all()
+    left = set(await db_session.scalars(select(WebSearchRun.id)))
+    assert left == set(ids)
+
+
 @pytest.mark.parametrize(
     "body",
     [
+        {"keep_keys": ["a" * 63]},
+        {"keep_keys": ["A" * 64]},
+        {"keep_keys": ["g" * 64]},
+        {"keep_keys": [uuid4().hex]},
+        {"keep_keys": ["a" * 64] * 201},
+        {"keep_keys": "a" * 64},
         {"keep": ["not-a-run"]},
         {"keep": [str(uuid4()).upper().replace("-", "")]},
         {"keep": [str(uuid4()) for _ in range(201)]},
