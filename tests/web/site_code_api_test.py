@@ -267,6 +267,7 @@ async def test_a_worker_that_dies_holding_the_run_is_a_plain_503(env, monkeypatc
     user = await _member(env.session)
     monkeypatch.setattr(site_code, "HEARTBEAT_SECONDS", 0.2)
     monkeypatch.setattr(site_code, "HEARTBEAT_TTL_SECONDS", 1)
+    monkeypatch.setattr(site_code, "WAIT_SECONDS", 5)
     env.state.worker = "claim-and-die"
     response = _run(env.tc, user.id, code=SECRET_CODE)
     assert response.status_code == 503

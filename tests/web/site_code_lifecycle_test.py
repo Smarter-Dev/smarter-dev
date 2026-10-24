@@ -7,6 +7,8 @@ was running, the sandbox stops. Real Monty, fakeredis, one event loop.
 """
 
 import asyncio
+import os
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -28,6 +30,23 @@ from smarter_dev.web import site_code_jobs
 from smarter_dev.web.api_native import site_code as site_code_api
 from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native.site_code import SiteCodeController
+
+
+def _live_monty_children() -> list[int]:
+    """This process's ``monty`` workers that still hold memory."""
+    me, live = os.getpid(), []
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            stat = (entry / "stat").read_text()
+        except OSError:
+            continue
+        name = stat[stat.index("(") + 1 : stat.rindex(")")]
+        state, ppid = stat[stat.rindex(")") + 2 :].split()[:2]
+        if name == "monty" and int(ppid) == me and state != "Z":
+            live.append(int(entry.name))
+    return live
 
 
 @pytest.fixture
@@ -115,9 +134,11 @@ async def test_a_run_given_up_while_it_runs_is_stopped(redis, started, monkeypat
     loop = asyncio.get_running_loop()
     began = loop.time()
     assert await asyncio.wait_for(job, 10) == {"status": "abandoned"}
-    # Stopped at the next heartbeat, long before its 10 s limit.
+    # Stopped at the next heartbeat, long before its 10 s limit, and its
+    # place given back only once its worker had exited.
     assert loop.time() - began < 2
     assert code_sandbox._budget().used == 0
+    assert _live_monty_children() == []
     assert await redis.llen(site_code.result_key(run_id)) == 0
 
 
