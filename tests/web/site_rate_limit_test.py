@@ -209,7 +209,11 @@ def test_site_routes_match_this_table():
     assert site == set(SITE_ROUTES)
 
 
-@pytest.mark.parametrize(("route", "name"), sorted(SITE_ROUTES.items()))
+@pytest.mark.parametrize(
+    ("route", "name"),
+    sorted(SITE_ROUTES.items()),
+    ids=[f"{method} {path}" for (method, path), _ in sorted(SITE_ROUTES.items())],
+)
 def test_every_site_route_resolves_to_its_family(route, name):
     method, template = route
     rule = app_rate_limit_config().resolve(concrete(template), method)
@@ -328,12 +332,12 @@ async def test_redis_keys_name_the_family_and_address_only():
                 assert (await limited.request(method, path, ip=ip))[0] == 200
     await limited.request(*DEFAULT_REQUEST)
     keys = await limited.keys()
+    for key in keys:
+        for secret in (*TOKENS, "apikey:", "Bearer", "bearer", "sk_"):
+            assert secret not in key
     assert keys == sorted(
         f"skrift:ratelimit:{name}:{ip}"
         for name in [*FAMILY_REQUESTS, "default"]
         for ip in ("203.0.113.1", "198.51.100.7")
         if name != "default" or ip == "203.0.113.1"
     )
-    for key in keys:
-        for secret in (*TOKENS, "apikey:", "Bearer", "bearer", "sk_"):
-            assert secret not in key
