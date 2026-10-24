@@ -76,6 +76,10 @@ from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import structured as site_snapshot
 
 SITE_SEARCH_GUARDS = [*SITE_API_GUARDS, Permission("site-search")]
+# The most runs one delete-all call decides: each is a short transaction of
+# its own (about 30 ms locally), so a call stays well inside the site
+# Worker's wait, and the site carries on with ``next``.
+DELETE_ALL_BATCH = 50
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +123,8 @@ class DeleteAllSearches(BaseModel):
     # And the search keys of those replies, for a start whose reply was lost:
     # two per reply (Jev's search and the chat model's tool).
     keep_keys: list[str] = Field(default_factory=list, max_length=200)
+    # Where an earlier call of this delete stopped (its ``next``).
+    after: str | None = None
 
 
 class StartAnonymousSearch(BaseModel):
@@ -406,13 +412,21 @@ class SiteSearchController(Controller):
         user = await _member(db_session, user_id)
         keep = _run_ids(data.keep)
         keep_keys = _search_keys(data.keep_keys)
+        after = None if data.after is None else next(iter(_run_ids([data.after])))
         result = await delete_all_searches(
-            db_session, user.id, keep=keep, keep_keys=keep_keys
+            db_session,
+            user.id,
+            keep=keep,
+            keep_keys=keep_keys,
+            after=after,
+            limit=DELETE_ALL_BATCH,
         )
         return {
             "deleted": result.deleted,
             "running": result.running,
             "kept": [str(rid) for rid in result.kept],
+            # Runs left to decide: call again with this as ``after``.
+            "next": None if result.next_after is None else str(result.next_after),
         }
 
     @get("/users/{user_id:str}/runs/{run_id:str}", guards=SITE_SEARCH_GUARDS)

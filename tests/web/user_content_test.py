@@ -1049,9 +1049,9 @@ async def _after_listing(monkeypatch, change):
     listed = user_content._search_ids
     done = False
 
-    async def listing(session, user_id):
+    async def listing(session, user_id, *args):
         nonlocal done
-        page = await listed(session, user_id)
+        page = await listed(session, user_id, *args)
         if not done:
             done = True
             await change()
