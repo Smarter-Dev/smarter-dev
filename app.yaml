@@ -228,6 +228,30 @@ rate_limit:
       limits:
         - limit: 600
           per: minute
+    # The site chat's research tools (#315): a reply makes at most 12 tool
+    # calls, at most 6 of them reads, and a member runs at most 3 replies at
+    # once. Keyed by IP (all site traffic comes from the Worker), sized for
+    # about 20 researched replies a minute; a cold read is a paid Jina call,
+    # so reads also have an hourly ceiling. On a 429 the Worker answers from
+    # its checked-in catalog (search) or says the source couldn't be read.
+    - name: site-corpus-search
+      match:
+        path: /api/site/resources/search
+        method: POST
+      key: ip
+      limits:
+        - limit: 240
+          per: minute
+    - name: site-corpus-read
+      match:
+        path: /api/site/resources/read
+        method: POST
+      key: ip
+      limits:
+        - limit: 120
+          per: minute
+        - limit: 3000
+          per: hour
 
 security_headers:
   enabled: true

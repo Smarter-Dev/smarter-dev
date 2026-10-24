@@ -319,10 +319,13 @@ def _parse_iso8601_duration(iso: str) -> str:
     return f"{minutes}:{seconds:02d}"
 
 
-async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
+async def jina_read(
+    client: httpx.AsyncClient, url: str, *, log_host: bool = True
+) -> dict:
     """Read the full content of a URL via the Jina Reader API.
 
     Returns a dict with keys: title, description, content, url.
+    ``log_host=False`` keeps the URL's host out of the failure log line.
     """
     api_key = os.environ.get("JINA_API_KEY", "")
     headers: dict[str, str] = {"Accept": "application/json"}
@@ -360,7 +363,12 @@ async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
         }
 
     except Exception as e:
-        logger.error("Jina Reader failed for %s: %s", _host(url), _failure_summary(e))
+        if log_host:
+            logger.error(
+                "Jina Reader failed for %s: %s", _host(url), _failure_summary(e)
+            )
+        else:
+            logger.error("Jina Reader failed: %s", _failure_summary(e))
         return {"error": f"Failed to read URL ({type(e).__name__}): {e}", "url": url}
 
 

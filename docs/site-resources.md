@@ -25,7 +25,8 @@ fresh budget. The cost of IP keying is that a leaked key is not bounded across
 addresses; a leaked key means a re-mint anyway, and this route only serves
 public catalog data.
 
-600 a minute is 10 page loads a second, well above today's site traffic. The
+600 a minute is 600 lookup requests: 120 to 600 enrichment events a minute,
+depending on how many batches each takes, well above today's site traffic. The
 Worker makes one batched call (at most 5 batches of 100 URLs) per chat page
 load, per earlier-history page, per version switch, per shared-answer view
 (also capped at 20 a minute per visitor on the Worker) and per completed
@@ -91,3 +92,38 @@ catalog.
 
 Deploy order: this API first, then the scope edit, then the Worker change that
 calls it.
+
+## Corpus search and read (#315)
+
+The site's chat researches the catalog as the Resources researcher does,
+through two more routes on the same controller and scope. Both call
+`smarter_dev/web/resources_corpus.py`, which the researcher's
+`search_resources`, `read_source` and `read_url` tools call too, so the
+ranking and the Jina cache are one implementation.
+
+| Route | Body / result |
+| ----- | ------------- |
+| `POST /api/site/resources/search` | `{query, limit?}` → 200 `{hits}`: up to `limit` (1–20, default 8) hits, sources then tools, each `{kind, title, url, byline, blurb, learning_type, directory, category}`. |
+| `POST /api/site/resources/read` | `{url}` → 200 `{url, body, cached}`: the source's text, at most 10,000 characters. 404 for a URL that isn't a curated `resource_sources` row (nothing is fetched); 504 when the whole read passes 12 seconds; 502 when Jina fails, in plain words, never Jina's own error text. |
+
+- **Search** ranks titles and blurbs: an English full-text match (scored
+  0.4) or pg_trgm similarity over 0.15. Article text is not searched.
+- **Read** returns a stored body as stored, if fetched in the last 30 days;
+  otherwise it reads the page live through Jina Reader, stores it (at most
+  10,000 characters) and returns it. Simultaneous reads of one cold URL share
+  one fetch. The 12-second bound covers the whole read: the lookup, the fetch
+  and the write-back. A fetch others are waiting on keeps going for them; the
+  last waiter to give up cancels it.
+- **Logs** name the route only. The query and URL travel in the request body;
+  while these routes run, httpx's request lines (which carry the Jina URL)
+  are held back, and the Jina failure line omits the host. The researcher's
+  logging is unchanged.
+- **Rate limits** (`rate_limit.rules`, keyed by IP for the reasons above):
+  `site-corpus-search` 240 a minute; `site-corpus-read` 120 a minute and
+  3,000 an hour. A chat reply makes at most 12 tool calls, at most 6 of them
+  reads, and a member runs at most 3 replies at once, so this is about 20
+  researched replies a minute; the hourly ceiling bounds paid Jina calls. On a
+  429 the Worker searches its checked-in catalog for the rest of the reply, or
+  tells the model that source couldn't be read.
+- **Before the scope edit** the Worker gets 401 and falls back to its
+  checked-in catalog, with summaries it marks as summaries.

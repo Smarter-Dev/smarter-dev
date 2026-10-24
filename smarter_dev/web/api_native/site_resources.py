@@ -5,12 +5,26 @@ chat answer cites and gets back the catalog fields Python's own renderer reads
 (``sdanswer._load_sources`` / ``_source_to_article_card``), so both renderers
 show the same title, byline and blurb, with the same duplicate-URL pick and
 field caps. The body is capped at ``MAX_RESPONSE_BYTES``; found sources that
-do not fit are listed in ``omitted``. Read-only: nothing here writes.
+do not fit are listed in ``omitted``. That lookup is read-only.
+
+The chat's research tools (#315, R07) search the catalog and read its
+sources here too, the way the Resources researcher does: ``/search`` and
+``/read`` call :mod:`smarter_dev.web.resources_corpus`, so the site gets
+Python's ranking and the same Jina cache. The search text and the URL travel
+in the body, never the request line, and nothing these two routes log names
+them: their own lines name the route, and httpx's request lines are held
+back while they run. A read is limited to curated rows, bounded in total by
+``READ_TIMEOUT_S``, and its body capped at ``READ_MAX_CHARS``. A read that
+fetches writes the body back to the cache, as the researcher's does.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from contextvars import ContextVar
 from typing import Annotated
+from typing import Any
 
 from litestar import Controller
 from litestar import post
@@ -23,8 +37,13 @@ from skrift.auth.guards import Permission
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
+from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
 from smarter_dev.web.models import ResourceSource
+from smarter_dev.web.resources_corpus import READ_MAX_CHARS
+from smarter_dev.web.resources_corpus import SEARCH_MAX_LIMIT
+from smarter_dev.web.resources_corpus import read_corpus
+from smarter_dev.web.resources_corpus import search_corpus
 from smarter_dev.web.sdanswer import _load_sources
 from smarter_dev.web.sdanswer import _source_to_article_card
 
@@ -34,6 +53,39 @@ MAX_URL_CHARS = 500
 MAX_RESPONSE_BYTES = 1024 * 1024
 
 SITE_RESOURCES_GUARDS = [*SITE_API_GUARDS, Permission("site-resources")]
+
+logger = logging.getLogger(__name__)
+
+# A whole read (the cache lookup, any live fetch and the write-back) ends
+# here, inside the site's own 15 s wait.
+READ_TIMEOUT_S = 12.0
+MAX_QUERY_CHARS = 500
+MAX_READ_URL_CHARS = 2048
+
+# While a corpus route runs, httpx's request lines (which carry the full
+# Jina URL) are dropped; everywhere else, the researcher included, they log
+# as they always have.
+_QUIET = ContextVar("site_corpus_quiet", default=False)
+
+
+class _QuietWhileCorpusRoutes(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not _QUIET.get()
+
+
+for _name in ("httpx", "httpcore", "httpcore.connection", "httpcore.http11"):
+    logging.getLogger(_name).addFilter(_QuietWhileCorpusRoutes())
+
+
+class CorpusSearch(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    query: str = Field(min_length=1, max_length=MAX_QUERY_CHARS)
+    limit: int = Field(default=8, ge=1, le=SEARCH_MAX_LIMIT)
+
+
+class CorpusRead(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    url: str = Field(min_length=1, max_length=MAX_READ_URL_CHARS)
 
 
 class SourcesLookup(BaseModel):
@@ -53,9 +105,7 @@ def _source(src: ResourceSource) -> dict[str, str]:
 class SiteResourcesController(Controller):
     path = "/api/site/resources"
     exception_handlers = BOT_API_EXCEPTION_HANDLERS
-    # No per-key rate limiter, as the billing, search, identity and privacy
-    # site routes: its bucket is shared with the site memory routes, and the
-    # Worker calls this on every chat page load. The read is a small exact match.
+    # Each route has its own IP-keyed rule in app.yaml's ``rate_limit``.
     #
     # As the other site routes: service responses stay out of shared caches.
     response_headers = {"Cache-Control": "private, no-store"}
@@ -68,6 +118,37 @@ class SiteResourcesController(Controller):
         # The renderer's own lookup and duplicate-URL pick (exact match).
         by_url = await _load_sources(db_session, set(urls))
         return _bounded([_source(by_url[url]) for url in urls if url in by_url])
+
+    @post("/search", guards=SITE_RESOURCES_GUARDS, status_code=HTTP_200_OK)
+    async def search(self, data: CorpusSearch) -> dict[str, Any]:
+        quiet = _QUIET.set(True)
+        try:
+            return {"hits": await search_corpus(data.query, data.limit)}
+        finally:
+            _QUIET.reset(quiet)
+
+    @post("/read", guards=SITE_RESOURCES_GUARDS, status_code=HTTP_200_OK)
+    async def read(self, data: CorpusRead) -> dict[str, Any]:
+        quiet = _QUIET.set(True)
+        try:
+            return await _read(data.url)
+        finally:
+            _QUIET.reset(quiet)
+
+
+async def _read(url: str) -> dict[str, Any]:
+    try:
+        async with asyncio.timeout(READ_TIMEOUT_S):
+            read = await read_corpus(url, curated_only=True, log_hosts=False)
+    except TimeoutError:
+        logger.warning("POST /api/site/resources/read: timed out")
+        raise plain_error(504, "This source took too long to read.") from None
+    if read.error is None:
+        return {"url": url, "body": read.body[:READ_MAX_CHARS], "cached": read.cached}
+    if not read.curated:
+        raise plain_error(404, "This isn't one of the curated sources.")
+    logger.warning("POST /api/site/resources/read: fetch failed")
+    raise plain_error(502, "This source couldn't be read just now.")
 
 
 def _bounded(found: list[dict[str, str]]) -> dict[str, list]:
