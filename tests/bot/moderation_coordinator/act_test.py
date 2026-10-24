@@ -15,6 +15,7 @@ from dataclasses import field
 from dataclasses import replace
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from smarter_dev.bot.moderation_coordinator import act as act_module
@@ -1087,7 +1088,8 @@ async def test_an_original_and_its_escalated_copy_are_sanctioned_once():
 
 def _answers(*, post, copy):
     """Haiku answering ``scam`` per message, ``(answer, seconds)``: the post
-    and its copy (told apart by the copy's file URLs, :func:`_copy_in`)."""
+    and its copy (told apart by the copy's file URLs, :func:`_copy_in`).
+    An :class:`asyncio.Event` in place of the seconds answers once it is set."""
     import json
 
     from pydantic_ai.messages import ModelResponse
@@ -1100,7 +1102,10 @@ def _answers(*, post, copy):
             prompt = content if isinstance(content, str) else content[0]
             calls.haiku.append(prompt)
             scam, seconds = copy if "/1/copy/" in prompt else post
-            await asyncio.sleep(seconds)
+            if isinstance(seconds, asyncio.Event):
+                await seconds.wait()
+            else:
+                await asyncio.sleep(seconds)
             body = {
                 "participants": {},
                 "scam": {"answer": scam, "confidence": 0.95},
@@ -1198,3 +1203,147 @@ async def test_a_failed_decided_check_still_judges_the_message(caplog):
         await h.judge(post)
     assert post.message_id in h.deleted()
     assert any("could not check whether" in r.getMessage() for r in caplog.records)
+
+
+# -- the round-3 verification of a62a82be (#310) ------------------------------
+
+
+async def test_an_original_still_sanctions_when_its_copy_fails_after_its_verdict():
+    """Round 3, item 1: the post dropped its sanction once its escalated
+    copy's check said yes, trusting the copy to sanction; a copy that failed
+    after sharing its verdict (before claiming) left nobody sanctioned. The
+    post always claims after waiting: the sanction is its own."""
+    member = Member("desk", 99, NOW - timedelta(days=900), NOW - timedelta(days=800))
+    first = say(member, "my desk setup", NOW, attachments=_shots(4))
+    copy = _copy_in(first, FOURTH)
+    copy_failed = asyncio.Event()
+    case = ReplayCase(
+        name="copy fails after its verdict",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=[first, copy],
+        # The copy answers first: the post's wait finds its verdict shared.
+        haiku=_answers(post=(True, copy_failed), copy=(True, 0.01)),
+        reads=ReplayReads(histories={member.id: ESTABLISHED}),
+    )
+    h = harness(case)
+    coordinator = h.shadow.coordinator
+    one_sanction = coordinator._one_sanction
+
+    async def fail_on_copy(facts, *args):
+        if facts.message_id == copy.message_id:
+            copy_failed.set()
+            raise RuntimeError("the copy failed before claiming")
+        return await one_sanction(facts, *args)
+
+    coordinator._one_sanction = fail_on_copy
+    h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
+    h.shadow.submit(first)
+    async with asyncio.timeout(5):
+        while not h.calls.haiku:  # the post's check is out
+            await asyncio.sleep(0.005)
+    h.shadow.submit(copy)
+    await h.shadow.drain()
+
+    assert h.calls.total == 2  # the copy escalated: asked again
+    rows = {row.message_id: row for row in h.recorder.rows}
+    sanction = rows[first.message_id].decision["targets"][member.id]["sanction"]
+    assert sanction is not None and sanction["kind"] == gw.WARN
+    assert any("has been warned" in text for _, text in h.messenger.posts)
+
+
+@pytest.mark.parametrize("placed", [True, False], ids=["post held", "post holding"])
+async def test_a_copy_whose_hold_failed_does_not_lift_its_posts_hold(placed):
+    """Round 3, item 2: the hold's pending count went up only when a
+    containment succeeded but down on every decision, so a copy whose
+    containment failed early counted as the last and lifted the post's hold
+    while the post was still being checked (``placed``). And a copy decided
+    while the post's hold was still being placed found no hold and released
+    the claim (``placed=False``; the copy's placing fails at the gateway)."""
+    newbie = Member("fresh", 100, NOW - timedelta(days=30), NOW - timedelta(hours=2))
+    first = say(newbie, "my setup", NOW, attachments=_shots(4))
+    copy = _copy_in(first, FOURTH)
+    copy_done = asyncio.Event()
+    case = ReplayCase(
+        name="copy's hold failed",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=[first, copy],
+        # The copy's clean verdict is carried out first; the post's scam after.
+        haiku=_answers(post=(True, copy_done), copy=(False, 0.01)),
+        reads=ReplayReads(histories={newbie.id: FIRST}),
+    )
+    h = harness(case)
+    execute = h.executor.execute
+
+    async def note_the_copy(evaluation):
+        try:
+            return await execute(evaluation)
+        finally:
+            if evaluation.facts.message_id == copy.message_id:
+                copy_done.set()
+
+    h.executor.execute = note_the_copy
+    trigger = h.executor._trigger
+
+    def fail_on_copy(facts, **kwargs):
+        if facts.message_id == copy.message_id and kwargs["reason"].startswith(
+            "held while under review"
+        ):
+            raise RuntimeError("the copy's hold could not be placed")
+        return trigger(facts, **kwargs)
+
+    contain = h.executor.contain
+
+    async def fail_early_on_copy(facts, *args, **kwargs):
+        if facts.message_id == copy.message_id:
+            return  # failed before the hold counted it (as a lost guild does)
+        return await contain(facts, *args, **kwargs)
+
+    gateway_for = h.executor._gateway_for
+
+    class _Placing:
+        """The post's timeout is on, but its hold is still being placed (the
+        gateway has not answered) until the copy is decided."""
+
+        def __init__(self, gateway):
+            self._gateway = gateway
+
+        def __getattr__(self, name):
+            return getattr(self._gateway, name)
+
+        async def act(self, trigger, proposals):
+            result = await self._gateway.act(trigger, proposals)
+            if any(proposal.provisional for proposal in proposals):
+                await asyncio.wait_for(copy_done.wait(), 5)
+            return result
+
+    if placed:
+        h.executor.contain = fail_early_on_copy
+    else:
+        h.executor._trigger = fail_on_copy
+        h.executor._gateway_for = lambda policy: _Placing(gateway_for(policy))
+    h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
+    h.shadow.submit(first)
+
+    def held():
+        if placed:
+            hold = next(iter(h.executor._holds.values()), None)
+            return hold is not None and hold.incident_id is not None
+        return h.port.count("timeout", newbie.id) == 1
+
+    async with asyncio.timeout(5):
+        while not held():  # the post's hold is placed, or its timeout is on
+            await asyncio.sleep(0.005)
+    h.shadow.submit(copy)
+    await h.shadow.drain()
+
+    assert h.calls.total == 2
+    outcomes = {
+        row.message_id: row.classifier["scam_outcome"] for row in h.recorder.rows
+    }
+    assert outcomes == {first.message_id: "violation", copy.message_id: "clean"}
+    lifted = [c for c in h.port.calls if c[0] == "timeout" and c[2] is None]
+    assert lifted == []
+    untils = [c[2] for c in h.port.calls if c[0] == "timeout"]
+    assert untils[-1] - time.time() > 3600  # the post's 24 h timeout
+    assert first.message_id in h.deleted()
+    assert h.executor._holds == {}

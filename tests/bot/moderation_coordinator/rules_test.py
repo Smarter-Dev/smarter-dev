@@ -108,6 +108,15 @@ def test_edit_ping_only_on_edits_and_case_sensitive_like_the_handler():
     assert rules.edit_ping_hits(say(REGULAR, "hi @Everyone", NOW, is_edit=True)) == []
 
 
+@pytest.mark.parametrize(
+    "text", ["mail me@here.com", "@hereby resign", "`@everyone` is a ping"]
+)
+def test_an_edit_with_an_email_a_longer_word_or_code_is_not_an_edit_ping(text):
+    """Round 3, item 4: the edit-ping read a substring, so an edit to
+    ``me@here.com`` was removed as a server-wide mention."""
+    assert rules.edit_ping_hits(say(REGULAR, text, NOW, is_edit=True)) == []
+
+
 def test_bump_channel_chatter_is_cleanup_only():
     chatter = say(REGULAR, "bump pls", NOW, channel="B")
     hit = rules.bump_channel_hits(chatter, frozenset({"B"}))

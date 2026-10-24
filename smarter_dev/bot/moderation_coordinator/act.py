@@ -34,6 +34,7 @@ from collections import defaultdict
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
 from uuid import UUID
 
@@ -160,8 +161,9 @@ class _Hold:
     noticed: bool
     #: Messages held under this post's claim whose decision is still out (a
     #: post and its escalated copy). Only the last one releases the claim and
-    #: closes the notice: an earlier "clean" must not lift a copy's hold.
-    pending: int = 0
+    #: closes the notice: an earlier "clean" must not lift a copy's hold. A
+    #: decision for a message the hold never counted cannot close it.
+    pending: set[str] = field(default_factory=set)
 
 
 class Executor:
@@ -234,11 +236,23 @@ class Executor:
         *,
         policy: GuildPolicy,
     ) -> None:
-        """Place the hold and its notice; never raises (the decision goes on)."""
+        """Place the hold and its notice; never raises (the decision goes on).
+
+        The message counts on the hold before the gateway is asked: a copy
+        decided while the post's hold is still being placed finds it
+        pending, and does not release it. It counts even when placing fails:
+        its decision still comes, and is then one of the hold's (#310 round
+        3, item 2)."""
+        hold_key = (facts.guild_id, facts.author_id, key)
         try:
             if not await self.still_owner(policy):
                 return
             gateway = self._gateway_for(policy)
+            hold = self._holds.get(hold_key)
+            if hold is None:
+                hold = _Hold(facts.channel_id, None, False)
+                self._holds[hold_key] = hold
+            hold.pending.add(facts.message_id)
             result = await gateway.act(
                 self._trigger(
                     facts,
@@ -258,12 +272,8 @@ class Executor:
                 ],
             )
             outcome = result.first(gw.TIMEOUT)
-            hold_key = (facts.guild_id, facts.author_id, key)
-            hold = self._holds.get(hold_key)
-            if hold is None:
-                hold = _Hold(facts.channel_id, result.incident_id, False)
-                self._holds[hold_key] = hold
-            hold.pending += 1
+            if hold.incident_id is None:
+                hold.incident_id = result.incident_id
             # One notice per post, where the hold was first placed (a copy
             # finds the hold already in place: covered, not confirmed).
             if (
@@ -309,7 +319,7 @@ class Executor:
         process already posted."""
         hold_key = (facts.guild_id, facts.author_id, key)
         hold = self._holds.get(hold_key)
-        if hold is None or (not counted and self._others_pending(hold)):
+        if hold is None or (not counted and self._others_pending(hold, facts)):
             return
         try:
             gateway = self._gateway_for(policy)
@@ -371,7 +381,7 @@ class Executor:
         facts = evaluation.facts
         hold_key = (facts.guild_id, facts.author_id, evaluation.key)
         hold = self._holds.get(hold_key)
-        if hold is None or self._others_pending(hold):
+        if hold is None or self._others_pending(hold, facts):
             return
         del self._holds[hold_key]
         if not hold.noticed:
@@ -408,7 +418,7 @@ class Executor:
         # waiting on the post's verdict, must not close it as "incomplete").
         hold_key = (facts.guild_id, facts.author_id, evaluation.key)
         hold = self._holds.get(hold_key) if provisional is not None else None
-        if hold is not None and self._others_pending(hold):
+        if hold is not None and self._others_pending(hold, facts):
             # Another message held under the same claim is still being
             # decided: it releases the hold and closes the notice.
             result, _ = await self._execute(evaluation, None, last=False)
@@ -432,10 +442,10 @@ class Executor:
                     )
 
     @staticmethod
-    def _others_pending(hold: _Hold) -> bool:
+    def _others_pending(hold: _Hold, facts: MessageFacts) -> bool:
         """Count one held message's decision as done; whether others remain."""
-        hold.pending -= 1
-        return hold.pending > 0
+        hold.pending.discard(facts.message_id)
+        return bool(hold.pending)
 
     async def _execute(
         self, evaluation: Evaluation, hold: _Hold | None, *, last: bool = True

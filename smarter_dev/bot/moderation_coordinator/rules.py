@@ -184,12 +184,11 @@ def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleH
 def edit_ping_hits(facts: MessageFacts) -> list[RuleHit]:
     """An edit whose current text carries ``@everyone``/``@here``: removed.
 
-    The same case-sensitive check the handler makes on the edit's text. Only
+    The mention as :func:`pings_everyone` reads it: a word outside code, not
+    an email address (``me@here.com``) or a longer word (``@hereby``). Only
     edits: a new message with a mass mention is the spam engine's.
     """
-    if not facts.is_edit:
-        return []
-    if "@everyone" not in facts.content and "@here" not in facts.content:
+    if not facts.is_edit or not pings_everyone(facts.content):
         return []
     return [
         RuleHit(

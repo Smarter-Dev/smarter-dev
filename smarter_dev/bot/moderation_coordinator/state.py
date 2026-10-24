@@ -321,6 +321,16 @@ class VerdictCache:
         if not future.done():
             future.set_result(verdicts)
 
+    def drop(
+        self, guild_id: str, author_id: str, key: str, future: asyncio.Future
+    ) -> None:
+        """Forget ``future``'s check, which found nothing (a crash, a spent
+        budget, a timeout): a later copy asks for itself, held as the post
+        was, instead of reading that empty answer."""
+        entry = self._entries.get((guild_id, author_id, key))
+        if entry is not None and entry[1] is future:
+            del self._entries[(guild_id, author_id, key)]
+
 
 def _adds_to(entry: tuple[float, asyncio.Future, frozenset[str]], reasons) -> bool:
     """Whether ``reasons`` go past what ``entry``'s check was asked under,
