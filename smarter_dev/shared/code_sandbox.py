@@ -6,7 +6,9 @@ that worker; the calling process (the bot, the agent worker) is unharmed.
 
 Each run gets its own one-worker pool, so the worker exits when the run ends
 and its memory goes back to the OS: a worker that peaked at the memory limit
-never lingers. Spawning one costs about 5 ms.
+never lingers. Spawning one costs about 5 ms. A run gives its place in the
+budget back only once its worker has exited: closing the pool doesn't wait
+for a worker whose run was cancelled (see ``_worker_exited``).
 
 **Memory.** A worker is a real process in the pod's cgroup, so every running
 sandbox counts against the pod's memory limit. Each process has a sandbox
@@ -33,6 +35,7 @@ import collections
 import contextlib
 import math
 import os as _os
+import signal
 import weakref
 from collections.abc import AsyncIterator
 from collections.abc import Awaitable
@@ -57,6 +60,10 @@ BUDGET_ENV = "CODE_SANDBOX_BUDGET_MIB"
 # Past a feed's time limit, how long the pool waits for the sandbox to raise
 # TimeoutError itself before killing the worker.
 KILL_GRACE_SECONDS = 2.0
+
+# Once its pool is closed, how long a run's worker gets to exit before it is
+# killed. Its place in the budget is held until it has gone.
+WORKER_EXIT_SECONDS = 2.0
 
 # Sleeps return immediately: a sleeping snippet would otherwise hold a worker
 # without counting against its time limit.
@@ -137,6 +144,60 @@ _budgets: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Budget] = (
 )
 
 
+def _watch_worker(pid: int | None) -> int | None:
+    """A pidfd for the run's worker, readable once it has exited.
+
+    ``None`` where the OS has no pidfds (not Linux): there the run doesn't
+    wait for its worker.
+    """
+    if pid is None or not hasattr(_os, "pidfd_open"):
+        return None
+    try:
+        return _os.pidfd_open(pid)
+    except ProcessLookupError:
+        return None
+
+
+async def _worker_exited(pidfd: int) -> None:
+    """Return once the worker behind ``pidfd`` has exited; close ``pidfd``.
+
+    pydantic-monty 1.3.0 doesn't wait for every worker it ends. Closing the
+    pool waits only for idle ones; a worker whose run was cancelled mid-feed
+    is sent SIGKILL as its checkout is dropped and left for tokio to reap in
+    the background (monty-python ``pool.rs`` ``AbandonGuard``, monty-pool
+    ``checkout.rs`` ``impl Drop for Checkout``, ``pool.rs`` ``Pool::close``).
+    Under load it can run on for a while after that, holding its memory.
+
+    A worker that hasn't exited within ``WORKER_EXIT_SECONDS`` is killed and
+    waited for. A cancellation meanwhile is held until the worker has gone,
+    then raised. The zombie holds no memory; tokio, which owns the child,
+    reaps it.
+    """
+    loop = asyncio.get_running_loop()
+    gone = loop.create_future()
+    loop.add_reader(pidfd, lambda: gone.done() or gone.set_result(None))
+    deadline: float | None = loop.time() + WORKER_EXIT_SECONDS
+    cancelled: asyncio.CancelledError | None = None
+    try:
+        while not gone.done():
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(gone),
+                    None if deadline is None else deadline - loop.time(),
+                )
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    signal.pidfd_send_signal(pidfd, signal.SIGKILL)
+                deadline = None
+            except asyncio.CancelledError as error:
+                cancelled = error
+    finally:
+        loop.remove_reader(pidfd)
+        _os.close(pidfd)
+    if cancelled is not None:
+        raise cancelled
+
+
 def _budget() -> _Budget:
     loop = asyncio.get_running_loop()
     budget = _budgets.get(loop)
@@ -174,19 +235,27 @@ async def run_sandboxed(
     async with budget.reserve(cap + WORKER_OVERHEAD_MIB):
         if still_wanted is not None and not await still_wanted():
             raise RunNotWanted
-        # Leaving the pool ends its worker, a cancelled run's included
-        # (tests/web/site_code_lifecycle_test.py checks none is left alive
-        # when the place is given back).
-        async with monty.AsyncMonty(
-            min_processes=1,
-            max_processes=1,
-            request_timeout=request_timeout,
-        ) as pool:
-            async with pool.checkout(limits=limits, os_policy=OS_POLICY) as session:
-                return await session.feed_run(
-                    code,
-                    inputs=inputs,
-                    external_lookup=external_lookup,
-                    print_callback=print_callback,
-                    os=os,
-                )
+        # Leaving the pool ends its worker, a cancelled run's included, and
+        # the place is held until that worker has exited
+        # (tests/shared/code_sandbox_test.py and
+        # tests/web/site_code_lifecycle_test.py check none is left alive when
+        # the place is given back).
+        worker = None
+        try:
+            async with monty.AsyncMonty(
+                min_processes=1,
+                max_processes=1,
+                request_timeout=request_timeout,
+            ) as pool:
+                async with pool.checkout(limits=limits, os_policy=OS_POLICY) as session:
+                    worker = _watch_worker(session.worker_pid)
+                    return await session.feed_run(
+                        code,
+                        inputs=inputs,
+                        external_lookup=external_lookup,
+                        print_callback=print_callback,
+                        os=os,
+                    )
+        finally:
+            if worker is not None:
+                await _worker_exited(worker)

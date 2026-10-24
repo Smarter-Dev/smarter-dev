@@ -10,7 +10,11 @@ sandboxes running at once (which is what bounds their memory together).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import signal
+import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -265,3 +269,110 @@ async def test_a_worker_exits_when_its_run_ends():
     # A worker that peaked at the memory limit must not linger holding it.
     await _run("x = [0] * 10_000_000\nlen(x)")
     assert _monty_children() == {}
+
+
+@contextlib.contextmanager
+def _crowded(pid: int):
+    """Slow ``pid`` down: idle priority, on one CPU kept busy by two loops.
+
+    A worker sent SIGKILL there takes a while to actually exit, as one does
+    on a busy pod.
+    """
+    cpu = max(os.sched_getaffinity(0))
+    hogs = [
+        subprocess.Popen([sys.executable, "-c", "while True: pass"]) for _ in range(2)
+    ]
+    try:
+        for hog in hogs:
+            os.sched_setaffinity(hog.pid, {cpu})
+        os.sched_setaffinity(pid, {cpu})
+        os.sched_setscheduler(pid, os.SCHED_IDLE, os.sched_param(0))
+        yield
+    finally:
+        for hog in hogs:
+            hog.kill()
+            hog.wait()
+
+
+def _running(pid: int) -> bool:
+    """Whether ``pid`` is still a live ``monty`` worker of this process."""
+    try:
+        stat = Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return False
+    comm = stat[stat.index("(") + 1 : stat.rindex(")")]
+    state, ppid = stat[stat.rindex(")") + 2 :].split()[:2]
+    return comm == "monty" and int(ppid) == os.getpid() and state != "Z"
+
+
+@pytest.mark.skipif(not hasattr(os, "pidfd_open"), reason="needs pidfds")
+async def test_a_cancelled_run_gives_its_place_back_once_its_worker_has_gone(
+    monkeypatch,
+):
+    # Monty kills a cancelled run's worker without waiting for it to exit.
+    # Checked by pid: a scan of /proc takes long enough to miss it.
+    workers: list[int] = []
+    at_release: list[list[int]] = []
+    reserve = code_sandbox._Budget.reserve
+
+    @contextlib.asynccontextmanager
+    async def watched(self, size):
+        async with reserve(self, size):
+            try:
+                yield
+            finally:
+                at_release.append([pid for pid in workers if _running(pid)])
+
+    monkeypatch.setattr(code_sandbox._Budget, "reserve", watched)
+    run = asyncio.create_task(run_code("spin", "while True:\n    pass\n"))
+    for _ in range(250):
+        await asyncio.sleep(0.02)
+        if workers := list(_monty_children()):
+            break
+    else:
+        raise AssertionError("the run never started a worker")
+    with _crowded(workers[0]):
+        await asyncio.sleep(0.2)
+        assert _running(workers[0])
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(run, 10)
+        assert at_release == [[]]
+    assert code_sandbox._budget().used == 0
+
+
+@pytest.fixture
+def stuck():
+    """A process that only stops when killed, and a pidfd for it."""
+    process = subprocess.Popen(["sleep", "60"])
+    try:
+        yield process, os.pidfd_open(process.pid)
+    finally:
+        process.kill()
+        process.wait()
+
+
+@pytest.mark.skipif(not hasattr(os, "pidfd_open"), reason="needs pidfds")
+async def test_a_worker_that_does_not_exit_is_killed(monkeypatch, stuck):
+    monkeypatch.setattr(code_sandbox, "WORKER_EXIT_SECONDS", 0.2)
+    process, pidfd = stuck
+    began = time.monotonic()
+    await asyncio.wait_for(code_sandbox._worker_exited(pidfd), 10)
+    assert time.monotonic() - began >= 0.2
+    assert process.wait(timeout=1) == -signal.SIGKILL
+
+
+@pytest.mark.skipif(not hasattr(os, "pidfd_open"), reason="needs pidfds")
+async def test_a_cancelled_wait_still_waits_for_the_worker(monkeypatch, stuck):
+    # A run cancelled again while it waits must not give its place back
+    # while its worker is alive.
+    monkeypatch.setattr(code_sandbox, "WORKER_EXIT_SECONDS", 0.5)
+    process, pidfd = stuck
+    waiting = asyncio.create_task(code_sandbox._worker_exited(pidfd))
+    await asyncio.sleep(0.05)
+    waiting.cancel()
+    await asyncio.sleep(0.1)
+    assert not waiting.done()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(waiting, 10)
+    assert process.poll() == -signal.SIGKILL
