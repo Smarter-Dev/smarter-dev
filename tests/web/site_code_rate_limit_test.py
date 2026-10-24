@@ -139,8 +139,9 @@ def test_app_yaml_gives_the_code_route_its_own_ip_rule():
     assert config.enabled
     rule = config.resolve(code_url(uuid4()), "POST")
     assert (rule.name, rule.key, rule.limits) == ("site-code", "ip", [(600, 60.0)])
-    # POST only, and only under the code route.
-    assert config.resolve(code_url(uuid4()), "GET").name == "default"
+    # POST only, and only under the code route: anything else under
+    # /api/site/ falls to the site catch-all.
+    assert config.resolve(code_url(uuid4()), "GET").name == "site"
     for other in (
         f"/api/site/search/users/{uuid4()}/runs",
         "/api/site/code",
@@ -149,11 +150,17 @@ def test_app_yaml_gives_the_code_route_its_own_ip_rule():
         assert config.resolve(other, "POST").name != "site-code", other
 
 
-async def test_code_runs_never_spend_the_default_budget(limited_app):
+async def test_code_runs_never_spend_another_budget(limited_app):
+    # The /api/site/ catch-all and the default both cut to 3: code runs go
+    # on, on their own rule.
     config = app_rate_limit_config()
-    default_limit = config.resolve("/api/site/anything", "POST").limits[0][0]
+    (catch_all,) = [rule for rule in config.rules if rule.name == "site"]
+    catch_all.limits[0].limit = 3
+    config.requests_per_minute = 3
+    assert config.resolve("/api/site/not-a-family", "POST").limits == [(3, 60.0)]
+    assert config.resolve("/chat", "GET").limits == [(3, 60.0)]
     async with limited_app.build(config) as client:
-        for _ in range(default_limit + 1):
+        for _ in range(10):
             response = await _run(client, limited_app.member)
             assert response.status_code == 200, response.text
         assert response.json() == {"result": "return value: 2"}
