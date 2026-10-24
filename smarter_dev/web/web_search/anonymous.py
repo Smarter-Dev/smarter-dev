@@ -17,6 +17,8 @@ The web pod imports this module, so it must not import pydantic-ai.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
 from datetime import UTC
@@ -26,6 +28,7 @@ from typing import NamedTuple
 from uuid import UUID
 from uuid import uuid4
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search.snapshot import EVENT_TYPE
 from smarter_dev.web.web_search.snapshot import snapshot
@@ -158,6 +161,18 @@ async def wait_seconds(redis, key: str, limit: int, window_seconds: int) -> int:
     return int(await redis.eval(_COUNT, 1, key, limit, window_seconds))
 
 
+def visitor_limit_key(namespace: str, visitor: str) -> str:
+    """A limit's Redis key for a visitor a caller names (the site Worker's
+    daily key, or an address): never the caller's text, which could be any
+    secret it was handed, but its HMAC-SHA-256 under the app's secret."""
+    digest = hmac.new(
+        get_settings().api_secret_key.encode(),
+        f"{namespace}\n{visitor}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{namespace}:{digest}"
+
+
 def link_day_key(owner_user_id: UUID | str) -> str:
     """The daily count of a member's search link. It names the owner, never
     the link: a link made, remade or deleted (here or on next.smarter.dev,
@@ -171,7 +186,10 @@ async def admit(redis, *, visitor: str, owner_user_id: UUID | str) -> Refusal | 
     None when both allow it. A visitor refused for the minute isn't counted
     against the link."""
     wait = await wait_seconds(
-        redis, f"web_search:anonymous:visitor:{visitor}", PER_MINUTE_LIMIT, 60
+        redis,
+        visitor_limit_key("web_search:anonymous:visitor", visitor),
+        PER_MINUTE_LIMIT,
+        60,
     )
     if wait:
         return Refusal(VISITOR_LIMITED, wait, per_link=False)

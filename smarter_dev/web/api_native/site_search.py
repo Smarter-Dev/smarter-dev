@@ -20,6 +20,7 @@ URL, so no path log along the way ever holds it.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from datetime import UTC
@@ -35,6 +36,7 @@ from litestar import get
 from litestar import post
 from litestar.exceptions import HTTPException
 from litestar.exceptions.responses import create_exception_response
+from litestar.serialization import encode_json
 from litestar.status_codes import HTTP_201_CREATED
 from litestar.status_codes import HTTP_204_NO_CONTENT
 from pydantic import BaseModel
@@ -67,18 +69,28 @@ logger = logging.getLogger(__name__)
 
 # ``secrets.token_urlsafe(32)``, the only tokens a preview link carries.
 PREVIEW_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
-# A pending page reloads every 2 s: 30 a minute per open tab.
+# The Worker's visitor key: HMAC-SHA-256, base64url, unpadded.
+PREVIEW_VISITOR = re.compile(r"[A-Za-z0-9_-]{43}")
+# A request body is two of those and their JSON; anything longer isn't one.
+MAX_PREVIEW_REQUEST_BYTES = 512
+# A pending page reloads every 2 s: 30 a minute per open tab. (Skrift's
+# app.yaml rule bounds each Worker egress address; this bounds a visitor.)
 PREVIEW_READS_PER_MINUTE = 120
 PREVIEW_LIMITED = "Too many search previews opened. Try again in a minute."
 PREVIEW_MISSING = "This search preview doesn't exist."
 PREVIEW_EXPIRED = "This search preview has expired."
-# Bounds on what one answer carries. Brave answers 5 results with fields far
-# shorter than these; a longer field is cut, a longer URL shown unlinked.
+PREVIEW_INVALID = "Invalid search preview request."
+# Bounds on what one answer carries, around what the page shows: Brave
+# answers 5 results, a query is at most what the bot's status line holds.
+# A longer field is cut, a longer URL shown unlinked.
 MAX_PREVIEW_RESULTS = 20
-MAX_PREVIEW_QUERY = 4_000
-MAX_PREVIEW_TITLE = 1_000
-MAX_PREVIEW_URL = 4_096
-MAX_PREVIEW_DESCRIPTION = 4_000
+MAX_PREVIEW_QUERY = 2_000
+MAX_PREVIEW_TITLE = 500
+MAX_PREVIEW_URL = 2_048
+MAX_PREVIEW_DESCRIPTION = 1_000
+# And on the whole answer, encoded: results past it are left out, counted
+# in ``omitted``. One result at every cut always fits.
+MAX_PREVIEW_BYTES = 65_536
 
 
 class StartSearch(BaseModel):
@@ -86,15 +98,6 @@ class StartSearch(BaseModel):
     request: str = Field(min_length=1, max_length=2000)
     # One key per chat turn: a retried start returns the same run.
     key: str = Field(min_length=8, max_length=64)
-
-
-class ResolvePreview(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    # Checked against PREVIEW_TOKEN in the handler, so a malformed token
-    # answers as a missing preview and is never echoed in a 422.
-    token: str = Field(max_length=128)
-    # The Worker's daily-rotated key for the visitor, as for anonymous runs.
-    visitor: str = Field(pattern=r"^[A-Za-z0-9_-]{16,128}$")
 
 
 class StartAnonymousSearch(BaseModel):
@@ -190,13 +193,36 @@ def _preview_result(result: dict) -> dict[str, str | None]:
     return view
 
 
+async def _preview_request(request: Request) -> tuple[str, str]:
+    """The token and visitor key a resolve names. Read by hand, never by a
+    model whose validation error would quote the input: a refusal says only
+    that the request is invalid, and carries nothing the caller sent."""
+    body = await request.body()
+    try:
+        if len(body) > MAX_PREVIEW_REQUEST_BYTES:
+            raise ValueError
+        asked = json.loads(body)
+        if not isinstance(asked, dict) or set(asked) != {"token", "visitor"}:
+            raise ValueError
+        token, visitor = asked["token"], asked["visitor"]
+        if not isinstance(token, str) or not isinstance(visitor, str):
+            raise ValueError
+        if not PREVIEW_VISITOR.fullmatch(visitor):
+            raise ValueError
+    except (ValueError, UnicodeDecodeError):
+        raise plain_error(422, PREVIEW_INVALID) from None
+    return token, visitor
+
+
 async def _admit_preview_read(visitor: str) -> None:
-    """Count one read against the visitor's minute. Redis down lets it
-    through: a read is one indexed lookup, and the page never had a limit."""
+    """Count one read against the visitor's minute, keyed by the visitor
+    key's HMAC, never the key itself. This limiter's own Redis failure lets
+    the read through (a read is one indexed lookup, and the page never had a
+    limit); Skrift's global middleware still needs Redis first (#332)."""
     try:
         wait = await anonymous.wait_seconds(
             get_redis_client(),
-            f"search_preview:visitor:{visitor}",
+            anonymous.visitor_limit_key("search_preview:visitor", visitor),
             PREVIEW_READS_PER_MINUTE,
             60,
         )
@@ -205,6 +231,32 @@ async def _admit_preview_read(visitor: str) -> None:
         return
     if wait:
         raise BotApiException(429, {"detail": PREVIEW_LIMITED, "wait": wait})
+
+
+def _bounded_results(query: str, results: list[dict]) -> tuple[list[dict], int]:
+    """The views that fit MAX_PREVIEW_BYTES once encoded, in order, and how
+    many were left out (past the count or the size)."""
+    views: list[dict] = []
+    size = len(
+        encode_json(
+            {
+                "preview": {
+                    "status": "ready",
+                    "query": query,
+                    "results": [],
+                    "omitted": 0,
+                }
+            }
+        )
+    ) + len(str(len(results)))
+    for result in results[:MAX_PREVIEW_RESULTS]:
+        view = _preview_result(result)
+        cost = len(encode_json(view)) + 1
+        if size + cost > MAX_PREVIEW_BYTES:
+            break
+        views.append(view)
+        size += cost
+    return views, len(results) - len(views)
 
 
 def _detail(exc: HTTPException) -> str:
@@ -340,15 +392,17 @@ class SiteSearchController(Controller):
 
     @post("/previews/resolve", guards=SITE_SEARCH_GUARDS, status_code=200)
     async def resolve_preview(
-        self, db_session: AsyncSession, data: ResolvePreview
+        self, request: Request, db_session: AsyncSession
     ) -> dict[str, Any]:
         """What ``/ai/search/<token>`` shows: 200 with its status (pending,
-        ready or failed), query and result views; 410 once expired, until
-        the sweep deletes it; 404 for a token that names no preview."""
-        await _admit_preview_read(data.visitor)
-        if not PREVIEW_TOKEN.fullmatch(data.token):
+        ready or failed), query, result views and how many were left out;
+        410 once expired, until the sweep deletes it (the page's 404 either
+        way); 404 for a token that names no preview."""
+        token, visitor = await _preview_request(request)
+        await _admit_preview_read(visitor)
+        if not PREVIEW_TOKEN.fullmatch(token):
             raise plain_error(404, PREVIEW_MISSING)
-        preview = await find_search_preview(db_session, data.token)
+        preview = await find_search_preview(db_session, token)
         if preview is None:
             raise plain_error(404, PREVIEW_MISSING)
         expires_at = preview.expires_at
@@ -356,12 +410,16 @@ class SiteSearchController(Controller):
             expires_at = expires_at.replace(tzinfo=UTC)
         if expires_at <= datetime.now(UTC):
             raise plain_error(410, PREVIEW_EXPIRED)
-        results = [r for r in (preview.results or []) if isinstance(r, dict)]
+        query = preview.query[:MAX_PREVIEW_QUERY]
+        results, omitted = _bounded_results(
+            query, [r for r in (preview.results or []) if isinstance(r, dict)]
+        )
         return {
             "preview": {
                 "status": preview.status,
-                "query": preview.query[:MAX_PREVIEW_QUERY],
-                "results": [_preview_result(r) for r in results[:MAX_PREVIEW_RESULTS]],
+                "query": query,
+                "results": results,
+                "omitted": omitted,
             }
         }
 

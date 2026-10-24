@@ -256,6 +256,19 @@ rate_limit:
           per: minute
         - limit: 3000
           per: hour
+    # The site Worker's search-preview reads (#171 S18), ahead of the
+    # site-search prefix: a pending /ai/search page reloads every 2 s
+    # (30/min per open tab), and one Worker egress address carries many
+    # visitors. 1200/min is 40 such tabs per address; the route's own limit
+    # bounds each visitor (120/min).
+    - name: site-search-previews
+      match:
+        path: /api/site/search/previews/resolve
+        method: POST
+      key: ip
+      limits:
+        - limit: 1200
+          per: minute
     # 3000/min: a member's chat web search polls its run every 800 ms for up
     # to 100 s (~75/min each), and an open /s/r/ page polls through the
     # Worker every 1.5-8 s; ~40 searches at once. Starts keep their per-member
