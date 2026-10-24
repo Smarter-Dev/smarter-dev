@@ -1,0 +1,475 @@
+{
+  "cases": [
+    {
+      "count_after": 0,
+      "count_before": 0,
+      "deleted": 0,
+      "foreign_keep": false,
+      "kept": 0,
+      "kept_runs": [],
+      "name": "empty",
+      "other_member_count_after": 0,
+      "running": 0,
+      "runs": []
+    },
+    {
+      "count_after": 0,
+      "count_before": 0,
+      "deleted": 0,
+      "foreign_keep": true,
+      "kept": 0,
+      "kept_runs": [],
+      "name": "empty_with_foreign_keep",
+      "other_member_count_after": 1,
+      "running": 0,
+      "runs": []
+    },
+    {
+      "count_after": 0,
+      "count_before": 3,
+      "deleted": 3,
+      "foreign_keep": false,
+      "kept": 0,
+      "kept_runs": [],
+      "name": "all_finished",
+      "other_member_count_after": 0,
+      "running": 0,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "complete"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "error"
+        },
+        {
+          "changed_minutes_ago": 1440,
+          "keep": false,
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "count_after": 5,
+      "count_before": 5,
+      "deleted": 0,
+      "foreign_keep": false,
+      "kept": 5,
+      "kept_runs": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "name": "all_recent_running",
+      "other_member_count_after": 0,
+      "running": 5,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "queued"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "planning"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "searching"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "ranking"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "answering"
+        }
+      ]
+    },
+    {
+      "count_after": 0,
+      "count_before": 5,
+      "deleted": 5,
+      "foreign_keep": false,
+      "kept": 0,
+      "kept_runs": [],
+      "name": "all_stalled_running",
+      "other_member_count_after": 0,
+      "running": 0,
+      "runs": [
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "queued"
+        },
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "planning"
+        },
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "searching"
+        },
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "ranking"
+        },
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "answering"
+        }
+      ]
+    },
+    {
+      "count_after": 1,
+      "count_before": 3,
+      "deleted": 2,
+      "foreign_keep": false,
+      "kept": 1,
+      "kept_runs": [
+        0
+      ],
+      "name": "running_either_side_of_stalled",
+      "other_member_count_after": 0,
+      "running": 1,
+      "runs": [
+        {
+          "changed_minutes_ago": 14,
+          "keep": false,
+          "status": "searching"
+        },
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "searching"
+        },
+        {
+          "changed_minutes_ago": 1440,
+          "keep": false,
+          "status": "answering"
+        }
+      ]
+    },
+    {
+      "count_after": 0,
+      "count_before": 2,
+      "deleted": 2,
+      "foreign_keep": false,
+      "kept": 0,
+      "kept_runs": [],
+      "name": "error_only",
+      "other_member_count_after": 0,
+      "running": 0,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "error"
+        },
+        {
+          "changed_minutes_ago": 1440,
+          "keep": false,
+          "status": "error"
+        }
+      ]
+    },
+    {
+      "count_after": 1,
+      "count_before": 2,
+      "deleted": 1,
+      "foreign_keep": false,
+      "kept": 1,
+      "kept_runs": [
+        0
+      ],
+      "name": "kept_finished",
+      "other_member_count_after": 0,
+      "running": 1,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "complete"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "count_after": 1,
+      "count_before": 1,
+      "deleted": 0,
+      "foreign_keep": false,
+      "kept": 1,
+      "kept_runs": [
+        0
+      ],
+      "name": "kept_error",
+      "other_member_count_after": 0,
+      "running": 1,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "error"
+        }
+      ]
+    },
+    {
+      "count_after": 1,
+      "count_before": 2,
+      "deleted": 1,
+      "foreign_keep": false,
+      "kept": 1,
+      "kept_runs": [
+        0
+      ],
+      "name": "kept_running",
+      "other_member_count_after": 0,
+      "running": 1,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "searching"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "count_after": 1,
+      "count_before": 2,
+      "deleted": 1,
+      "foreign_keep": false,
+      "kept": 1,
+      "kept_runs": [
+        0
+      ],
+      "name": "kept_stalled",
+      "other_member_count_after": 0,
+      "running": 1,
+      "runs": [
+        {
+          "changed_minutes_ago": 16,
+          "keep": true,
+          "status": "searching"
+        },
+        {
+          "changed_minutes_ago": 20,
+          "keep": false,
+          "status": "searching"
+        }
+      ]
+    },
+    {
+      "count_after": 2,
+      "count_before": 2,
+      "deleted": 0,
+      "foreign_keep": false,
+      "kept": 2,
+      "kept_runs": [
+        0,
+        1
+      ],
+      "name": "every_run_kept",
+      "other_member_count_after": 0,
+      "running": 2,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "complete"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "error"
+        }
+      ]
+    },
+    {
+      "count_after": 0,
+      "count_before": 1,
+      "deleted": 1,
+      "foreign_keep": true,
+      "kept": 0,
+      "kept_runs": [],
+      "name": "foreign_id_in_keep",
+      "other_member_count_after": 1,
+      "running": 0,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "complete"
+        }
+      ]
+    },
+    {
+      "count_after": 3,
+      "count_before": 7,
+      "deleted": 4,
+      "foreign_keep": true,
+      "kept": 3,
+      "kept_runs": [
+        3,
+        4,
+        5
+      ],
+      "name": "mixed",
+      "other_member_count_after": 1,
+      "running": 3,
+      "runs": [
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "complete"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "error"
+        },
+        {
+          "changed_minutes_ago": 16,
+          "keep": false,
+          "status": "planning"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": false,
+          "status": "ranking"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "complete"
+        },
+        {
+          "changed_minutes_ago": 0,
+          "keep": true,
+          "status": "answering"
+        },
+        {
+          "changed_minutes_ago": 1440,
+          "keep": false,
+          "status": "complete"
+        }
+      ]
+    }
+  ],
+  "copy": [
+    {
+      "button": null,
+      "confirm": null,
+      "count": 0,
+      "meta": "0 searches",
+      "offers_delete": false
+    },
+    {
+      "button": "Delete it",
+      "confirm": "Delete all 1 search? Every search from your dashboard, with its results and answer.",
+      "count": 1,
+      "meta": "1 search",
+      "offers_delete": true
+    },
+    {
+      "button": "Delete all 2",
+      "confirm": "Delete all 2 searches? Every search from your dashboard, with its results and answer.",
+      "count": 2,
+      "meta": "2 searches",
+      "offers_delete": true
+    },
+    {
+      "button": "Delete all 5",
+      "confirm": "Delete all 5 searches? Every search from your dashboard, with its results and answer.",
+      "count": 5,
+      "meta": "5 searches",
+      "offers_delete": true
+    }
+  ],
+  "messages": [
+    {
+      "deleted": 0,
+      "message": "Deleted 0 searches.",
+      "running": 0
+    },
+    {
+      "deleted": 0,
+      "message": "Deleted 0 searches. 1 still being answered was kept; delete it once it finishes.",
+      "running": 1
+    },
+    {
+      "deleted": 0,
+      "message": "Deleted 0 searches. 2 still being answered were kept; delete them once they finish.",
+      "running": 2
+    },
+    {
+      "deleted": 1,
+      "message": "Deleted 1 search.",
+      "running": 0
+    },
+    {
+      "deleted": 1,
+      "message": "Deleted 1 search. 1 still being answered was kept; delete it once it finishes.",
+      "running": 1
+    },
+    {
+      "deleted": 1,
+      "message": "Deleted 1 search. 2 still being answered were kept; delete them once they finish.",
+      "running": 2
+    },
+    {
+      "deleted": 2,
+      "message": "Deleted 2 searches.",
+      "running": 0
+    },
+    {
+      "deleted": 2,
+      "message": "Deleted 2 searches. 1 still being answered was kept; delete it once it finishes.",
+      "running": 1
+    },
+    {
+      "deleted": 2,
+      "message": "Deleted 2 searches. 2 still being answered were kept; delete them once they finish.",
+      "running": 2
+    },
+    {
+      "deleted": 5,
+      "message": "Deleted 5 searches.",
+      "running": 0
+    },
+    {
+      "deleted": 5,
+      "message": "Deleted 5 searches. 1 still being answered was kept; delete it once it finishes.",
+      "running": 1
+    },
+    {
+      "deleted": 5,
+      "message": "Deleted 5 searches. 2 still being answered were kept; delete them once they finish.",
+      "running": 2
+    }
+  ],
+  "stalled_after_minutes": 15
+}

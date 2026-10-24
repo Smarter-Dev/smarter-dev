@@ -30,6 +30,7 @@ so a run its worker abandoned never blocks a delete.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -40,6 +41,7 @@ from skrift.db.models.notification import StoredNotification
 from skrift.db.models.push_subscription import PushSubscription
 from skrift.db.models.user import User
 from sqlalchemy import delete
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,7 +80,7 @@ class DeleteAllResult:
     running: int
     # Chats whose uploads could not all be removed; they stay, retryable.
     stranded: int = 0
-    # The searches left (still running).
+    # The searches left (still running, or named in ``keep``), for the site.
     kept: tuple[UUID, ...] = ()
 
 
@@ -335,7 +337,13 @@ async def lock_member(session: AsyncSession, user_id: UUID) -> UUID | None:
     )
 
 
-async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID) -> str:
+async def _delete_one_search(
+    session: AsyncSession,
+    user_id: UUID,
+    run_id: UUID,
+    keep: Collection[UUID] = (),
+    keep_keys: Collection[str] = (),
+) -> str:
     """Delete one of the member's runs in its own transaction, deciding from
     the run as it is now, not as a caller last saw it (port of lane 1's
     smarter-dev 1cd6d610). Lock order (``dashboard_controller.create_search``):
@@ -345,7 +353,9 @@ async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID)
     forgotten with the delete, so a start retried with it (a lost reply)
     can't make the run again; a dashboard key, which can recur, is not.
     "deleted" only when this call's DELETE removed the row; "kept" for one
-    still running (nothing marked); "gone" for one already deleted."""
+    still running, or one a site reply is still being written from (named in
+    ``keep`` by id or ``keep_keys`` by key; the member's own only, and
+    nothing marked); "gone" for one already deleted."""
     await lock_member(session, user_id)
     run = (
         await session.execute(
@@ -364,7 +374,11 @@ async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID)
     if run is None:
         await session.rollback()
         return "gone"
-    if run.status not in FINISHED_SEARCH_STATUSES and _recent(run.updated_at):
+    if (
+        run.id in keep
+        or run.submission_key in keep_keys
+        or (run.status not in FINISHED_SEARCH_STATUSES and _recent(run.updated_at))
+    ):
         await session.rollback()
         return "kept"
     if SITE_SEARCH_KEY.match(run.submission_key):
@@ -375,6 +389,18 @@ async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID)
     )
     await session.commit()
     return "deleted" if removed.rowcount else "gone"
+
+
+async def count_searches(session: AsyncSession, user_id: UUID) -> int:
+    """Every search the member owns, as "Your data" counts them."""
+    return (
+        await session.scalar(
+            select(func.count())
+            .select_from(WebSearchRun)
+            .where(WebSearchRun.owner_user_id == user_id)
+        )
+        or 0
+    )
 
 
 async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
@@ -400,22 +426,32 @@ async def _search_ids(session: AsyncSession, user_id: UUID) -> list[UUID]:
     )
 
 
-async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAllResult:
-    """Every search the member owns but those still running.
+async def delete_all_searches(
+    session: AsyncSession,
+    user_id: UUID,
+    keep: Collection[UUID] = (),
+    keep_keys: Collection[str] = (),
+) -> DeleteAllResult:
+    """Every search the member owns but those still running, and those in
+    ``keep`` or started under a key in ``keep_keys``, which count as running:
+    the site names the searches its replies are still being written from, by
+    run id when it has one, and by the reply's search keys when a start's
+    reply was lost, so a run the site may still rejoin is never deleted, or
+    its key marked, under it. An id or key that is not one of the member's is
+    ignored.
 
     The runs are listed first, ids only and in one read: those are the runs
     it deletes, so one started meanwhile is never reached. Each is then
     decided and deleted in a transaction of its own under the member's lock
     (:func:`_delete_one_search`), its site key marked forgotten: never one
     long lock over all of them, and a run that started or finished since it
-    was listed is judged as it is. (Lane 1's smarter-dev 1cd6d610 and
-    dd2e9eed, ported without their ``keep`` options, which PR 222 adds.)"""
+    was listed is judged as it is."""
     run_ids = await _search_ids(session, user_id)
     await session.commit()
     deleted = running = 0
     kept: list[UUID] = []
     for run_id in run_ids:
-        outcome = await _delete_one_search(session, user_id, run_id)
+        outcome = await _delete_one_search(session, user_id, run_id, keep, keep_keys)
         if outcome == "deleted":
             deleted += 1
         elif outcome == "kept":

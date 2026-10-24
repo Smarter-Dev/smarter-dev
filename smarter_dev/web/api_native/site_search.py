@@ -7,6 +7,11 @@ and grounded answer on the agent worker, the same limits and the same
 deletion rules. The member is the synced site user named in the path; the
 service key is the only authority, and a browser never reaches these routes.
 
+The site's "Your data" counts and deletes the member's searches as the account
+page does (``count_searches``, ``delete_all_searches``). A delete-all names
+the runs whose replies the site is still writing; they are left, and reported
+with the ones still running, so the site can keep the turns that cite them.
+
 A signed-out visitor using a member's search link gets an anonymous search
 (``web_search.anonymous``): never saved, kept in Redis for 30 minutes, billed
 to the link's owner, under the anonymous limits. The Worker names the visitor
@@ -59,6 +64,8 @@ from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.search_preview_controller import result_view
 from smarter_dev.web.search_previews import find_search_preview
 from smarter_dev.web.user_content import StillRunning
+from smarter_dev.web.user_content import count_searches
+from smarter_dev.web.user_content import delete_all_searches
 from smarter_dev.web.user_content import delete_search
 from smarter_dev.web.user_content import mark_search_key_forgotten
 from smarter_dev.web.web_search import anonymous
@@ -100,6 +107,12 @@ class StartSearch(BaseModel):
     request: str = Field(min_length=1, max_length=2000)
     # One key per chat turn: a retried start returns the same run.
     key: str = Field(min_length=8, max_length=64)
+
+
+class DeleteAllSearches(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Runs the site's replies are still being written from.
+    keep: list[str] = Field(default_factory=list, max_length=200)
 
 
 class StartAnonymousSearch(BaseModel):
@@ -148,6 +161,19 @@ async def _run_for_key(session: AsyncSession, owner: UUID, key: str):
 
 async def _forgotten(session: AsyncSession, owner: UUID, key: str) -> bool:
     return await session.get(WebSearchForgottenKey, (owner, key)) is not None
+
+
+def _run_ids(values: list[str]) -> set[UUID]:
+    ids = set()
+    for value in values:
+        try:
+            rid = UUID(value)
+            if str(rid) != value.lower():
+                raise ValueError
+        except ValueError:
+            raise plain_error(422, "Invalid search ID") from None
+        ids.add(rid)
+    return ids
 
 
 async def _owned(session: AsyncSession, user: User, run_id: str) -> WebSearchRun:
@@ -350,6 +376,28 @@ class SiteSearchController(Controller):
                 raise
             return {"search": site_snapshot(existing), "idempotent": True}
         return {"search": site_snapshot(run)}
+
+    @get("/users/{user_id:str}/runs/count", guards=SITE_SEARCH_GUARDS)
+    async def count(self, db_session: AsyncSession, user_id: str) -> dict[str, int]:
+        user = await _member(db_session, user_id)
+        return {"searches": await count_searches(db_session, user.id)}
+
+    @post(
+        "/users/{user_id:str}/runs/delete-all",
+        guards=SITE_SEARCH_GUARDS,
+        status_code=200,
+    )
+    async def remove_all(
+        self, db_session: AsyncSession, user_id: str, data: DeleteAllSearches
+    ) -> dict[str, Any]:
+        user = await _member(db_session, user_id)
+        keep = _run_ids(data.keep)
+        result = await delete_all_searches(db_session, user.id, keep=keep)
+        return {
+            "deleted": result.deleted,
+            "running": result.running,
+            "kept": [str(rid) for rid in result.kept],
+        }
 
     @get("/users/{user_id:str}/runs/{run_id:str}", guards=SITE_SEARCH_GUARDS)
     async def read(
