@@ -1,6 +1,7 @@
 """Site search facade: principal isolation, idempotent starts, limits,
 structured snapshots without HTML, ownership and deletion."""
 
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -393,3 +394,52 @@ async def test_a_closing_or_gone_account_can_still_be_forgotten(
     assert await db_session.get(WebSearchRun, UUID(run_id)) is None
     gone = _forget(tc, uuid4(), uuid4().hex)
     assert gone.status_code == 200 and gone.json() == {"status": "forgotten"}
+
+
+async def test_every_start_refuses_a_forgotten_key_where_runs_are_made(
+    client, member, db_session
+):
+    """The dashboard's own start (and the search link's) make runs through
+    the same creator as the site: a forgotten key refuses there too, so no
+    path recreates a run the site forgot."""
+    tc, _ = client
+    key = uuid4().hex
+    assert _forget(tc, member.id, key).json() == {"status": "forgotten"}
+    with pytest.raises(dashboard_controller.SearchKeyForgotten):
+        await dashboard_controller.create_search(
+            db_session, member.id, "latest Python release notes", key
+        )
+    assert (await db_session.execute(WebSearchRun.__table__.select())).all() == []
+    dashboard_controller.dispatch_one.assert_not_awaited()
+    # Another key still starts.
+    run = await dashboard_controller.create_search(
+        db_session, member.id, "latest Python release notes", uuid4().hex
+    )
+    assert run.status == "queued"
+
+
+async def test_deleting_a_site_run_forgets_its_key(client, member, db_session):
+    """A run the site deletes by id takes its turn's key with it: a start
+    retried with that key (its reply lost) gets 410, not the run again.
+    Only site keys (64 hex, one per turn); a dashboard key can recur."""
+    tc, _ = client
+    site_key = hashlib.sha256(uuid4().bytes).hexdigest()
+    dashboard_key = uuid4().hex
+    ids = {}
+    for key in (site_key, dashboard_key):
+        ids[key] = _start(tc, member.id, key=key).json()["search"]["id"]
+    # Still running: refused, and nothing forgotten.
+    assert (
+        tc.delete(f"{ROOT}/users/{member.id}/runs/{ids[site_key]}").status_code == 409
+    )
+    assert _start(tc, member.id, key=site_key).json()["idempotent"] is True
+    for run_id in ids.values():
+        run = await db_session.get(WebSearchRun, UUID(run_id))
+        run.status = "complete"
+    await db_session.commit()
+    for run_id in ids.values():
+        assert tc.delete(f"{ROOT}/users/{member.id}/runs/{run_id}").json() == {
+            "status": "deleted"
+        }
+    assert _start(tc, member.id, key=site_key).status_code == 410
+    assert _start(tc, member.id, key=dashboard_key).status_code == 201

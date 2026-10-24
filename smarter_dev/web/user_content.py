@@ -306,6 +306,19 @@ async def delete_all_resources_conversations(
 # ── Dashboard web searches ───────────────────────────────────────────
 
 
+async def mark_search_key_forgotten(
+    session: AsyncSession, owner_id: UUID, key: str
+) -> None:
+    """Mark a site search key forgotten, so a start with it refuses (410):
+    for a site chat turn whose start reply was lost. Idempotent; flushes,
+    never commits. The caller holds the owner's users-row lock (lock order:
+    ``dashboard_controller.create_search``), as every delete path that
+    forgets a key must: the site's forget by key, and any delete-all."""
+    if await session.get(WebSearchForgottenKey, (owner_id, key)) is None:
+        session.add(WebSearchForgottenKey(owner_user_id=owner_id, submission_key=key))
+        await session.flush()
+
+
 async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
     if run.status not in FINISHED_SEARCH_STATUSES and _recent(run.updated_at):
         raise StillRunning
@@ -353,6 +366,12 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     from smarter_dev.web.site_identity import fence_account_deletion
 
     await fence_account_deletion(session, user_id)
+    # Lock order (dashboard_controller.create_search): the identity fence,
+    # then the users row, before any of the owner's rows are written. A site
+    # forget takes the users row before the mark, run and dispatches it
+    # writes, so the two never wait on each other in a cycle; and a mark it
+    # committed first is purged below, while one after finds no user.
+    await session.execute(select(User.id).where(User.id == user_id).with_for_update())
     await delete_account_signups(session, user_id)
     await forget_admin_identifiers(session, user_id)
     turn_ids = list(
@@ -403,10 +422,6 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     await session.execute(
         delete(WebSearchRun).where(WebSearchRun.owner_user_id == user_id)
     )
-    # Under the user row's lock, which a site forget takes before it writes
-    # a mark: one committed before this is purged here, and one after finds
-    # no user and writes none.
-    await session.execute(select(User.id).where(User.id == user_id).with_for_update())
     await session.execute(
         delete(WebSearchForgottenKey).where(
             WebSearchForgottenKey.owner_user_id == user_id

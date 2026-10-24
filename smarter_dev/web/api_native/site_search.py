@@ -15,6 +15,7 @@ by an opaque key it derives; Python never sees the visitor's address.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 from uuid import UUID
 
@@ -47,11 +48,15 @@ from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.user_content import StillRunning
 from smarter_dev.web.user_content import delete_search
+from smarter_dev.web.user_content import mark_search_key_forgotten
 from smarter_dev.web.web_search import anonymous
 from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import structured as site_snapshot
 
 SITE_SEARCH_GUARDS = [*SITE_API_GUARDS, Permission("site-search")]
+# The site's keys: SHA-256 of a chat turn's id, so one per turn and never
+# reused. The dashboard's own keys can recur for the same text; never these.
+SITE_KEY = re.compile(r"^[0-9a-f]{64}$")
 
 
 class StartSearch(BaseModel):
@@ -181,13 +186,13 @@ class SiteSearchController(Controller):
     async def start(
         self, db_session: AsyncSession, user_id: str, data: StartSearch
     ) -> dict[str, Any]:
-        # The lock a forget of this key takes too: a start still on its way
-        # when the site forgets it either lands first, and its run is the
-        # forget's to delete, or finds the key forgotten.
+        # The lock a forget of this key takes too (lock order:
+        # dashboard_controller.create_search): a forgotten key refuses before
+        # the idempotent repeat, and create_search checks again under it.
         user = await _member(db_session, user_id, lock=True)
         key = _key(data.key)
         if await _forgotten(db_session, user.id, key):
-            raise plain_error(410, "This search was deleted.")
+            raise plain_error(410, dashboard.SEARCH_FORGOTTEN)
         existing = await _run_for_key(db_session, user.id, key)
         if existing is not None:
             return {"search": site_snapshot(existing), "idempotent": True}
@@ -201,6 +206,8 @@ class SiteSearchController(Controller):
         owner_id = user.id
         try:
             run = await dashboard.create_search(db_session, owner_id, text, key)
+        except dashboard.SearchKeyForgotten:
+            raise plain_error(410, dashboard.SEARCH_FORGOTTEN) from None
         except IntegrityError:
             # Two starts for the same turn raced and the other one saved its
             # run first (unique owner + key). Answer as an idempotent repeat.
@@ -251,14 +258,15 @@ class SiteSearchController(Controller):
         tells it from an API without this route."""
         uid = _account_id(user_id)
         key = _key(key)
+        # Lock order (dashboard_controller.create_search): the users row
+        # before the mark, the run and its dispatches, as starts and the
+        # account purge take them.
         user = await db_session.scalar(
             select(User).where(User.id == uid).with_for_update()
         )
         if user is None:
             return {"status": "forgotten"}
-        if not await _forgotten(db_session, uid, key):
-            db_session.add(WebSearchForgottenKey(owner_user_id=uid, submission_key=key))
-            await db_session.flush()
+        await mark_search_key_forgotten(db_session, uid, key)
         run = await _run_for_key(db_session, uid, key)
         if run is not None:
             try:
@@ -279,8 +287,14 @@ class SiteSearchController(Controller):
     async def remove(
         self, db_session: AsyncSession, user_id: str, run_id: str
     ) -> dict[str, str]:
-        user = await _member(db_session, user_id)
+        # Lock order (dashboard_controller.create_search): the users row,
+        # then the run and its key's mark, committed with the delete.
+        user = await _member(db_session, user_id, lock=True)
         run = await _owned(db_session, user, run_id)
+        if SITE_KEY.match(run.submission_key):
+            # A site turn's key never names another search: forgotten, so a
+            # start retried with it (a lost reply) can't make the run again.
+            await mark_search_key_forgotten(db_session, user.id, run.submission_key)
         try:
             await delete_search(db_session, run)
         except StillRunning:

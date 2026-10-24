@@ -216,6 +216,8 @@ class SearchLinkController(Controller):
             await dashboard._enforce_limits(db_session, user.id)
         except HTTPException as error:
             return _limited(request, message=str(error.detail), wait=None, login=False)
+        # A key of its own, never a site turn's: no forget can name it, so
+        # create_search's forgotten-key refusal can't reach this start.
         run = await dashboard.create_search(db_session, user.id, text, uuid4().hex)
         return Redirect(path=f"/dashboard/search/{run.id}", status_code=303)
 
