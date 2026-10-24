@@ -10,10 +10,21 @@ Every route requires the site service principal (`principal_type="service"`,
 `service_name="site"`) with an explicit **site-resources** scope, and the
 owner's `site-service` role. A browser never calls these routes.
 
-The route deliberately has no per-key rate limit, so card lookups never share
-(or exhaust) the bucket the site memory routes use for the same key. The
-Worker bounds its own calls instead: one batched lookup per page load, at most
-5 batches of 100 URLs, and a per-visitor limit on the public share page.
+**Rate limit.** The route does not use the bot API's per-key limiter
+(`MultiTierRateLimitMiddleware`), whose bucket the site memory routes share.
+It has its own rule in Skrift's global limiter (`rate_limit.rules` in
+`app.yaml`): namespace `site-resources`, `POST` on this exact path, keyed by
+the caller's API key rather than the IP, **600 requests a minute per key**.
+Every other route stays on the IP-keyed default (60 a minute), so card lookups
+never spend the site memory routes' budget, and one key's lookups are one
+budget whichever address they come from.
+
+600 a minute is 10 page loads a second, well above today's site traffic. The
+Worker makes one batched call (at most 5 batches of 100 URLs) per chat page
+load, per earlier-history page, per version switch, per shared-answer view
+(also capped at 20 a minute per visitor on the Worker) and per completed
+answer. On a 429 the Worker shows its stored cards, so hitting the limit only
+costs freshness.
 
 | Route | Body / result |
 | ----- | ------------- |

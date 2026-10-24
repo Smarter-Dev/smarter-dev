@@ -210,6 +210,23 @@ storage:
 redis:
   url: $REDIS_URL
 
+rate_limit:
+  # Skrift's global limiter. Unmatched requests share the IP-keyed default
+  # (60/min). The site Worker's card lookups get their own namespace, keyed
+  # by the caller's API key, so they never spend the site-memory routes'
+  # budget. 600/min per key: one batched call (at most 5 batches of 100 URLs)
+  # per chat page load, earlier-history page, version switch, shared-answer
+  # view and completed answer; on a 429 the Worker shows its stored cards.
+  rules:
+    - name: site-resources
+      match:
+        path: /api/site/resources/sources
+        method: POST
+      key: api_key
+      limits:
+        - limit: 600
+          per: minute
+
 security_headers:
   enabled: true
   content_security_policy: "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; style-src-attr 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com https:; img-src 'self' data: https:; connect-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://polar.sh https://*.polar.sh"

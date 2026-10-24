@@ -4,23 +4,31 @@ order, sdanswer card fields and request limits."""
 import json
 from contextlib import asynccontextmanager
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+import yaml
 from litestar import Litestar
 from litestar.datastructures import State
 from litestar.di import Provide
+from litestar.middleware import DefineMiddleware
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.serialization import encode_json
 from litestar.testing import AsyncTestClient
+from skrift import config as skrift_config
 from skrift.auth.services import UserPermissions
+from skrift.config import interpolate_env_vars
 from skrift.db.services import api_key_service
+from skrift.middleware.rate_limit import RateLimitMiddleware
+from skrift.ratelimit import RateLimiter
 
 from smarter_dev.web.api_native import auth
 from smarter_dev.web.api_native import rate_limiting
 from smarter_dev.web.api_native import site_resources
+from smarter_dev.web.api_native.site_memory import SiteMemoryController
 from smarter_dev.web.api_native.site_resources import MAX_RESPONSE_BYTES
 from smarter_dev.web.api_native.site_resources import SiteResourcesController
 from smarter_dev.web.api_native.site_resources import _source
@@ -404,7 +412,6 @@ async def test_real_skrift_site_key_authorization(test_engine, monkeypatch):
 
 def test_parity_script_prints_the_pick_for_duplicated_urls_only(tmp_path, capsys):
     import importlib.util
-    from pathlib import Path
 
     path = Path(__file__).parents[2] / "scripts" / "parity" / "pick_sources.py"
     spec = importlib.util.spec_from_file_location("pick_sources_script", path)
@@ -422,3 +429,149 @@ def test_parity_script_prints_the_pick_for_duplicated_urls_only(tmp_path, capsys
         assert json.loads(capsys.readouterr().out) == {
             "https://dup.example/": "a-first"
         }
+
+
+# Skrift's global rate limiter, configured from app.yaml as the app loads it.
+
+REPO = Path(__file__).parents[2]
+GUILD = "123456789012345678"
+MEMORY_URL = f"/api/site/guilds/{GUILD}/memory/blocks"
+
+
+def app_rate_limit_config():
+    """``rate_limit`` from app.yaml, built the way ``skrift.config.get_settings``
+    builds each section (env interpolation, then the registered model)."""
+    raw = interpolate_env_vars(
+        yaml.safe_load((REPO / "app.yaml").read_text()), strict=False
+    )
+    model = skrift_config._CONFIG_SECTIONS["rate_limit"]
+    assert model is skrift_config.RateLimitConfig
+    return model(**raw.get("rate_limit", {}))
+
+
+class ClientIPStandIn:
+    """Stands in for Skrift's ClientIPMiddleware, which runs before the rate
+    limiter and records the resolved address in ``scope["state"]``."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            ip = dict(scope["headers"]).get(b"x-test-ip", b"203.0.113.1").decode()
+            scope.setdefault("state", {})["client_ip"] = ip
+        await self.app(scope, receive, send)
+
+
+@pytest.fixture
+async def limited_app(db_session, monkeypatch):
+    import skrift.auth.services
+
+    @asynccontextmanager
+    async def session_factory():
+        yield db_session
+
+    scopes = ["site-resources", "site-memory"]
+    key = SimpleNamespace(
+        id=uuid4(),
+        user_id=uuid4(),
+        principal_type="service",
+        service_name="site",
+        scoped_permission_list=scopes,
+        scoped_role_list=[],
+        key_prefix="sk_test",
+        display_name="site",
+    )
+    monkeypatch.setattr(api_key_service, "verify_api_key", AsyncMock(return_value=key))
+    monkeypatch.setattr(
+        skrift.auth.services,
+        "get_user_permissions",
+        AsyncMock(
+            return_value=UserPermissions(
+                user_id=str(key.user_id), roles=set(), permissions=set(scopes)
+            )
+        ),
+    )
+    monkeypatch.setattr(auth, "get_db_session_context", session_factory)
+    # The site-memory routes' own per-key limiter is not under test here.
+    monkeypatch.setattr(rate_limiting, "get_db_session_context", session_factory)
+    monkeypatch.setattr(
+        rate_limiting,
+        "check_rate_limits",
+        AsyncMock(
+            return_value=rate_limiting.RateLimitDecision(allowed=True, headers={})
+        ),
+    )
+
+    @asynccontextmanager
+    async def build(config):
+        app = Litestar(
+            route_handlers=[SiteResourcesController, SiteMemoryController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: db_session, sync_to_thread=False)
+            },
+            state=State({"session_maker_class": session_factory}),
+            # As skrift.asgi mounts them: client IP, then the global limiter.
+            middleware=[
+                ClientIPStandIn,
+                DefineMiddleware(
+                    RateLimitMiddleware,
+                    config=config,
+                    limiter=RateLimiter(redis_client=None),
+                ),
+            ],
+        )
+        async with AsyncTestClient(app=app) as client:
+            yield client
+
+    return build
+
+
+def _post(client, token, ip="203.0.113.1"):
+    return client.post(
+        URL,
+        json={"urls": ["https://x.example/"]},
+        headers={"Authorization": f"Bearer {token}", "X-Test-IP": ip},
+    )
+
+
+def test_app_yaml_gives_the_lookup_its_own_per_key_rule():
+    config = app_rate_limit_config()
+    assert config.enabled
+    rule = config.resolve(URL, "POST")
+    assert (rule.name, rule.key, rule.limits) == (
+        "site-resources",
+        "api_key",
+        [(600, 60.0)],
+    )
+    assert config.resolve(MEMORY_URL, "GET").name == "default"
+
+
+async def test_lookups_never_spend_the_site_memory_budget(limited_app):
+    config = app_rate_limit_config()
+    default_limit = config.resolve(MEMORY_URL, "GET").limits[0][0]
+    async with limited_app(config) as client:
+        for _ in range(default_limit + 1):
+            assert (await _post(client, "sk_site")).status_code == 200
+        response = await client.get(
+            MEMORY_URL,
+            headers={"Authorization": "Bearer sk_site", "X-Test-IP": "203.0.113.1"},
+        )
+        assert response.status_code == 200, response.text
+
+
+async def test_lookup_rule_limits_per_key_across_ips(limited_app):
+    config = app_rate_limit_config()
+    (rule,) = [rule for rule in config.rules if rule.name == "site-resources"]
+    rule.limits[0].limit = 5  # the app.yaml rule, with a lower limit for speed
+    async with limited_app(config) as client:
+        for _ in range(5):
+            assert (await _post(client, "sk_site_a")).status_code == 200
+        limited = await _post(client, "sk_site_a")
+        assert limited.status_code == 429
+        assert int(limited.headers["retry-after"]) > 0
+        # The same key from another address shares the one budget.
+        assert (await _post(client, "sk_site_a", ip="198.51.100.7")).status_code == 429
+        # Another key has its own.
+        assert (await _post(client, "sk_site_b")).status_code == 200
