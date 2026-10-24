@@ -139,6 +139,19 @@ async def get_active_search_preview(
     )
 
 
+async def find_search_preview(
+    session: AsyncSession, token: str
+) -> SearchResultPreview | None:
+    """Resolve a capability token whether or not its preview has expired, so
+    the site can tell an expired link from one that never existed. The sweep
+    deletes expired rows, after which both read as missing."""
+    return await session.scalar(
+        select(SearchResultPreview).where(
+            SearchResultPreview.access_token_hash == _hash_token(token)
+        )
+    )
+
+
 async def delete_expired_search_previews(
     session: AsyncSession, *, now: datetime | None = None
 ) -> int:
