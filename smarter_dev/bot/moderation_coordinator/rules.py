@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from datetime import datetime
 from datetime import timedelta
 
@@ -51,13 +52,19 @@ from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.model import Verdicts
 from smarter_dev.bot.moderation_coordinator.model import participant_label
+from smarter_dev.bot.moderation_coordinator.ownership import ATTACHMENT_FILTER
+from smarter_dev.bot.moderation_coordinator.ownership import BUMP_CHANNEL
+from smarter_dev.bot.moderation_coordinator.ownership import EDIT_PING
+from smarter_dev.bot.moderation_coordinator.ownership import MASS_MENTION
+from smarter_dev.bot.moderation_coordinator.ownership import SCAM_GATE
+from smarter_dev.bot.moderation_coordinator.ownership import SPAM_ENGINE
+from smarter_dev.bot.moderation_coordinator.ownership import SPAM_RING
 from smarter_dev.bot.moderation_coordinator.policy import AttachmentPolicy
 from smarter_dev.bot.spam_engine import SPAM_ACTION_MUTE
 from smarter_dev.bot.spam_engine import SPAM_ACTION_NONE
 from smarter_dev.bot.spam_engine import SPAM_ACTION_WARN
 from smarter_dev.bot.spam_engine import SpamDecision
 from smarter_dev.bot.spam_engine import SpamMetrics
-from smarter_dev.bot.spam_engine import analyze_message_content
 from smarter_dev.bot.spam_ring import JOIN_PROXIMITY
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import TranscriptMessage
@@ -66,14 +73,6 @@ from smarter_dev.bot.spam_ring import joined_near_participant
 from smarter_dev.bot.spam_ring import passes_prefilter
 from smarter_dev.bot.spam_ring import select_candidates
 from smarter_dev.web.moderation_gateway import types as gw
-
-# Rule names, as decisions and the shadow record name them.
-SPAM_ENGINE = "spam_engine"
-ATTACHMENT_FILTER = "attachment_filter"
-SPAM_RING = "spam_ring"
-SCAM_GATE = "scam_gate"
-EDIT_PING = "edit_ping"
-BUMP_CHANNEL = "bump_channel"
 
 DAY = 86400
 
@@ -204,6 +203,45 @@ def edit_ping_hits(facts: MessageFacts) -> list[RuleHit]:
     ]
 
 
+#: The reason a mass-mention removal carries. The author's history finds the
+#: removal again by it (``moderation_actions.reason``), so keep it stable.
+MASS_MENTION_REASON = "server-wide mention from a member"
+#: Inline code and code blocks: a mention written there is not a ping.
+_CODE = re.compile(r"```.*?(?:```|$)|`[^`\n]*`", re.DOTALL)
+#: ``@everyone``/``@here`` as a word: not in an email address
+#: (``me@here.com``) and not the start of a longer word (``@hereby``).
+_MASS_MENTION = re.compile(r"(?<![\w@])@(?:everyone|here)(?!\w)")
+
+
+def pings_everyone(content: str) -> bool:
+    """Whether ``content`` carries ``@everyone``/``@here`` outside code."""
+    return _MASS_MENTION.search(_CODE.sub(" ", content)) is not None
+
+
+def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
+    """Zech, Oct 23 22:36: ``@everyone`` and ``@here`` are not for members.
+
+    A message or an edit whose text carries either, outside inline code and
+    code blocks, is removed, whether or not Discord pinged anyone (members
+    without the permission can still type it, the usual scam pattern). Staff
+    are exempt by the shared staff rule. It removes only: a hold or a
+    sanction comes from the other rules (a link, nitro bait) when they fire.
+    """
+    if facts.is_webhook or facts.author_is_bot:
+        return []
+    if not pings_everyone(facts.content):
+        return []
+    return [
+        RuleHit(
+            rule=MASS_MENTION,
+            reason=MASS_MENTION_REASON,
+            target_user_id=facts.author_id,
+            target_name=facts.author_name,
+            cleanup=(Cleanup(facts.channel_id, facts.message_id),),
+        )
+    ]
+
+
 def bump_channel_hits(
     facts: MessageFacts, bump_channel_ids: frozenset[str]
 ) -> list[RuleHit]:
@@ -225,8 +263,25 @@ def bump_channel_hits(
 # High signal
 # ---------------------------------------------------------------------------
 
-#: scam-banner's link test (scheme or www required, unlike the spam engine's).
-_SCAM_GATE_LINK = re.compile(r"(?:https?://|www\.)\S+", re.IGNORECASE)
+#: A link with a scheme (or ``www.``), or a bare Discord invite
+#: (``discord.gg/x``, ``discord.com/invite/x``): what a mass mention needs
+#: next to it to be high signal. Nothing a code snippet writes matches.
+_SCHEME_OR_INVITE = (
+    r"(?:https?://|www\.)\S+"
+    r"|(?<![\w@.-])(?:discord(?:app)?\.(?:gg|com/invite)|dsc\.gg)/\S+"
+)
+_MENTION_LINK = re.compile(_SCHEME_OR_INVITE, re.IGNORECASE)
+#: scam-banner's link test, widened to links written without a scheme (#301:
+#: ferryloy's bare invites passed scam-banner as plain text): the above, or a
+#: bare host on a commonly abused TLD followed by ``/``, whitespace or the end.
+#: A host right after ``@`` or a word character (an email address) is not a
+#: link, and neither is code: ``logger.info(``, ``self.store.get``, ``node.js``.
+_SCAM_GATE_LINK = re.compile(
+    _SCHEME_OR_INVITE + r"|(?<![\w@.-])(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+"
+    r"(?:com|net|org|gg|io|xyz|ru|ly|me|app|gift|link|click|shop|site|online|top"
+    r"|live|co|cc|tk|ml|ga|cf|gq|pw|info|biz|store|fun|win|vip)(?=/|\s|$)",
+    re.IGNORECASE,
+)
 _RISKY_WORDS = re.compile(
     r"\b(?:crypto|bitcoin|ethereum|eth|wallet|seed phrase|airdrop|giveaway|nitro|claim"
     r"|fag(?:got)?|nigg(?:er|a)|kike|spic|chink|tranny)\b",
@@ -244,7 +299,6 @@ def high_signal_reasons(
     facts: MessageFacts,
     *,
     metrics: SpamMetrics | None,
-    scam_link_domains: Sequence[str],
     suspect: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Why this message is a high-signal scam event, if it is.
@@ -256,7 +310,9 @@ def high_signal_reasons(
        ``d*.gift`` lookalike) fired on this message;
     2. its nitro-scam metric fired: a mass mention and a nitro keyword within
        the mass-mention window;
-    3. this one message carries ``@everyone``/``@here`` and a link;
+    3. this one message carries ``@everyone``/``@here`` outside code and a
+       link with a scheme or a bare invite (not a bare domain:
+       ``logger.info`` is code);
     4. scam-banner's "suspect": four or more images, or the same post in
        another channel within 10 s (``suspect`` holds those reasons).
 
@@ -268,8 +324,7 @@ def high_signal_reasons(
             reasons.append(HIGH_SIGNAL_SCAM_LINK)
         if metrics.nitro_scam:
             reasons.append(HIGH_SIGNAL_NITRO_SCAM)
-        analysis = analyze_message_content(facts.content, scam_link_domains)
-        if analysis.contains_mass_mention and _SCAM_GATE_LINK.search(facts.content):
+        if pings_everyone(facts.content) and _MENTION_LINK.search(facts.content):
             reasons.append(HIGH_SIGNAL_MENTION_LINK)
     reasons.extend(suspect)
     return tuple(dict.fromkeys(reasons))
@@ -287,6 +342,9 @@ REPEAT_TIMEOUT_SECONDS = DAY
 BURST_SECONDS = 10.0
 #: Under this account age a confirmed scam is a ban.
 BAN_ACCOUNT_AGE = timedelta(days=7)
+#: How long a removed ``@everyone``/``@here`` leaves its author high risk.
+PINGED_EVERYONE_SECONDS = DAY
+PINGED_EVERYONE = "pinged everyone in the last day"
 #: How far back the history scam-banner reads reaches (its 3650 days).
 HISTORY_SECONDS = 3650 * DAY
 SANCTION_ACTIONS = ("warn", "timeout", "kick", "ban")
@@ -340,10 +398,22 @@ def scam_suspect_reasons(facts: MessageFacts, burst: bool) -> tuple[str, ...]:
     return tuple(reasons)
 
 
+def hold_reasons(suspect: Sequence[str], risky: Sequence[str]) -> tuple[str, ...]:
+    """Which suspect reasons hold the author while the post is judged.
+
+    Zech, Oct 23: four or more images hold only a high-risk author (new,
+    first-time, silent 30 days, or moderated in the last 30 days:
+    :func:`scam_risky_author`); an established member's image post is still
+    reviewed, without a hold. A cross-channel burst always holds.
+    """
+    return tuple(reason for reason in suspect if reason != HIGH_SIGNAL_IMAGES or risky)
+
+
 def scam_risky_author(
     facts: MessageFacts, history: AuthorHistory, now: datetime
 ) -> tuple[str, ...]:
-    """scam-banner's author gate: new, first-time, long-silent, recently moderated."""
+    """scam-banner's author gate: new, first-time, long-silent, recently
+    moderated; and (new) a removed ``@everyone``/``@here`` in the last day."""
     reasons = []
     if facts.joined_at is not None and (now - facts.joined_at).total_seconds() < DAY:
         reasons.append("joined in the last day")
@@ -353,7 +423,35 @@ def scam_risky_author(
         reasons.append("silent for 30 days or more")
     if actions_within(history, RECENT_ACTION_SECONDS, now):
         reasons.append("moderated in the last 30 days")
+    pinged = history.pinged_everyone_at
+    if (
+        pinged is not None
+        and 0 <= (now - pinged).total_seconds() < PINGED_EVERYONE_SECONDS
+    ):
+        # Zech, Oct 23 22:38: most of these pings are scammers and bots.
+        reasons.append(PINGED_EVERYONE)
     return tuple(reasons)
+
+
+def scam_claim(key: str) -> str:
+    """The one timeout claim a post and its copies share."""
+    return f"scam:{key}"
+
+
+def without_sanction(hits: Sequence[RuleHit], why: str) -> list[RuleHit]:
+    """The scam gate's hits as cleanup only: the post's sanction is owed once."""
+    return [
+        replace(
+            hit,
+            reason=hit.reason + why,
+            sanction=None,
+            notice=None,
+            high_signal=False,
+        )
+        if hit.rule == SCAM_GATE and hit.sanction is not None
+        else hit
+        for hit in hits
+    ]
 
 
 @dataclass(frozen=True, slots=True)
@@ -373,6 +471,9 @@ class ScamReview:
     high_signal: tuple[str, ...]
     account_age: timedelta
     repeat: bool
+    #: The same author's same post was judged (or is being judged) lately:
+    #: this message only reuses that verdict.
+    copy: bool = False
 
     labels: frozenset[str] = frozenset({SCAM, ABUSE})
 
@@ -403,20 +504,31 @@ class ScamReview:
             Cleanup(post.channel_id, post.message_id) for post in self.copies
         )
         compromised = bool(self.suspect)
-        if self.account_age < BAN_ACCOUNT_AGE:
+        if self.copy:
+            # The post it copies carries the sanction; a copy is removed only,
+            # as scam-banner's ``bad:`` claim removed a copy unreviewed. A
+            # second warn (or a repeat timeout) for one post is not owed.
+            sanction = None
+            reason += ", copy of a post already judged"
+            notice = None
+        elif self.account_age < BAN_ACCOUNT_AGE:
             sanction = Sanction(gw.BAN)
             reason += ", account under a week old"
             notice = None
         elif self.high_signal:
             # Zech: a high-signal scam held while it was judged ends in a
             # timeout plus cleanup when the account is not new.
-            sanction = Sanction(gw.TIMEOUT, duration_seconds=REPEAT_TIMEOUT_SECONDS)
+            sanction = Sanction(
+                gw.TIMEOUT,
+                duration_seconds=REPEAT_TIMEOUT_SECONDS,
+                claim=scam_claim(self.key),
+            )
             notice = NOTICE_SECURE_ACCOUNT
         elif self.repeat:
             sanction = Sanction(
                 gw.TIMEOUT,
                 duration_seconds=REPEAT_TIMEOUT_SECONDS,
-                claim=f"repeat:{self.key}",
+                claim=scam_claim(self.key),
             )
             reason += ", repeat within 30 days"
             notice = NOTICE_SECURE_ACCOUNT if compromised else NOTICE_SCAM_REMOVED
@@ -433,7 +545,7 @@ class ScamReview:
                 cleanup=cleanup,
                 notice=notice,
                 model_justified=True,
-                high_signal=bool(self.high_signal),
+                high_signal=bool(self.high_signal) and not self.copy,
             )
         ]
 
@@ -446,6 +558,7 @@ def scam_gate_review(
     recent: Sequence[RecentPost],
     high_signal: Sequence[str],
     now: datetime,
+    known_copy: bool = False,
 ) -> ScamReview | None:
     """Whether scam-banner would have reviewed this message, and with what.
 
@@ -453,13 +566,21 @@ def scam_gate_review(
     images, or a cross-channel burst), a risky author, or a high-signal
     event. The last is new: a scam lure from an established account (a
     compromised one) is judged instead of only being muted.
+
+    ``known_copy``: the same author's same post was judged (or is being
+    judged) within the last two minutes. The copy reuses that verdict, so a
+    confirmed scam's later copy is removed even when its own gates no longer
+    fire (the author's second post is no longer a first message), as
+    scam-banner's ``bad:`` claim removed it unreviewed; the copy is removed
+    only, never sanctioned again. A copy that escalates (a burst its post
+    was not judged under) is not passed as one: it is judged afresh.
     """
     if facts.is_edit or not scam_gate_content(facts):
         return None
     copies, burst = burst_copies(facts, key, recent)
     suspect = scam_suspect_reasons(facts, burst)
     risky = scam_risky_author(facts, history, now)
-    if not (suspect or risky or high_signal):
+    if not (suspect or risky or high_signal or known_copy):
         return None
     return ScamReview(
         facts=facts,
@@ -470,6 +591,7 @@ def scam_gate_review(
         high_signal=tuple(high_signal),
         account_age=now - facts.account_created_at,
         repeat=bool(actions_within(history, RECENT_ACTION_SECONDS, now)),
+        copy=known_copy,
     )
 
 
@@ -650,6 +772,8 @@ class RingIncident:
     context: list[str]
     spared: set[str] = field(default_factory=set)
     handled_message_ids: set[str] = field(default_factory=set)
+    #: The ad's message: its follow-ups join the ad's gateway incident.
+    ad_message_id: str = ""
 
 
 def ring_followup_applies(

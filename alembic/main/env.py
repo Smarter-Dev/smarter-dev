@@ -91,6 +91,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "moderation_member_locks",
     "moderation_operations",
     "moderation_outbox",
+    "moderation_ownership",
     "moderation_shadow_decisions",
     "proactive_recipe_settings",
     "proactive_recipes",

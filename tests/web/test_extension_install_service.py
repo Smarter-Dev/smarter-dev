@@ -321,6 +321,68 @@ async def test_an_install_of_a_moved_template_cannot_be_reconfigured(
     assert await get_install(db_session, GUILD, "keyword-watch") is None
 
 
+async def test_a_moved_template_is_refused_before_its_config_is_checked(
+    db_session, worker_stub, monkeypatch
+):
+    """#257: a direct POST with an invalid config got a config error instead
+    of the refusal. The refusal comes first."""
+    from smarter_dev.extensions.registry import get_registry
+
+    retired = get_registry().get("keyword-watch")
+    before = _loaded(
+        retired.manifest.model_copy(update={"moved_to_moderation": None}),
+        retired.scripts,
+    )
+    _use_registry(monkeypatch, before)
+    await install_extension(
+        db_session,
+        guild_id=GUILD,
+        slug="keyword-watch",
+        raw_config=dict(retired.manifest.example_config),
+        installed_by="admin",
+    )
+    _use_registry(monkeypatch, retired)
+
+    with pytest.raises(ExtensionInstallError, match="moderation system"):
+        await edit_extension_config(
+            db_session, guild_id=GUILD, slug="keyword-watch", raw_config={}
+        )
+
+
+async def test_a_disabled_install_of_a_moved_template_cannot_be_enabled(
+    db_session, worker_stub, monkeypatch
+):
+    """#240: enabling would re-arm the frozen punisher next to the coordinator."""
+    from smarter_dev.extensions.registry import get_registry
+
+    retired = get_registry().get("keyword-watch")
+    before = _loaded(
+        retired.manifest.model_copy(update={"moved_to_moderation": None}),
+        retired.scripts,
+    )
+    _use_registry(monkeypatch, before)
+    install = await install_extension(
+        db_session,
+        guild_id=GUILD,
+        slug="keyword-watch",
+        raw_config=dict(retired.manifest.example_config),
+        installed_by="admin",
+    )
+    _use_registry(monkeypatch, retired)
+    await set_extension_enabled(
+        db_session, guild_id=GUILD, slug="keyword-watch", enabled=False
+    )
+
+    with pytest.raises(ExtensionInstallError, match="can no longer be enabled"):
+        await set_extension_enabled(
+            db_session, guild_id=GUILD, slug="keyword-watch", enabled=True
+        )
+    await db_session.rollback()
+    stored = await get_install(db_session, GUILD, "keyword-watch")
+    assert stored.enabled is False
+    assert all(not row.enabled for row in await _owned(db_session, install.id))
+
+
 # -- config edit ---------------------------------------------------------------
 
 
@@ -843,3 +905,57 @@ async def test_orphaned_install_cannot_be_updated(
     await _orphaned_install(db_session, worker_stub, monkeypatch)
     with pytest.raises(ExtensionInstallError, match="unknown extension"):
         await update_extension(db_session, guild_id=GUILD, slug="test-relay")
+
+
+# -- Disboard while the coordinator owns the guild (#310 item 9) ---------------
+
+
+async def test_disboard_is_not_re_rendered_while_the_coordinator_owns_the_guild(
+    db_session, worker_stub, monkeypatch
+):
+    """The cutover patched the live Disboard row so the coordinator alone keeps
+    the bump channel clear; a re-render (config edit, update, reinstall) would
+    put the handler's own restriction back next to it."""
+    from smarter_dev.web.models import ModerationOwnership
+
+    relay = _relay()
+    disboard = _loaded(
+        relay.manifest.model_copy(update={"slug": "disboard-bumping"}), relay.scripts
+    )
+    _use_registry(monkeypatch, disboard)
+    install = await install_extension(
+        db_session, guild_id=GUILD, slug="disboard-bumping",
+        raw_config={"chan": CHAN_A}, installed_by="admin",
+    )  # legacy: allowed
+    rows = await _owned(db_session, install.id)
+    scripts = {row.id: row.script for row in rows}
+    db_session.add(
+        ModerationOwnership(guild_id=GUILD, owner="coordinator", generation=1)
+    )
+    await db_session.commit()
+
+    with pytest.raises(ExtensionInstallError, match="coordinator now keeps"):
+        await edit_extension_config(
+            db_session, guild_id=GUILD, slug="disboard-bumping",
+            raw_config={"chan": CHAN_B},
+        )
+    with pytest.raises(ExtensionInstallError, match="coordinator now keeps"):
+        await update_extension(db_session, guild_id=GUILD, slug="disboard-bumping")
+    after = await _owned(db_session, install.id)
+    assert {row.id: row.script for row in after} == scripts
+
+    await uninstall_extension(db_session, guild_id=GUILD, slug="disboard-bumping")
+    with pytest.raises(ExtensionInstallError, match="coordinator now keeps"):
+        await install_extension(
+            db_session, guild_id=GUILD, slug="disboard-bumping",
+            raw_config={"chan": CHAN_A}, installed_by="admin",
+        )
+
+    # Handed back: allowed again.
+    owner = await db_session.get(ModerationOwnership, GUILD)
+    owner.owner = "legacy"
+    await db_session.commit()
+    await install_extension(
+        db_session, guild_id=GUILD, slug="disboard-bumping",
+        raw_config={"chan": CHAN_A}, installed_by="admin",
+    )

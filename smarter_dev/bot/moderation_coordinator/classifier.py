@@ -34,6 +34,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import re
 import time
 from collections import deque
@@ -128,14 +129,23 @@ MAX_MATERIAL_BYTES = 16_000
 #: out) costs a tenth of that, and an image adds at most $0.0005. The day's count is
 #: read back from the shadow's own rows at startup (:meth:`ClassifierBudget.
 #: restore_day`), so a restart does not reset it.
+#:
+#: A guild the coordinator acts for has its own, larger ceiling (#310 item 5):
+#: there the classifier is the scam check itself, and an empty budget leaves
+#: every scam check unknown for the rest of the day. 1500 requests bound a
+#: day at about $7.20 worst case.
 PER_AUTHOR = 2
 AUTHOR_WINDOW_SECONDS = 600.0
 PER_GUILD_MINUTE = 20
 DAILY_REQUESTS_ENV_VAR = "MODERATION_SHADOW_DAILY_REQUESTS"
 DEFAULT_DAILY_REQUESTS = 300
+ACTING_DAILY_REQUESTS_ENV_VAR = "MODERATION_ACTING_DAILY_REQUESTS"
+DEFAULT_ACTING_DAILY_REQUESTS = 1500
 MAX_TRACKED_AUTHORS = 4096
 
 METER_OPERATION = "moderation_shadow_classifier"
+#: The acting coordinator's requests: moderation spend, not a trial's.
+ACTING_METER_OPERATION = "moderation_classifier"
 
 
 def _is_timeout(error: BaseException) -> bool:
@@ -158,12 +168,20 @@ def choose_backend(labels: frozenset[str], *, images: bool = False) -> str | Non
 # ---------------------------------------------------------------------------
 
 
-def daily_request_cap() -> int:
-    raw = os.getenv(DAILY_REQUESTS_ENV_VAR, "").strip()
+def _cap(env_var: str, default: int) -> int:
+    raw = os.getenv(env_var, "").strip()
     try:
-        return max(0, int(raw)) if raw else DEFAULT_DAILY_REQUESTS
+        return max(0, int(raw)) if raw else default
     except ValueError:
-        return DEFAULT_DAILY_REQUESTS
+        return default
+
+
+def daily_request_cap() -> int:
+    return _cap(DAILY_REQUESTS_ENV_VAR, DEFAULT_DAILY_REQUESTS)
+
+
+def acting_daily_request_cap() -> int:
+    return _cap(ACTING_DAILY_REQUESTS_ENV_VAR, DEFAULT_ACTING_DAILY_REQUESTS)
 
 
 class ClassifierBudget:
@@ -180,6 +198,7 @@ class ClassifierBudget:
         author_window: float = AUTHOR_WINDOW_SECONDS,
         per_guild_minute: int = PER_GUILD_MINUTE,
         per_guild_day: int | None = None,
+        acting_per_guild_day: int | None = None,
         restored: bool = True,
     ) -> None:
         self.per_author = per_author
@@ -188,19 +207,37 @@ class ClassifierBudget:
         self.per_guild_day = (
             daily_request_cap() if per_guild_day is None else per_guild_day
         )
+        self.acting_per_guild_day = (
+            acting_daily_request_cap()
+            if acting_per_guild_day is None
+            else acting_per_guild_day
+        )
         self._authors: dict[tuple[str, str], deque[float]] = {}
         self._minutes: dict[str, deque[float]] = {}
         self._days: dict[tuple[str, int], int] = {}
         #: False until :meth:`restore` has read today's spend back: until
         #: then every request is refused, so a restart never resets the day.
         self.restored = restored
+        #: The read failed and the day was opened on a fresh count instead
+        #: (:meth:`open_fresh`); the read is tried again and merged.
+        self.restore_pending = False
 
     @staticmethod
     def _trim(calls: deque[float], horizon: float) -> None:
         while calls and calls[0] <= horizon:
             calls.popleft()
 
-    def refusal(self, guild_id: str, author_id: str | None, now: float) -> str | None:
+    def day_cap(self, acting: bool) -> int:
+        return self.acting_per_guild_day if acting else self.per_guild_day
+
+    def refusal(
+        self,
+        guild_id: str,
+        author_id: str | None,
+        now: float,
+        *,
+        acting: bool = False,
+    ) -> str | None:
         """The cap that would refuse a request now, or None; charges nothing.
 
         Asked before work that only a request would use (the ring's history
@@ -209,7 +246,7 @@ class ClassifierBudget:
         """
         if not self.restored:
             return "not_restored"
-        if self._days.get((guild_id, int(now // 86400)), 0) >= self.per_guild_day:
+        if self._days.get((guild_id, int(now // 86400)), 0) >= self.day_cap(acting):
             return "guild_day"
         if author_id is not None:
             author_calls = self._authors.get((guild_id, author_id))
@@ -224,9 +261,16 @@ class ClassifierBudget:
                 return "guild_minute"
         return None
 
-    def try_spend(self, guild_id: str, author_id: str | None, now: float) -> str | None:
+    def try_spend(
+        self,
+        guild_id: str,
+        author_id: str | None,
+        now: float,
+        *,
+        acting: bool = False,
+    ) -> str | None:
         """Charge one request and return None, or name the cap that refused it."""
-        refused = self.refusal(guild_id, author_id, now)
+        refused = self.refusal(guild_id, author_id, now, acting=acting)
         if refused is not None:
             return refused
         day = (guild_id, int(now // 86400))
@@ -250,6 +294,14 @@ class ClassifierBudget:
             key = (guild_id, day)
             self._days[key] = max(self._days.get(key, 0), int(requests))
         self.restored = True
+        self.restore_pending = False
+
+    def open_fresh(self) -> None:
+        """The day's spend could not be read: open on what this process
+        counted (fail open, #310 item 5); a later read is merged in."""
+        if not self.restored:
+            self.restored = True
+            self.restore_pending = True
 
     def spent_today(self, guild_id: str, now: float) -> int:
         return self._days.get((guild_id, int(now // 86400)), 0)
@@ -279,6 +331,15 @@ class ClassifierRequest:
     ring_ad: str | None = None
     ring_candidates: tuple[RingCandidate, ...] = ()
     charge_author: bool = True
+    #: The coordinator acts for the guild: its daily ceiling and its meter.
+    acting: bool = False
+    #: Show the model this many of the images, chosen at random, instead of
+    #: the first :data:`MAX_IMAGES` (Zech, Oct 23: an established member's
+    #: image post is checked on one image). The rest are named, not unseen.
+    sampled_images: int | None = None
+    #: Images loaded before the message was deleted (:func:`preload_images`),
+    #: by attachment index: the CDN no longer serves a deleted message's files.
+    preloaded_images: Mapping[int, bytes | None] | None = None
 
 
 @dataclass(slots=True)
@@ -384,6 +445,10 @@ class ImageCounts:
     over_limit: int = 0
     #: Attachments that are not images (listed by name only).
     other_files: int = 0
+    #: Shown a random sample; the images not chosen are named and are not
+    #: unseen (a "no" stays a no).
+    sampled: bool = False
+    not_sampled: int = 0
 
     def as_record(self) -> dict:
         return {
@@ -391,6 +456,8 @@ class ImageCounts:
             "unseen": self.unseen,
             "over_limit": self.over_limit,
             "other_files": self.other_files,
+            "sampled": self.sampled,
+            "not_sampled": self.not_sampled,
         }
 
 
@@ -404,35 +471,76 @@ class LoadedImages:
     counts: ImageCounts = ImageCounts()
 
 
-async def load_images(
+async def _load_one(item: Attachment, fetch: ImageFetcher) -> bytes | None:
+    """One image's bytes, or None when it cannot be had in time."""
+    if item.size is not None and item.size > MAX_IMAGE_BYTES:
+        return None
+    try:
+        async with asyncio.timeout(IMAGE_FETCH_SECONDS):
+            return await fetch(item.url or "", MAX_IMAGE_BYTES)
+    except Exception as error:  # noqa: BLE001 — unseen, never a retry
+        # The URL names the file; log only what went wrong.
+        logger.info("Moderation classifier image not loaded: %s", type(error).__name__)
+        return None
+
+
+async def preload_images(
     attachments: Sequence[Attachment], fetch: ImageFetcher
+) -> dict[int, bytes | None]:
+    """The first :data:`MAX_IMAGES` images' bytes, by attachment index, for a
+    message about to be deleted before its check (#310 re-review item 1)."""
+    images = [(index, item) for index, item in enumerate(attachments) if item.is_image][
+        :MAX_IMAGES
+    ]
+    loaded = await asyncio.gather(*(_load_one(item, fetch) for _, item in images))
+    return {index: data for (index, _), data in zip(images, loaded, strict=True)}
+
+
+async def load_images(
+    attachments: Sequence[Attachment],
+    fetch: ImageFetcher,
+    *,
+    sample: int | None = None,
+    choose: Callable[[list, int], list] = random.sample,
+    preloaded: Mapping[int, bytes | None] | None = None,
 ) -> LoadedImages:
-    """The first :data:`MAX_IMAGES` images, loaded in parallel and checked.
+    """The first :data:`MAX_IMAGES` images (or ``sample`` of them chosen at
+    random), loaded in parallel and checked.
 
     An image is what its bytes say, not its name or declared type; one that
-    cannot be loaded within :data:`IMAGE_FETCH_SECONDS` is unseen.
+    cannot be loaded within :data:`IMAGE_FETCH_SECONDS` is unseen. An image
+    left out of a sample is only named: not seen, and not unseen either.
+    ``preloaded`` images (the message is gone) are not fetched again, and a
+    sample is drawn from them only.
     """
     images = [(index, item) for index, item in enumerate(attachments) if item.is_image]
-    shown = images[:MAX_IMAGES]
-    notes = {
-        index: "not shown: over the image limit" for index, _ in images[MAX_IMAGES:]
-    }
+    notes: dict[int, str] = {}
+    not_sampled = 0
+    if sample is not None and len(images) > sample:
+        pool = (
+            images
+            if preloaded is None
+            else [(index, item) for index, item in images if index in preloaded]
+        )
+        chosen = {index for index, _ in choose(pool, min(sample, len(pool)))}
+        shown = [(index, item) for index, item in images if index in chosen]
+        for index, _ in images:
+            if index not in chosen:
+                notes[index] = "not shown: not sampled"
+        not_sampled = len(images) - len(shown)
+    else:
+        shown = images[:MAX_IMAGES]
+        notes = {
+            index: "not shown: over the image limit" for index, _ in images[MAX_IMAGES:]
+        }
     unseen = 0
 
-    async def one(item: Attachment) -> bytes | None:
-        if item.size is not None and item.size > MAX_IMAGE_BYTES:
-            return None
-        try:
-            async with asyncio.timeout(IMAGE_FETCH_SECONDS):
-                return await fetch(item.url or "", MAX_IMAGE_BYTES)
-        except Exception as error:  # noqa: BLE001 — unseen, never a retry
-            # The URL names the file; log only what went wrong.
-            logger.info(
-                "Moderation classifier image not loaded: %s", type(error).__name__
-            )
-            return None
+    async def one(index: int, item: Attachment) -> bytes | None:
+        if preloaded is not None and index in preloaded:
+            return preloaded[index]
+        return await _load_one(item, fetch)
 
-    loaded = await asyncio.gather(*(one(item) for _, item in shown))
+    loaded = await asyncio.gather(*(one(index, item) for index, item in shown))
     contents = []
     for (index, _), data in zip(shown, loaded, strict=True):
         media_type = image_type(data) if data else None
@@ -448,8 +556,10 @@ async def load_images(
         counts=ImageCounts(
             sent=len(contents),
             unseen=unseen,
-            over_limit=len(images) - len(shown),
+            over_limit=len(images) - len(shown) - not_sampled,
             other_files=len(attachments) - len(images),
+            sampled=sample is not None,
+            not_sampled=not_sampled,
         ),
     )
 
@@ -799,7 +909,9 @@ class ModerationClassifier:
     """Answers one :class:`ClassifierRequest` with at most one model request.
 
     ``haiku_model`` / ``jev_model`` are built on first use; tests pass
-    stand-ins, and a stand-in for ``fetch_image``. Usage is metered into the ledger as ``moderation_shadow_classifier``.
+    stand-ins, and a stand-in for ``fetch_image``. Usage is metered into the
+    ledger as ``moderation_shadow_classifier``, or ``moderation_classifier``
+    for a guild the coordinator acts for.
     """
 
     def __init__(
@@ -812,9 +924,11 @@ class ModerationClassifier:
         operation_type: str = METER_OPERATION,
         clock: Callable[[], float] = time.time,
         fetch_image: ImageFetcher = fetch_image,
+        choose_images: Callable[[list, int], list] = random.sample,
     ) -> None:
         self.budget = budget or ClassifierBudget()
         self.fetch_image = fetch_image
+        self.choose_images = choose_images
         self._haiku = haiku_model or build_haiku_model
         self._jev = jev_model or build_jev_model
         self.deadline = deadline
@@ -829,9 +943,17 @@ class ModerationClassifier:
             setattr(self, attr, model)
         return model
 
-    def budget_refusal(self, guild_id: str, author_id: str | None) -> str | None:
+    async def preload(
+        self, attachments: Sequence[Attachment]
+    ) -> dict[int, bytes | None]:
+        """:func:`preload_images` with this classifier's fetcher."""
+        return await preload_images(attachments, self.fetch_image)
+
+    def budget_refusal(
+        self, guild_id: str, author_id: str | None, *, acting: bool = False
+    ) -> str | None:
         """The budget cap a request would meet now (:meth:`ClassifierBudget.refusal`)."""
-        return self.budget.refusal(guild_id, author_id, self._clock())
+        return self.budget.refusal(guild_id, author_id, self._clock(), acting=acting)
 
     async def classify(self, request: ClassifierRequest) -> ClassifierResult:
         labels = sorted(request.labels)
@@ -843,6 +965,7 @@ class ModerationClassifier:
             request.guild_id,
             request.author_id if request.charge_author else None,
             self._clock(),
+            acting=request.acting,
         )
         if refused is not None:
             return unknown_result(labels, BUDGET, backend=backend, refused_by=refused)
@@ -850,7 +973,7 @@ class ModerationClassifier:
         started = time.monotonic()
         result = ClassifierResult(backend=backend, model=model_name, requests=1)
         async with metered(
-            self.operation_type,
+            ACTING_METER_OPERATION if request.acting else self.operation_type,
             guild_id=request.guild_id,
             channel_id=request.channel_id,
         ) as meter:
@@ -859,7 +982,11 @@ class ModerationClassifier:
                 async with asyncio.timeout(self.deadline):
                     if backend == HAIKU:
                         images = await load_images(
-                            request.attachments, self.fetch_image
+                            request.attachments,
+                            self.fetch_image,
+                            sample=request.sampled_images,
+                            choose=self.choose_images,
+                            preloaded=request.preloaded_images,
                         )
                         result.images = images.counts
                         verdicts = await self._ask_haiku(model, request, images)

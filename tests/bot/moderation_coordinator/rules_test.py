@@ -140,30 +140,23 @@ def _metrics(**flags):
 
 def test_the_high_signal_set():
     plain = say(REGULAR, "see https://example.com", NOW)
-    assert (
-        rules.high_signal_reasons(plain, metrics=_metrics(), scam_link_domains=()) == ()
+    assert rules.high_signal_reasons(plain, metrics=_metrics()) == ()
+    assert rules.high_signal_reasons(plain, metrics=_metrics(scam_link=True)) == (
+        "scam link",
     )
-    assert rules.high_signal_reasons(
-        plain, metrics=_metrics(scam_link=True), scam_link_domains=()
-    ) == ("scam link",)
-    assert rules.high_signal_reasons(
-        plain, metrics=_metrics(nitro_scam=True), scam_link_domains=()
-    ) == ("mass mention with nitro bait",)
+    assert rules.high_signal_reasons(plain, metrics=_metrics(nitro_scam=True)) == (
+        "mass mention with nitro bait",
+    )
     ping_link = say(REGULAR, "@here look https://example.com", NOW)
     assert "mass mention with a link" in rules.high_signal_reasons(
-        ping_link, metrics=_metrics(), scam_link_domains=()
+        ping_link, metrics=_metrics()
     )
     # A mass mention alone is the spam engine's warn, not a scam event.
     ping = say(REGULAR, "@here standup in 5", NOW)
-    assert (
-        rules.high_signal_reasons(
-            ping, metrics=_metrics(mass_mention=True), scam_link_domains=()
-        )
-        == ()
-    )
+    assert rules.high_signal_reasons(ping, metrics=_metrics(mass_mention=True)) == ()
     # Without the spam engine only scam-banner's suspect counts.
     assert rules.high_signal_reasons(
-        ping_link, metrics=None, scam_link_domains=(), suspect=("four or more images",)
+        ping_link, metrics=None, suspect=("four or more images",)
     ) == ("four or more images",)
 
 
@@ -350,3 +343,86 @@ def test_settle_bounds():
     assert settle("x", None, 0.9).outcome == "invalid_output"
     assert settle("x", False, None).outcome == "low_confidence"
     assert not settle(ABUSE, True, 0.2).yes
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@everyone logger.info(msg) is broken",
+        "@here self.store.get(key) returns None",
+        "@everyone check github.com",
+        "@here foo.bar(1)",
+    ],
+)
+def test_a_mass_mention_next_to_code_or_a_bare_domain_is_not_high_signal(text):
+    """#310 item 7: a bare domain or a dotted name is not a link for the
+    mention+link check, so a staff-style @everyone with code is not held."""
+    message = say(REGULAR, text, NOW)
+    assert "mass mention with a link" not in rules.high_signal_reasons(
+        message, metrics=_metrics()
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "@everyone join discord.gg/x",
+        "@here https://scam.ru/claim",
+        "@everyone www.x.io",
+    ],
+)
+def test_a_mass_mention_with_a_scheme_link_or_invite_is_high_signal(text):
+    message = say(REGULAR, text, NOW)
+    assert "mass mention with a link" in rules.high_signal_reasons(
+        message, metrics=_metrics()
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "logger.info(msg) is broken",
+        "call self.store.get(key)",
+        "`self.store`",
+        "foo.bar(1)",
+        "the app.run() call",
+    ],
+)
+def test_code_snippets_do_not_open_the_scam_gate(text):
+    assert not rules.scam_gate_content(say(REGULAR, text, NOW))
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["discord.gg/x", "claim it scam.ru/claim", "go to scam.ru", "github.com is up"],
+)
+def test_a_known_tld_before_a_slash_space_or_the_end_opens_the_scam_gate(text):
+    assert rules.scam_gate_content(say(REGULAR, text, NOW))
+
+
+# -- the re-review of a326953a (#310 items 5 and 6) ----------------------------
+
+
+@pytest.mark.parametrize("text", ["a@everyone.com", "mail me@here.com", "@hereby"])
+def test_an_email_or_a_longer_word_is_not_a_mass_mention(text):
+    """Re-review item 5: these were removed and left the author high risk."""
+    assert rules.mass_mention_hits(say(REGULAR, text, NOW)) == []
+
+
+@pytest.mark.parametrize("text", ["hey @everyone", "@here.", "(@everyone)"])
+def test_a_mass_mention_as_a_word_still_counts(text):
+    assert rules.mass_mention_hits(say(REGULAR, text, NOW)) != []
+
+
+def test_a_mass_mention_in_code_with_a_docs_link_is_not_high_signal():
+    """Re-review item 6: the mention+link check honours the code exemption."""
+    in_code = say(
+        REGULAR, "`@everyone` is escaped, see https://docs.python.org/3/", NOW
+    )
+    assert "mass mention with a link" not in rules.high_signal_reasons(
+        in_code, metrics=_metrics()
+    )
+    plain = say(REGULAR, "@everyone see https://docs.python.org/3/", NOW)
+    assert "mass mention with a link" in rules.high_signal_reasons(
+        plain, metrics=_metrics()
+    )

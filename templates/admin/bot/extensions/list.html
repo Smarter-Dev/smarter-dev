@@ -72,7 +72,7 @@
                                 {% endif %}
                                 {% if install.enabled %}
                                 {{ disable_form(guild.id, manifest.slug) }}
-                                {% else %}
+                                {% elif not manifest.moved_to_moderation %}
                                 <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/enable" style="display:inline;">
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
                                 </form>

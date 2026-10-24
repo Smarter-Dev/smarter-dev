@@ -851,6 +851,10 @@ class GuildSpamState:
     def record_mute(self, author_id: str, muted_until: float) -> None:
         self._muted_until[author_id] = muted_until
 
+    def clear_mute(self, author_id: str) -> None:
+        """Forget a mute that never took effect (Discord refused it)."""
+        self._muted_until.pop(author_id, None)
+
     def prune(self, now: float, thresholds: SpamThresholds) -> None:
         """Drop expired mutes, stale warnings, and aged-out buffer entries."""
         self.buffer.prune(now)

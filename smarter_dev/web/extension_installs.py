@@ -41,7 +41,7 @@ from smarter_dev.extensions.schema import ExtensionManifest
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError, first_fire_at
-from smarter_dev.web.models import AdminHandler, ExtensionInstall
+from smarter_dev.web.models import AdminHandler, ExtensionInstall, ModerationOwnership
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,23 @@ _TIME_TRIGGERS = ("schedule", "timer")
 RETIRED_CONFIG_REFUSAL = (
     "This extension has moved into the moderation system, so its config can "
     "no longer be changed. You can still disable or uninstall it."
+)
+
+
+#: Refusal for enabling an install of such a template again.
+RETIRED_ENABLE_REFUSAL = (
+    "This extension has moved into the moderation system, so it can no longer "
+    "be enabled. You can still uninstall it."
+)
+
+
+#: Refusal for rendering Disboard's handler while the moderation coordinator
+#: owns the guild: a fresh render restores the bump-channel restriction the
+#: cutover moved into the coordinator, and both would delete chatter.
+DISBOARD_COORDINATOR_REFUSAL = (
+    "The moderation coordinator now keeps the bump channel clear in this "
+    "guild, so Disboard bumping can't be reconfigured, updated or reinstalled "
+    "until the guild is handed back to the old moderation."
 )
 
 
@@ -118,6 +135,7 @@ async def install_extension(
     manifest = loaded.manifest
     if manifest.moved_to_moderation:
         raise ExtensionInstallError(manifest.moved_to_moderation)
+    await _refuse_disboard_under_coordinator(session, guild_id, slug)
     cleaned = _validate(manifest, raw_config)
     rendered = _render(manifest, cleaned, loaded.scripts)
 
@@ -168,6 +186,9 @@ async def edit_extension_config(
     catalog version — the registry only holds the newest templates)."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
+    # The refusal first: a config error on a template that can no longer be
+    # configured at all would point the admin the wrong way.
+    _refuse_retired(loaded)
     cleaned = _validate(loaded.manifest, raw_config)
     return await _apply(session, install, loaded, cleaned)
 
@@ -181,6 +202,7 @@ async def update_extension(
     newer schema dropped is discarded rather than blocking the update."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
+    _refuse_retired(loaded)
     try:
         cleaned = validate_stored_config(loaded.manifest, install.config)
     except RenderError as exc:
@@ -194,8 +216,17 @@ async def update_extension(
 async def set_extension_enabled(
     session: AsyncSession, *, guild_id: str, slug: str, enabled: bool
 ) -> ExtensionInstall:
-    """Flip the install and every owned row's ``enabled``; cancel/re-arm schedules."""
+    """Flip the install and every owned row's ``enabled``; cancel/re-arm schedules.
+
+    A template that moved into the moderation system can be disabled but not
+    enabled again: enabling would re-arm its frozen punisher next to the
+    coordinator that replaced it.
+    """
     install = await _locked_install(session, guild_id, slug)
+    if enabled:
+        loaded = _get_loaded(slug)
+        if loaded.manifest.moved_to_moderation:
+            raise ExtensionInstallError(RETIRED_ENABLE_REFUSAL)
     install.enabled = enabled
     for row in await _owned_rows(session, install):
         row.enabled = enabled
@@ -233,10 +264,12 @@ async def _apply(
     cleaned: dict,
 ) -> ExtensionInstall:
     """Render + reconcile rows for a new config, then advance the install."""
-    if loaded.manifest.moved_to_moderation:
-        # Re-rendering would rewrite a frozen punisher (new keywords, a
-        # harsher allowed action) past the handler API's freeze.
-        raise ExtensionInstallError(RETIRED_CONFIG_REFUSAL)
+    # Re-rendering would rewrite a frozen punisher (new keywords, a harsher
+    # allowed action) past the handler API's freeze.
+    _refuse_retired(loaded)
+    await _refuse_disboard_under_coordinator(
+        session, install.guild_id, install.extension_slug
+    )
     rendered = _render(loaded.manifest, cleaned, loaded.scripts)
     try:
         await _sync_handler_rows(session, install, loaded, rendered)
@@ -421,6 +454,29 @@ async def _arm_time_trigger(record: AdminHandler) -> None:
         record.trigger_type, record.settings or {}, datetime.now(timezone.utc)
     )
     await _recurring_chain.arm_occurrence(record, fire_at)
+
+
+async def _refuse_disboard_under_coordinator(
+    session: AsyncSession, guild_id: str, slug: str
+) -> None:
+    from smarter_dev.web.moderation_cutover import DISBOARD_SLUG
+
+    if slug != DISBOARD_SLUG:
+        return
+    owner = (
+        await session.execute(
+            select(ModerationOwnership.owner).where(
+                ModerationOwnership.guild_id == guild_id
+            )
+        )
+    ).scalar_one_or_none()
+    if owner == "coordinator":
+        raise ExtensionInstallError(DISBOARD_COORDINATOR_REFUSAL)
+
+
+def _refuse_retired(loaded: LoadedExtension) -> None:
+    if loaded.manifest.moved_to_moderation:
+        raise ExtensionInstallError(RETIRED_CONFIG_REFUSAL)
 
 
 def _get_loaded(slug: str) -> LoadedExtension:

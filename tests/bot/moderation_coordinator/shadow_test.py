@@ -630,7 +630,7 @@ async def test_rows_are_deleted_after_thirty_days():
 
 async def test_the_days_spend_is_read_back_from_the_rows():
     """#255: the daily cap survives a restart; today's rows are counted, not
-    yesterday's or another guild's. A failed read leaves the budget shut."""
+    yesterday's or another guild's. A failed read opens on a fresh count."""
     from smarter_dev.bot.moderation_coordinator.shadow import ShadowRecorder
     from smarter_dev.bot.moderation_coordinator.shadow import restore_budget
 
@@ -674,10 +674,16 @@ async def test_the_days_spend_is_read_back_from_the_rows():
         async def requests_today(self, guild_ids, now):
             raise ConnectionError("db down")
 
-    shut = ClassifierBudget(restored=False)
-    await restore_budget(shut, Broken(), [GUILD])
-    assert not shut.restored
-    assert shut.try_spend(GUILD, "A", time.time()) == "not_restored"
+    # #310 item 5: a failed read opens the day on a fresh count (shut, every
+    # scam check in an acting guild would be unknown), and the next read is
+    # merged in.
+    fresh = ClassifierBudget(per_guild_day=3, restored=False)
+    await restore_budget(fresh, Broken(), [GUILD])
+    assert fresh.restored and fresh.restore_pending
+    assert fresh.try_spend(GUILD, "A", time.time()) is None
+    await restore_budget(fresh, ShadowRecorder(), [GUILD])
+    assert not fresh.restore_pending
+    assert fresh.spent_today(GUILD, time.time()) == 2  # the larger count wins
 
 
 async def test_a_deletion_request_removes_the_persons_shadow_rows():

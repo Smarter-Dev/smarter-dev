@@ -55,12 +55,14 @@ from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_moderation_policy import moderation_refusal
 from smarter_dev.web.handler_moderation_policy import rename_refusal
+from smarter_dev.web.handler_moderation_policy import sanction_calls
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
 from smarter_dev.web.models import AdminHandler
+from smarter_dev.web.moderation_cutover import RETIRED_HANDLERS as COORDINATOR_REPLACED
 
 logger = logging.getLogger(__name__)
 
@@ -289,8 +291,17 @@ class AdminHandlerController(Controller):
             data.script, existing_script=record.script, handler_name=record.name
         )
 
+        # Judged on the name the row had before this write: a switched-off
+        # replaced handler renamed in the same save would otherwise come back.
+        retired = not record.enabled and record.name in COORDINATOR_REPLACED
         if data.name is not None:
             name = _normalized_name(data.name)
+            if retired and name != record.name:
+                raise plain_error(
+                    422,
+                    f"{record.name!r} was replaced by the moderation coordinator "
+                    "and cannot be renamed",
+                )
             reason = rename_refusal(data.script, name=record.name, new_name=name)
             if reason is not None:
                 raise plain_error(422, reason)
@@ -307,7 +318,11 @@ class AdminHandlerController(Controller):
         record.script = data.script
         record.settings = data.settings
         record.channel_ids = data.channel_ids
-        record.enabled = True
+        # Every write enables, except a frozen punisher or a handler the
+        # coordinator replaced (scam-banner, edit-ping-catch) that was switched
+        # off: saving it must not re-arm it next to the coordinator.
+        if record.enabled or not (sanction_calls(data.script) or retired):
+            record.enabled = True
 
         if record.trigger_type in _TIME_TRIGGERS:
             try:
@@ -329,7 +344,7 @@ class AdminHandlerController(Controller):
         """Put a reviewed script on a handler (``scripts/apply_handler_script.py``).
 
         A disabled handler stays disabled, unlike the full update, which
-        enables on every write.
+        enables on every write (a switched-off punisher aside).
         """
         parsed_handler_id = parse_uuid_path(handler_id, "handler_id")
         record = await db_session.get(AdminHandler, parsed_handler_id)

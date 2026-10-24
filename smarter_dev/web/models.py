@@ -4294,6 +4294,30 @@ class ModerationMemberLock(Base):
     expires_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
+class ModerationOwnership(Base):
+    """Who moderates a guild: the legacy actors or the coordinator.
+
+    Written only by ``scripts/moderation_cutover.py``, in the same transaction
+    that turns the legacy actors off (or back on). ``generation`` goes up on
+    every switch and the coordinator checks it before every action, so a
+    decision made under an older generation never acts. ``rules`` are the
+    coordinator's rules; ``legacy_state`` is what the switch changed, so a
+    rollback restores exactly that. No row means ``legacy``.
+    """
+
+    __tablename__ = "moderation_ownership"
+
+    guild_id: Mapped[str] = mapped_column(String, primary_key=True)
+    owner: Mapped[str] = mapped_column(String(20), nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rules: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    legacy_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    changed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class ModerationShadowDecision(Base):
     """What the moderation coordinator would have done, next to what was done.
 

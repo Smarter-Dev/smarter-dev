@@ -147,6 +147,8 @@ async def test_2030_shape_all_four_images_are_shown_and_a_clean_answer_stands():
         "unseen": 0,
         "over_limit": 0,
         "other_files": 0,
+        "sampled": False,
+        "not_sampled": 0,
     }
 
 
