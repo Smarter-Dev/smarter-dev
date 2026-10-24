@@ -606,12 +606,16 @@ def test_app_yaml_gives_the_resolve_its_own_ip_rule():
         "ip",
         [(1200, 60.0)],
     )
-    assert config.resolve(MEMORY_URL, "GET").name == "default"
+    # Ahead of the site-search prefix, which keeps every other search route.
+    assert config.resolve("/api/site/search/users/u/runs/r", "GET").name == (
+        "site-search"
+    )
+    assert config.resolve(MEMORY_URL, "GET").name == "site-memory"
 
 
 async def test_resolves_never_spend_the_other_site_routes_budget(limited_app):
-    """Past the default's 60 a minute from one address, every resolve is
-    answered by the route (not Skrift's plain 429), and another site route
+    """Past another site family's budget from one address, every resolve is
+    answered by the route (not Skrift's plain 429), and that family's route
     from that address still answers 200."""
     config = app_rate_limit_config()
     default_limit = config.resolve(MEMORY_URL, "GET").limits[0][0]
