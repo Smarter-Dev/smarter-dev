@@ -121,28 +121,34 @@ class SiteResourcesController(Controller):
 
     @post("/search", guards=SITE_RESOURCES_GUARDS, status_code=HTTP_200_OK)
     async def search(self, data: CorpusSearch) -> dict[str, Any]:
-        _QUIET.set(True)
-        return {"hits": await search_corpus(data.query, data.limit)}
+        quiet = _QUIET.set(True)
+        try:
+            return {"hits": await search_corpus(data.query, data.limit)}
+        finally:
+            _QUIET.reset(quiet)
 
     @post("/read", guards=SITE_RESOURCES_GUARDS, status_code=HTTP_200_OK)
     async def read(self, data: CorpusRead) -> dict[str, Any]:
-        _QUIET.set(True)
+        quiet = _QUIET.set(True)
         try:
-            async with asyncio.timeout(READ_TIMEOUT_S):
-                read = await read_corpus(data.url, curated_only=True, log_hosts=False)
-        except TimeoutError:
-            logger.warning("POST /api/site/resources/read: timed out")
-            raise plain_error(504, "This source took too long to read.") from None
-        if read.error is None:
-            return {
-                "url": data.url,
-                "body": read.body[:READ_MAX_CHARS],
-                "cached": read.cached,
-            }
-        if not read.curated:
-            raise plain_error(404, "This isn't one of the curated sources.")
-        logger.warning("POST /api/site/resources/read: fetch failed")
-        raise plain_error(502, "This source couldn't be read just now.")
+            return await _read(data.url)
+        finally:
+            _QUIET.reset(quiet)
+
+
+async def _read(url: str) -> dict[str, Any]:
+    try:
+        async with asyncio.timeout(READ_TIMEOUT_S):
+            read = await read_corpus(url, curated_only=True, log_hosts=False)
+    except TimeoutError:
+        logger.warning("POST /api/site/resources/read: timed out")
+        raise plain_error(504, "This source took too long to read.") from None
+    if read.error is None:
+        return {"url": url, "body": read.body[:READ_MAX_CHARS], "cached": read.cached}
+    if not read.curated:
+        raise plain_error(404, "This isn't one of the curated sources.")
+    logger.warning("POST /api/site/resources/read: fetch failed")
+    raise plain_error(502, "This source couldn't be read just now.")
 
 
 def _bounded(found: list[dict[str, str]]) -> dict[str, list]:

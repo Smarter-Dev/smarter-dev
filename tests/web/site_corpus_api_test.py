@@ -244,26 +244,105 @@ async def test_simultaneous_cold_reads_share_one_fetch(corpus, monkeypatch):  # 
     assert {read.body for read in reads} == {f"Fetched\n\nBody of {COLD}"}
 
 
+def _held_jina(monkeypatch):
+    """A Jina stand-in that says when a fetch has started, holds it until
+    released, and is slow to clean up when cancelled."""
+    state = SimpleNamespace(calls=[], started=asyncio.Event(), cancelled=0)
+    release = asyncio.Event()
+
+    async def fake(client, url, *, log_host=True):
+        state.calls.append(url)
+        state.started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            state.cancelled += 1
+            await asyncio.sleep(0.3)  # cleanup takes a while
+            raise
+        return {"title": "Fetched", "content": f"Body of {url}"}
+
+    monkeypatch.setattr(resources_corpus, "jina_read", fake)
+    state.release = release
+    return state
+
+
 @needs_postgres
 async def test_a_reader_giving_up_leaves_the_fetch_for_the_rest(corpus, monkeypatch):  # noqa: F811
-    calls = _jina(monkeypatch, delay=0.3)
+    jina = _held_jina(monkeypatch)
     waiting = asyncio.ensure_future(resources_corpus.read_corpus(COLD, log_hosts=False))
     quitter = asyncio.ensure_future(resources_corpus.read_corpus(COLD, log_hosts=False))
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(jina.started.wait(), 5)
     quitter.cancel()
-    read = await waiting
-    assert read.body == f"Fetched\n\nBody of {COLD}"
-    assert calls == [COLD]
-    # The last reader to give up stops the fetch.
-    _jina(monkeypatch, delay=5)
+    await asyncio.sleep(0.05)
+    assert jina.cancelled == 0
+    jina.release.set()
+    assert (await waiting).body == f"Fetched\n\nBody of {COLD}"
+    assert jina.calls == [COLD]
+
+
+@needs_postgres
+async def test_the_last_reader_out_cancels_the_fetch_and_a_new_reader_starts_afresh(
+    corpus,  # noqa: F811
+    monkeypatch,
+):
+    jina = _held_jina(monkeypatch)
     alone = asyncio.ensure_future(resources_corpus.read_corpus(STALE, log_hosts=False))
-    await asyncio.sleep(0.1)
+    # Only once the fetch has started.
+    await asyncio.wait_for(jina.started.wait(), 5)
     alone.cancel()
     with pytest.raises(asyncio.CancelledError):
         await alone
-    await asyncio.sleep(0)
+    # Retired at once, while its cleanup is still running.
     assert resources_corpus._IN_FLIGHT == {}
-    assert (await stored(corpus, STALE))[0] == "old body"
+    # A reader arriving now gets a fresh fetch, not the cancelled one.
+    jina.started.clear()
+    replacement = asyncio.ensure_future(
+        resources_corpus.read_corpus(STALE, log_hosts=False)
+    )
+    await asyncio.wait_for(jina.started.wait(), 5)
+    jina.release.set()
+    read = await replacement
+    assert read.body == f"Fetched\n\nBody of {STALE}"
+    assert jina.calls == [STALE, STALE]
+    await asyncio.sleep(0.4)
+    assert jina.cancelled == 1
+    assert resources_corpus._IN_FLIGHT == {}
+
+
+@needs_postgres
+async def test_a_late_cache_miss_finds_the_first_fetch(corpus, monkeypatch):  # noqa: F811
+    calls = _jina(monkeypatch)
+    real = resources_corpus._stored
+    first_done = asyncio.Event()
+    held = False
+
+    async def barrier(url):
+        nonlocal held
+        result = await real(url)
+        if asyncio.current_task().get_name() == "second" and not held:
+            # The second reader's own lookup missed; it resumes only after
+            # the first reader's fetch has stored its body and left.
+            held = True
+            await first_done.wait()
+        return result
+
+    monkeypatch.setattr(resources_corpus, "_stored", barrier)
+
+    async def first():
+        try:
+            return await resources_corpus.read_corpus(COLD, log_hosts=False)
+        finally:
+            first_done.set()
+
+    one = asyncio.ensure_future(first())
+    two = asyncio.create_task(
+        resources_corpus.read_corpus(COLD, log_hosts=False), name="second"
+    )
+    a, b = await asyncio.wait_for(asyncio.gather(one, two), 10)
+    assert held
+    assert calls == [COLD]
+    assert a.body == b.body == f"Fetched\n\nBody of {COLD}"
+    assert (a.cached, b.cached) == (False, True)
 
 
 @needs_postgres
@@ -369,3 +448,26 @@ async def test_the_researcher_logs_as_main_does(corpus, monkeypatch, caplog):  #
     await resources_agent.read_source(ctx, COLD)
     # httpx's request line, as on main: only the site routes hold it back.
     assert f"https://r.jina.ai/{COLD}" in _logged(caplog)
+
+
+async def test_work_after_a_corpus_route_logs_again(monkeypatch, caplog):
+    """The routes hold httpx's lines back only while they run: the same
+    context logs again afterwards."""
+    caplog.set_level(logging.INFO)
+    monkeypatch.setattr(site_resources, "search_corpus", AsyncMock(return_value=[]))
+    monkeypatch.setattr(
+        site_resources,
+        "read_corpus",
+        AsyncMock(return_value=resources_corpus.CorpusRead("b", None, True, True)),
+    )
+    controller = SimpleNamespace()
+    httpx_log = logging.getLogger("httpx")
+    await SiteResourcesController.search.fn(
+        controller, site_resources.CorpusSearch(query="q")
+    )
+    httpx_log.info("after search")
+    await SiteResourcesController.read.fn(
+        controller, site_resources.CorpusRead(url=COLD)
+    )
+    httpx_log.info("after read")
+    assert {"after search", "after read"} <= {r.getMessage() for r in caplog.records}

@@ -231,25 +231,41 @@ _IN_FLIGHT: dict[tuple[str, bool], asyncio.Task] = {}
 _WAITING: dict[tuple[str, bool], int] = {}
 
 
-async def _fetch(url: str, log_hosts: bool) -> tuple[str | None, str | None]:
-    """Jina, then the write-back: (body, None) or (None, error)."""
+def _memory(url: str) -> str | None:
+    cached = _READ_CACHE.get(url)
+    if cached and (time.time() - cached[0]) < READ_TTL_SECONDS:
+        return cached[1]
+    return None
+
+
+async def _fetch(url: str, log_hosts: bool) -> tuple[str | None, str | None, bool]:
+    """``(body, error, cached)``: the caches again, then Jina and the
+    write-back. A reader that missed the cache before an earlier fetch
+    finished finds that fetch's body here, rather than paying for another."""
+    _, body = await _stored(url)
+    if body is None:
+        body = _memory(url)
+    if body is not None:
+        return body, None, True
     async with httpx.AsyncClient() as client:
         result = await jina_read(client, url, log_host=log_hosts)
     if "error" in result:
-        return None, result["error"]
+        return None, result["error"], False
     title = result.get("title", "") or ""
     content = result.get("content", "") or ""
     body = f"{title}\n\n{content}".strip()[:READ_MAX_CHARS]
     if not await _store(url, body):
         # Not a curated row: keep it in-process instead.
         _READ_CACHE[url] = (time.time(), body)
-    return body, None
+    return body, None, False
 
 
-async def _shared_fetch(url: str, log_hosts: bool) -> tuple[str | None, str | None]:
+async def _shared_fetch(
+    url: str, log_hosts: bool
+) -> tuple[str | None, str | None, bool]:
     """Join the fetch in flight for ``url``, or start it. A caller that is
     cancelled leaves it running for the others; the last one to leave
-    cancels it."""
+    retires it at once (no later reader can join it) and cancels it."""
     key = (url, log_hosts)
     task = _IN_FLIGHT.get(key)
     if task is None:
@@ -265,6 +281,8 @@ async def _shared_fetch(url: str, log_hosts: bool) -> tuple[str | None, str | No
         return await asyncio.shield(task)
     except asyncio.CancelledError:
         if _WAITING.get(key) == 1 and not task.done():
+            if _IN_FLIGHT.get(key) is task:
+                del _IN_FLIGHT[key]
             task.cancel()
         raise
     finally:
@@ -296,11 +314,11 @@ async def read_corpus(
     if curated_only and not curated:
         return CorpusRead(None, "not curated", False, False)
 
-    cached = _READ_CACHE.get(url)
-    if cached and (time.time() - cached[0]) < READ_TTL_SECONDS:
-        return CorpusRead(cached[1], None, curated, True)
+    body = _memory(url)
+    if body is not None:
+        return CorpusRead(body, None, curated, True)
 
-    body, error = await _shared_fetch(url, log_hosts)
+    body, error, cached = await _shared_fetch(url, log_hosts)
     if error is not None:
         return CorpusRead(None, error, curated, False)
-    return CorpusRead(body, None, curated, False)
+    return CorpusRead(body, None, curated, cached)
