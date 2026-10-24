@@ -1429,10 +1429,16 @@ def _runtime_error(exc: monty.MontyError) -> str:
     frames = getattr(exc, "traceback", None)
     if callable(frames):
         lines.extend(
-            f'  File "{frame.filename}", line {frame.line}, in {frame.function_name}'
+            f'  File "{_script_file(frame.filename)}", line {frame.line}, in {frame.function_name}'
             for frame in frames()
         )
     return "\n".join(lines)
+
+
+def _script_file(filename: str) -> str:
+    """A frame's file as stored: Monty 1.x names a session's feed
+    ``<python-input-0>``; a fire is one feed of one script, ``main.py``."""
+    return "main.py" if filename.startswith("<python-input-") else filename
 
 async def run_handler_script(
     script: str,
