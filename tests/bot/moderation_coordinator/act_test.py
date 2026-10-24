@@ -206,6 +206,30 @@ def _slow(model, seconds: float = 0.05):
     return model
 
 
+def _held(model, release: asyncio.Event):
+    """The model answers only once ``release`` is set: "the review is still
+    out" is a fact of the test, not a race against a sleep."""
+    answer = model.function
+
+    async def held(messages, info):
+        await release.wait()
+        return answer(messages, info)
+
+    model.function = held
+    return model
+
+
+async def _until(condition, budget: float = 30.0) -> bool:
+    """Wait for ``condition``. The budget only bounds a hang; it is not a
+    timing claim (a loaded machine takes ~0.5 s for a dozen gateway calls)."""
+    deadline = time.monotonic() + budget
+    while not condition():
+        if time.monotonic() > deadline:
+            return False
+        await asyncio.sleep(0.01)
+    return True
+
+
 def held_burst(answers=None):
     """A cross-channel burst with the spam engine off: the second post is
     held by the scam gate alone (no spam mute covers the hold first)."""
@@ -762,24 +786,28 @@ async def test_a_spam_flood_behind_a_full_queue_still_gets_the_spam_mute(
     blocker = Member("newbie", 80, NOW - timedelta(days=1), NOW - timedelta(hours=1))
     spammer = Member("raider", 81, NOW - timedelta(days=400), NOW - timedelta(days=300))
     slow_post = say(blocker, "free nitro https://nitro-claim.example/x", NOW)
+    release = asyncio.Event()
     case = ReplayCase(
         name="raid",
         policy=acting(policy(ring=None)),
         messages=[slow_post],
         answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
-        haiku=lambda answers, calls, by_text: _slow(
-            scripted_haiku(answers, calls, by_text), 0.5
+        haiku=lambda answers, calls, by_text: _held(
+            scripted_haiku(answers, calls, by_text), release
         ),
         reads=ReplayReads(histories={blocker.id: FIRST}),
+        deadline=60.0,  # the held check never times out while we wait
     )
     h = harness(case)
     h.port.add_member(spammer.id)
 
     h.shadow.submit(slow_post)
     await _flood(h, spammer)
-    await asyncio.sleep(0.2)  # the slow check is still out
-    assert h.port.count("timeout", spammer.id) == 1
+    assert await _until(lambda: h.port.count("timeout", spammer.id) >= 1)
+    assert h.calls.total == 0  # the queued check is still out
+    release.set()
     await h.shadow.drain()
+    assert h.port.count("timeout", spammer.id) == 1
 
     assert h.shadow.dropped == 0
     assert h.shadow.backlogged == 12
@@ -926,6 +954,19 @@ async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_rep
     assert told == PINGER.id
     assert hacked.startswith("Your account posted what looks like a scam")
     assert f"timed you out until <t:{int(timeouts[1])}:f>" in hacked
+
+
+def test_review_lines_with_details_log_without_a_crash():
+    """#342 item 6: review lines are only logged when nothing is acted on;
+    a history line carries details, and unpacking it as a pair raised."""
+    lines = [
+        (gw.ENTRY_NOTE, "Scam check came back unknown."),
+        (gw.ENTRY_HISTORY, "History: none on record.", {"count": 0}),
+    ]
+
+    assert act_module.review_text(lines) == (
+        "Scam check came back unknown. | History: none on record."
+    )
 
 
 def _db_actions(history: AuthorHistory):
@@ -1426,15 +1467,17 @@ async def test_the_spam_mute_lands_before_the_classifier_answers():
         )
         for i in range(12)
     ]
+    release = asyncio.Event()
     case = ReplayCase(
         name="flood with links",
         policy=acting(policy(ring=None)),
         messages=posts,
         answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
-        haiku=lambda answers, calls, by_text: _slow(
-            scripted_haiku(answers, calls, by_text), 1.0
+        haiku=lambda answers, calls, by_text: _held(
+            scripted_haiku(answers, calls, by_text), release
         ),
         reads=ReplayReads(histories={flooder.id: FIRST}),
+        deadline=60.0,  # the held reviews never time out while we wait
     )
     h = harness(case)
     budget = h.shadow.coordinator.classifier.budget
@@ -1443,9 +1486,9 @@ async def test_the_spam_mute_lands_before_the_classifier_answers():
         h.clock[0] = facts.posted_at
         h.case.reads.now = facts.posted_at
         h.shadow.submit(facts)
-    await asyncio.sleep(0.5)
+    assert await _until(lambda: h.port.count("timeout", flooder.id) >= 1)
     assert h.calls.total == 0  # no review has answered yet
-    assert h.port.count("timeout", flooder.id) >= 1
+    release.set()
     await h.shadow.drain()
 
 
@@ -1644,7 +1687,10 @@ async def test_backlogged_messages_never_wait_for_a_slot(monkeypatch):
         h.case.reads.now = facts.posted_at
         backlog.append(h.shadow.submit(facts))
     try:
-        await asyncio.wait_for(asyncio.gather(*backlog), 2)
+        # A backlog message waiting on a slot never finishes (none is free),
+        # so a generous bound still fails it; 2 s was a timing claim that a
+        # loaded machine missed.
+        await asyncio.wait_for(asyncio.gather(*backlog), 30)
     finally:
         waiting.cancel()
     assert h.shadow.backlogged == 12
@@ -1974,15 +2020,62 @@ async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
     [(member, dm)] = h.messenger.dms
     until = [c[2] for c in h.port.calls if c[0] == "timeout"][-1]
     assert member == HONEY.id
-    # The post is decided before its copy arrives here: one message so far.
+    # The post is decided before its copy arrives here, so the DM names no
+    # count that the copy's removal would make wrong (#342).
     assert dm.startswith(
         "Your account posted what looks like a scam in **Smarter Dev**, so we "
-        f"removed that message and timed you out until <t:{int(until)}:f>."
+        f"removed what it posted and timed you out until <t:{int(until)}:f>."
     )
+    assert "that message" not in dm and "(1)" not in dm
+    # The confirmed lead outranks any later one (#342).
+    async with default_session_factory()() as session:
+        from smarter_dev.web.models import ModerationIncidentEntry
+
+        leads = (
+            await session.execute(
+                select(
+                    ModerationIncidentEntry.rule, ModerationIncidentEntry.details
+                ).where(ModerationIncidentEntry.kind == gw.ENTRY_SUMMARY)
+            )
+        ).all()
+    assert {(rule, (details or {}).get("priority")) for rule, details in leads} == {
+        (act_module.LEAD_CONFIRMED_HACKED, 3)
+    }
     assert "change your Discord password" in dm
     assert "once the timeout ends" in dm
     assert len(dm) < 2000
     assert (gw.MESSAGE_DM, "delivered") in await _outbox()
+
+
+async def test_a_covered_timeouts_dm_gives_the_end_of_the_one_in_place():
+    """#342: a member already under a longer automated timeout is told when
+    that one ends, not the end this decision asked for."""
+    case, (first, _) = _image_only_burst()
+    case = replace(case, messages=[first])
+    h = harness(case)
+    week = await ModerationGateway(h.port).act(
+        gw.Trigger(
+            guild_id=GUILD,
+            actor="spam_engine",
+            reason="spam",
+            channel_id=first.channel_id,
+            message_id="1",
+            author_id=HONEY.id,
+        ),
+        [
+            gw.Proposal(
+                kind=gw.TIMEOUT, target_user_id=HONEY.id, duration_seconds=604800
+            )
+        ],
+    )
+    ends = int(week.outcomes[0].expires_at.timestamp())
+    await h.judge(first)
+
+    assert [c for c in h.port.calls if c[0] == "timeout"] == [
+        c for c in h.port.calls[:1] if c[0] == "timeout"
+    ]  # only the week's timeout was sent
+    [(_, dm)] = h.messenger.dms
+    assert f"timed you out until <t:{ends}:f>" in dm
 
 
 async def test_a_dm_that_did_not_arrive_is_recorded_and_reported():
@@ -2005,12 +2098,12 @@ async def test_a_dm_that_did_not_arrive_is_recorded_and_reported():
     assert (gw.MESSAGE_DM, "not delivered") in await _outbox()
 
 
-def test_a_timed_out_hacked_account_is_told_the_count_and_the_end():
+def test_a_timed_out_hacked_account_is_told_the_removal_and_the_end():
     text = act_module.hacked_account_dm("Smarter Dev", 2, 1792935734.6, timed_out=True)
 
     assert text.startswith(
         "Your account posted what looks like a scam in **Smarter Dev**, so we "
-        "removed those messages (2) and timed you out until <t:1792935734:f>. "
+        "removed what it posted and timed you out until <t:1792935734:f>. "
         "This usually means someone else has access to your account."
     )
     assert "Authorized Apps and Devices" in text
@@ -2022,7 +2115,7 @@ def test_a_warned_hacked_account_is_told_without_a_timeout():
 
     assert text.startswith(
         "Your account posted what looks like a scam in **Smarter Dev**, so we "
-        "removed that message. This usually means someone else has access"
+        "removed what it posted. This usually means someone else has access"
     )
     assert "timed you out" not in text
     assert text.endswith("If this was a mistake, reply to a moderator.")
@@ -2071,4 +2164,4 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     assert "upgraded to a 24-hour timeout" in report
     assert "2 messages removed, timed out for 24 hours, told by DM" in report
     [(_, dm)] = h.messenger.dms
-    assert "we removed those messages (2)" in dm
+    assert "we removed what it posted" in dm

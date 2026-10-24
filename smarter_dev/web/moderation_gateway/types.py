@@ -235,6 +235,9 @@ class Outcome:
     expires_at: datetime | None = None
     deleted: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
+    #: A covered timeout: when the timeout already in place ends (its
+    #: ``expires_at`` is the end this request asked for).
+    in_place_until: datetime | None = None
     #: Skipped only because the incident already holds a sanction at least as
     #: strong. A warn skipped so still owes the member its messages (deduped
     #: through :meth:`ModerationGateway.claim_member_message`).

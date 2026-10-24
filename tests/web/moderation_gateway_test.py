@@ -353,6 +353,33 @@ async def test_a_timeout_never_shortens_a_longer_one(discord, db, clock):
     assert discord.count("timeout") == 1
 
 
+async def test_a_covered_timeout_says_when_the_one_in_place_ends(discord, db, clock):
+    """#342: the member's DM gave the end the covered request asked for; the
+    timeout already in place is what they live with."""
+    gateway = make_gateway(discord, db, clock)
+    first = await gateway.act(
+        spam_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=86400)],
+    )
+    result = await gateway.act(
+        handler_trigger(),
+        [
+            Proposal(
+                kind=t.TIMEOUT,
+                target_user_id=SCAMMER,
+                duration_seconds=300,
+                claim="hold:x",
+            )
+        ],
+    )
+
+    [outcome] = result.outcomes
+    assert outcome.state == t.COVERED
+    assert outcome.in_place_until == first.outcomes[0].expires_at
+    assert outcome.expires_at != outcome.in_place_until
+    assert first.outcomes[0].in_place_until is None
+
+
 async def test_someone_elses_timeout_is_left_alone(discord, db, clock):
     gateway = make_gateway(discord, db, clock)
     discord.members[SCAMMER] = clock.now + 600  # a moderator's 10 minutes
@@ -1213,7 +1240,7 @@ def test_the_report_is_a_timeline_then_a_summary():
         "🛡️ **Moderation incident** in <#7001> · <t:1792849330:f>",
         f"**Member:** <@{user}> ({user})",
         f"**Message:** {link}/7001/8001",
-        f"- <t:1792849330:T> Held {who} for 5 minutes: {hold}",
+        f"- <t:1792849330:f> Held {who} for 5 minutes: {hold}",
         f"- <t:1792849334:T> Hold on {who} upgraded to a 24-hour timeout "
         "(until <t:1792935734:f>): confirmed scam",
         f"- <t:1792849335:T> Deleted a message from {who}: {link}/7001/8001",
@@ -1227,6 +1254,7 @@ def test_the_report_is_a_timeline_then_a_summary():
 
 
 def test_a_refusal_to_act_on_staff_still_shows_while_no_ops_do_not():
+    """Idle effects get no line; skips a moderator needs to see do (#342)."""
     from uuid import uuid4
 
     from smarter_dev.web.moderation_gateway.report import ReportFacts
@@ -1260,13 +1288,275 @@ def test_a_refusal_to_act_on_staff_still_shows_while_no_ops_do_not():
             operations=(
                 timeout(t.SKIPPED, "protected: staff role"),
                 timeout(t.COVERED, "already timed out"),
+                timeout(t.SKIPPED, "weaker than the ban already in this incident"),
                 timeout(t.SKIPPED, "not a member"),
             ),
         )
     )
 
     assert f"<@{SCAMMER}>: timeout 1 day: not done (protected: staff role)" in text
-    assert "already timed out" not in text and "not a member" not in text
+    assert f"<@{SCAMMER}>: timeout 1 day: not done (not a member)" in text
+    assert "already timed out" not in text and "weaker than" not in text
+    assert (
+        "**Summary:** Recorded: **refused on a protected member**, "
+        "not done: not a member."
+    ) in text
+
+
+def _report_op(kind, state, at, **values):
+    from smarter_dev.web.moderation_gateway.report import ReportOperation
+
+    fields = {
+        "kind": kind,
+        "state": state,
+        "actor": "coordinator",
+        "target_user_id": SCAMMER,
+        "target_username": None,
+        "detail": None,
+        "channel_id": CHANNEL,
+        "message_ids": (),
+        "deleted": (),
+        "duration_seconds": None,
+        "expires_at": None,
+        "at": at,
+    }
+    fields.update(values)
+    return ReportOperation(**fields)
+
+
+def _report_entry(kind, at, rule, details=None, target=SCAMMER):
+    from smarter_dev.web.moderation_gateway.report import ReportEntry
+
+    return ReportEntry(
+        kind=kind,
+        source="coordinator",
+        rule=rule,
+        content=None,
+        target_user_id=target,
+        channel_id=None,
+        message_id=None,
+        at=at,
+        details=details,
+    )
+
+
+def _report(operations=(), entries=(), opened_at=1_790_000_000.0, **render):
+    from uuid import uuid4
+
+    from smarter_dev.web.moderation_gateway.report import ReportFacts
+    from smarter_dev.web.moderation_gateway.report import render_report
+
+    return render_report(
+        ReportFacts(
+            incident_id=uuid4(),
+            guild_id=GUILD,
+            subject_user_id=SCAMMER,
+            channel_id=CHANNEL,
+            trigger_message_id=MESSAGE,
+            opened_at=opened_at,
+            ping_role_id=None,
+            entries=tuple(entries),
+            operations=tuple(operations),
+        ),
+        **render,
+    )
+
+
+def test_a_moderator_stand_down_shows_in_the_timeline_and_the_summary():
+    """#342: a moderator lifts the hold; the scam timeout that follows stands
+    down. The report showed nothing for it."""
+    start = 1_790_000_000.0
+    stand_down = "a moderator reversed it (untimeout); automation stands down"
+    text = _report(
+        operations=(
+            _report_op(
+                t.TIMEOUT,
+                t.CONFIRMED,
+                start + 1,
+                duration_seconds=300,
+                expires_at=start + 301,
+                provisional=True,
+                reason="possible scam under review: a link",
+            ),
+            _report_op(
+                t.TIMEOUT,
+                t.SKIPPED,
+                start + 9,
+                duration_seconds=86400,
+                detail=stand_down,
+            ),
+        ),
+        entries=(_report_entry(t.ENTRY_SUMMARY, start + 9, "Confirmed scam"),),
+    )
+
+    lines = text.splitlines()
+    assert (
+        f"- <t:{int(start) + 9}:T> <@{SCAMMER}>: timeout 1 day: not done ({stand_down})"
+    ) in lines
+    assert (
+        "**Summary:** Confirmed scam: held for 5 minutes, stood down after a "
+        "moderator reversed it."
+    ) in lines
+
+
+def test_someone_elses_timeout_and_a_ban_already_in_place_show():
+    start = 1_790_000_000.0
+    text = _report(
+        operations=(
+            _report_op(
+                t.TIMEOUT,
+                t.SKIPPED,
+                start,
+                duration_seconds=86400,
+                detail="a timeout someone else set runs until <t:1790003600:f>; "
+                "left as it is",
+            ),
+            _report_op(t.BAN, t.SKIPPED, start + 1, detail="already banned"),
+            _report_op(
+                t.DELETE,
+                t.SKIPPED,
+                start + 2,
+                message_ids=(MESSAGE,),
+                detail="already deleted",
+            ),
+        ),
+    )
+
+    assert "left as it is" in text and "(already banned)" in text
+    assert "already deleted" not in text
+    assert text.splitlines()[-2] == (
+        "**Summary:** Recorded: left a timeout someone else set, already banned."
+    )
+
+
+def test_a_trimmed_report_keeps_the_staff_refusal():
+    """#342: with about 80 deletes, a staff refusal ranked with confirmed
+    effects and vanished into "…and 65 more (65 confirmed)"."""
+    start = 1_790_000_000.0
+    refusal = _report_op(
+        t.TIMEOUT,
+        t.SKIPPED,
+        start,
+        target_user_id="6001",
+        target_username="a moderator",
+        duration_seconds=604800,
+        detail="protected: staff role",
+    )
+    deletes = [
+        _report_op(
+            t.DELETE,
+            t.CONFIRMED,
+            start + 1 + i,
+            target_user_id=str(9000 + i),
+            target_username=f"member{i}",
+            message_ids=(str(8100 + i),),
+            deleted=(str(8100 + i),),
+        )
+        for i in range(80)
+    ]
+    text = _report(operations=(refusal, *deletes))
+
+    assert len(text) <= 2000
+    assert "<@6001> a moderator: timeout 7 days: not done (protected: staff role)" in (
+        text
+    )
+    assert "more (" in text and "refused" not in text.split("more (")[1].split(")")[0]
+    assert "**refused on a protected member**" in text.splitlines()[-2]
+
+
+def test_a_dropped_staff_refusal_is_counted_as_one():
+    start = 1_790_000_000.0
+    refusals = [
+        _report_op(
+            t.TIMEOUT,
+            t.SKIPPED,
+            start + i,
+            target_user_id=str(6000 + i),
+            target_username="staff",
+            duration_seconds=604800,
+            detail="protected: staff role " + "x" * 120,
+        )
+        for i in range(30)
+    ]
+    text = _report(operations=refusals)
+
+    assert len(text) <= 2000
+    assert "more (**22 refused (protected)**)" in text
+    assert "**Summary:** Recorded: **refused on 30 protected members**." in text
+
+
+def test_the_summary_tells_every_dm_not_only_the_last():
+    start = 1_790_000_000.0
+
+    def delivery(at, delivered, kind):
+        word = "delivered." if delivered else "not delivered."
+        return _report_entry(
+            t.ENTRY_DELIVERY,
+            at,
+            f"{kind} to <@{SCAMMER}> {word}",
+            {"delivered": delivered, "message": kind},
+        )
+
+    missed_first = _report(
+        entries=(
+            delivery(start, False, t.MESSAGE_WARNING_DM),
+            delivery(start + 5, True, t.MESSAGE_DM),
+        )
+    )
+    all_told = _report(entries=(delivery(start, True, t.MESSAGE_DM),))
+
+    assert "**1 of 2 DMs not delivered**" in missed_first
+    assert "told by DM" not in missed_first
+    assert "told by DM" in all_told
+
+
+def test_a_confirmed_lead_outranks_a_later_unknown_one():
+    start = 1_790_000_000.0
+    text = _report(
+        entries=(
+            _report_entry(t.ENTRY_SUMMARY, start, "Confirmed scam", {"priority": 3}),
+            _report_entry(
+                t.ENTRY_SUMMARY, start + 5, "Scam check incomplete", {"priority": 1}
+            ),
+        )
+    )
+    newer = _report(
+        entries=(
+            _report_entry(
+                t.ENTRY_SUMMARY, start, "Scam check incomplete", {"priority": 1}
+            ),
+            _report_entry(
+                t.ENTRY_SUMMARY, start + 5, "Confirmed scam", {"priority": 3}
+            ),
+        )
+    )
+
+    assert "**Summary:** Confirmed scam." in text
+    assert "**Summary:** Confirmed scam." in newer
+
+
+def test_the_timeline_dates_its_first_line_and_each_new_day():
+    """#342: a bare time is ambiguous across midnight."""
+    late = 1_792_886_340.0  # 23:59 UTC
+    text = _report(
+        operations=(
+            _report_op(t.WARN, t.CONFIRMED, late, reason="spam"),
+            _report_op(t.WARN, t.CONFIRMED, late + 30, reason="spam again"),
+            _report_op(t.WARN, t.CONFIRMED, late + 90, reason="and again"),
+            _report_op(t.WARN, t.CONFIRMED, late + 120, reason="once more"),
+        ),
+        opened_at=late,
+    )
+
+    stamps = [
+        line.split(">")[0] for line in text.splitlines() if line.startswith("- <t:")
+    ]
+    assert stamps == [
+        f"- <t:{int(late)}:f",
+        f"- <t:{int(late) + 30}:T",
+        f"- <t:{int(late) + 90}:f",
+        f"- <t:{int(late) + 120}:T",
+    ]
 
 
 def test_trimming_keeps_failures_and_alerts_and_drops_the_least_important_first():
