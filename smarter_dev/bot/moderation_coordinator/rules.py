@@ -30,6 +30,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from datetime import datetime
 from datetime import timedelta
 
@@ -64,7 +65,6 @@ from smarter_dev.bot.spam_engine import SPAM_ACTION_NONE
 from smarter_dev.bot.spam_engine import SPAM_ACTION_WARN
 from smarter_dev.bot.spam_engine import SpamDecision
 from smarter_dev.bot.spam_engine import SpamMetrics
-from smarter_dev.bot.spam_engine import analyze_message_content
 from smarter_dev.bot.spam_ring import JOIN_PROXIMITY
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import TranscriptMessage
@@ -208,6 +208,14 @@ def edit_ping_hits(facts: MessageFacts) -> list[RuleHit]:
 MASS_MENTION_REASON = "server-wide mention from a member"
 #: Inline code and code blocks: a mention written there is not a ping.
 _CODE = re.compile(r"```.*?(?:```|$)|`[^`\n]*`", re.DOTALL)
+#: ``@everyone``/``@here`` as a word: not in an email address
+#: (``me@here.com``) and not the start of a longer word (``@hereby``).
+_MASS_MENTION = re.compile(r"(?<![\w@])@(?:everyone|here)(?!\w)")
+
+
+def pings_everyone(content: str) -> bool:
+    """Whether ``content`` carries ``@everyone``/``@here`` outside code."""
+    return _MASS_MENTION.search(_CODE.sub(" ", content)) is not None
 
 
 def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
@@ -221,8 +229,7 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
     """
     if facts.is_webhook or facts.author_is_bot:
         return []
-    text = _CODE.sub(" ", facts.content)
-    if "@everyone" not in text and "@here" not in text:
+    if not pings_everyone(facts.content):
         return []
     return [
         RuleHit(
@@ -292,7 +299,6 @@ def high_signal_reasons(
     facts: MessageFacts,
     *,
     metrics: SpamMetrics | None,
-    scam_link_domains: Sequence[str],
     suspect: Sequence[str] = (),
 ) -> tuple[str, ...]:
     """Why this message is a high-signal scam event, if it is.
@@ -304,8 +310,9 @@ def high_signal_reasons(
        ``d*.gift`` lookalike) fired on this message;
     2. its nitro-scam metric fired: a mass mention and a nitro keyword within
        the mass-mention window;
-    3. this one message carries ``@everyone``/``@here`` and a link with a
-       scheme or a bare invite (not a bare domain: ``logger.info`` is code);
+    3. this one message carries ``@everyone``/``@here`` outside code and a
+       link with a scheme or a bare invite (not a bare domain:
+       ``logger.info`` is code);
     4. scam-banner's "suspect": four or more images, or the same post in
        another channel within 10 s (``suspect`` holds those reasons).
 
@@ -317,8 +324,7 @@ def high_signal_reasons(
             reasons.append(HIGH_SIGNAL_SCAM_LINK)
         if metrics.nitro_scam:
             reasons.append(HIGH_SIGNAL_NITRO_SCAM)
-        analysis = analyze_message_content(facts.content, scam_link_domains)
-        if analysis.contains_mass_mention and _MENTION_LINK.search(facts.content):
+        if pings_everyone(facts.content) and _MENTION_LINK.search(facts.content):
             reasons.append(HIGH_SIGNAL_MENTION_LINK)
     reasons.extend(suspect)
     return tuple(dict.fromkeys(reasons))
@@ -427,6 +433,27 @@ def scam_risky_author(
     return tuple(reasons)
 
 
+def scam_claim(key: str) -> str:
+    """The one timeout claim a post and its copies share."""
+    return f"scam:{key}"
+
+
+def without_sanction(hits: Sequence[RuleHit], why: str) -> list[RuleHit]:
+    """The scam gate's hits as cleanup only: the post's sanction is owed once."""
+    return [
+        replace(
+            hit,
+            reason=hit.reason + why,
+            sanction=None,
+            notice=None,
+            high_signal=False,
+        )
+        if hit.rule == SCAM_GATE and hit.sanction is not None
+        else hit
+        for hit in hits
+    ]
+
+
 @dataclass(frozen=True, slots=True)
 class ScamReview:
     """A message the scam gate wants judged (labels ``scam`` and ``abuse``).
@@ -491,13 +518,17 @@ class ScamReview:
         elif self.high_signal:
             # Zech: a high-signal scam held while it was judged ends in a
             # timeout plus cleanup when the account is not new.
-            sanction = Sanction(gw.TIMEOUT, duration_seconds=REPEAT_TIMEOUT_SECONDS)
+            sanction = Sanction(
+                gw.TIMEOUT,
+                duration_seconds=REPEAT_TIMEOUT_SECONDS,
+                claim=scam_claim(self.key),
+            )
             notice = NOTICE_SECURE_ACCOUNT
         elif self.repeat:
             sanction = Sanction(
                 gw.TIMEOUT,
                 duration_seconds=REPEAT_TIMEOUT_SECONDS,
-                claim=f"repeat:{self.key}",
+                claim=scam_claim(self.key),
             )
             reason += ", repeat within 30 days"
             notice = NOTICE_SECURE_ACCOUNT if compromised else NOTICE_SCAM_REMOVED

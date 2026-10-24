@@ -589,3 +589,54 @@ async def test_the_same_post_25_hours_later_is_sampled_and_not_held():
     evaluation = result.evaluations[0]
     assert evaluation.decision.provisional is None
     assert evaluation.classifier.as_record()["images"]["sampled"] is True
+
+
+# -- one sanction per post (#310 re-review item 2) ----------------------------
+
+
+def test_a_post_and_its_copies_share_one_sanction_claim():
+    """The ``scam:{key}`` claim: a copy decided after its post's sanction
+    gets none unless its own is stronger; a weaker or equal one is dropped."""
+    from smarter_dev.bot.moderation_coordinator.model import Sanction
+    from smarter_dev.bot.moderation_coordinator.state import ScamSanctions
+
+    warn = Sanction(gw.WARN)
+    timeout = Sanction(gw.TIMEOUT, duration_seconds=86400, claim="scam:k")
+    claims = ScamSanctions()
+    assert claims.claim("g", "u", "k", timeout, now=0)
+    assert not claims.claim("g", "u", "k", warn, now=1)  # the copy's warn
+    assert not claims.claim("g", "u", "k", timeout, now=2)  # the same again
+    assert claims.claim("g", "u", "other post", warn, now=3)
+
+    stronger = ScamSanctions()
+    assert stronger.claim("g", "u", "k", warn, now=0)
+    assert stronger.claim("g", "u", "k", timeout, now=1)
+    # Forgotten after its window: a post a day later is its own.
+    assert stronger.claim("g", "u", "k", warn, now=10_000)
+
+
+async def test_a_copy_decided_after_its_posts_timeout_is_not_warned_too():
+    """The claim in the coordinator: the held copy's timeout came first (its
+    post's own check answered later), so the post keeps cleanup only."""
+    from smarter_dev.bot.moderation_coordinator.model import Sanction
+
+    member = Member("desk", 73, NOW - timedelta(days=900), NOW - timedelta(days=800))
+    post = _five_images(member)
+    coordinator = _coordinator(
+        ReplayReads(histories={member.id: ESTABLISHED}),
+        {SCAM: (True, 0.95), ABUSE: (False, 0.9)},
+    )
+    key = coordinator_module.facts_hash(post)
+    coordinator.sanctions.claim(
+        post.guild_id,
+        member.id,
+        key,
+        Sanction(gw.TIMEOUT, duration_seconds=86400),
+        now=post.posted_at,
+    )
+    evaluation = await coordinator.evaluate(post, policy(ring=None, spam=None))
+    assert evaluation.scam_outcome == "violation"
+    target = evaluation.decision.targets[member.id]
+    assert target.sanction is None
+    assert target.notices == []
+    assert [item.message_id for item in target.cleanup] == [post.message_id]

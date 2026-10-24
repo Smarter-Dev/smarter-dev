@@ -59,6 +59,7 @@ from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
 from smarter_dev.bot.moderation_coordinator.policy import in_scope
 from smarter_dev.bot.moderation_coordinator.state import RecentPosts
 from smarter_dev.bot.moderation_coordinator.state import RingRegistry
+from smarter_dev.bot.moderation_coordinator.state import ScamSanctions
 from smarter_dev.bot.moderation_coordinator.state import SpamTracker
 from smarter_dev.bot.moderation_coordinator.state import VerdictCache
 from smarter_dev.bot.spam_engine import NO_SPAM_ACTION
@@ -190,6 +191,7 @@ class Coordinator:
         recent: RecentPosts | None = None,
         rings: RingRegistry | None = None,
         verdicts: VerdictCache | None = None,
+        sanctions: ScamSanctions | None = None,
     ) -> None:
         self.reads = reads
         self.classifier = classifier
@@ -197,6 +199,7 @@ class Coordinator:
         self.recent = recent or RecentPosts()
         self.rings = rings or RingRegistry()
         self.verdict_cache = verdicts or VerdictCache()
+        self.sanctions = sanctions or ScamSanctions()
 
     async def evaluate(
         self,
@@ -222,7 +225,7 @@ class Coordinator:
         except while waiting on a busy ring channel. ``on_provisional`` places
         the provisional timeout (with the post's key) before the classifier is
         asked. ``judge_labels=False`` (a backlog past the queue) judges the
-        deterministic rules only.
+        deterministic rules only and never takes a slot.
         """
         held = _Slot(slot)
         async with contextlib.AsyncExitStack() as stack:
@@ -341,24 +344,35 @@ class Coordinator:
 
         key = facts_hash(facts)
         early_hits = 0
+        preloaded = None
+        scam_candidate = (
+            policy.scam_gate
+            and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
+            and not facts.is_edit
+            and rules.scam_gate_content(facts)
+        )
         if on_deterministic is not None and hits:
             # Carried out now, not after a classifier wait: a raid's spam
             # mutes and removals land while the label checks queue.
             await author_is_staff()
             early_hits = len(hits)
-            await on_deterministic(
-                facts,
-                decide(
-                    hits,
-                    refusals=await self._refusals(
-                        facts, hits, author_refusal, refusal_known, extra_roles
-                    ),
+            early = decide(
+                hits,
+                refusals=await self._refusals(
+                    facts, hits, author_refusal, refusal_known, extra_roles
                 ),
-                key,
             )
-        await held.take()
-
-        # 2. Rules that need labels, and what they read first.
+            if (
+                judge_labels
+                and scam_candidate
+                and facts.images
+                and author_refusal is None
+                and _deletes(early, facts.message_id)
+            ):
+                # The CDN stops serving a deleted message's files: the scam
+                # check's images are loaded before the removal, or it is blind.
+                preloaded = await self.classifier.preload(facts.attachments)
+            await on_deterministic(facts, early, key)
         earlier_posts = self.recent.read(facts.guild_id, facts.author_id, now)
         if not facts.is_edit:
             self.recent.record(
@@ -366,18 +380,35 @@ class Coordinator:
                 facts.author_id,
                 RecentPost(facts.channel_id, facts.message_id, now, key),
             )
+        if not judge_labels:
+            # Past the queue: the deterministic rules only, and no slot taken
+            # (a raid must not fill the backlog waiting for one).
+            if hits and not refusal_known:
+                await author_is_staff()
+            decision = decide(
+                hits,
+                refusals=await self._refusals(
+                    facts, hits, author_refusal, refusal_known, extra_roles
+                ),
+                review=review,
+            )
+            return Evaluation(
+                facts=facts,
+                policy=policy,
+                decision=decision,
+                classifier=ClassifierResult(),
+                latency_ms=int((time.monotonic() - started) * 1000),
+                key=key,
+                remaining=decide([], refusals={}) if early_hits else None,
+            )
+        await held.take()
+
+        # 2. Rules that need labels, and what they read first.
         scam_review = None
         history = None
         known_copy = False
         escalated = False
-        if (
-            judge_labels
-            and policy.scam_gate
-            and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
-            and not facts.is_edit
-            and rules.scam_gate_content(facts)
-            and not await author_is_staff()
-        ):
+        if scam_candidate and not await author_is_staff():
             history = await self._author_history(facts, now_dt, review)
             known_copy = self.verdict_cache.known(
                 facts.guild_id, facts.author_id, key, now
@@ -387,9 +418,6 @@ class Coordinator:
             high_signal = rules.high_signal_reasons(
                 facts,
                 metrics=spam_obs.metrics if spam_obs is not None else None,
-                scam_link_domains=policy.spam.scam_link_domains
-                if policy.spam is not None
-                else (),
                 suspect=rules.hold_reasons(
                     suspect, rules.scam_risky_author(facts, history, now_dt)
                 ),
@@ -410,12 +438,28 @@ class Coordinator:
                 now=now_dt,
                 known_copy=known_copy,
             )
+        claimed = None
+        if scam_review is not None:
+            # Claimed here, with nothing awaited since ``known`` and
+            # ``escalates`` read the cache: a post and its copy cannot both
+            # miss each other, and a post decided later sees its escalated
+            # copy's check (the one-sanction wait, re-review item 2).
+            claimed = self.verdict_cache.claim(
+                facts.guild_id,
+                facts.author_id,
+                key,
+                now,
+                reasons=scam_review.high_signal,
+                replace=escalated,
+            )
+            if claimed[0]:
+                # Copies waiting on this check get no answer if it never runs.
+                stack.callback(VerdictCache.settle, claimed[1], {})
 
         ring_pending = None
         ring = policy.ring
         if (
-            judge_labels
-            and ring is not None
+            ring is not None
             and not facts.is_edit
             and not facts.author_is_bot
             and (
@@ -528,15 +572,8 @@ class Coordinator:
         labels: set[str] = set()
         reused: dict[str, LabelVerdict] = {}
         first_asker = None
-        if scam_review is not None:
-            first, future = self.verdict_cache.claim(
-                facts.guild_id,
-                facts.author_id,
-                key,
-                now,
-                reasons=scam_review.high_signal,
-                replace=escalated,
-            )
+        if scam_review is not None and claimed is not None:
+            first, future = claimed
             if first:
                 first_asker = future
                 labels |= scam_review.labels
@@ -568,6 +605,7 @@ class Coordinator:
             or bool(labels & {SCAM, ABUSE}),
             sampled_images=_image_sample(facts, scam_review),
             acting=policy.acting,
+            preloaded_images=preloaded,
         )
         try:
             result = await self.classifier.classify(request)
@@ -599,6 +637,9 @@ class Coordinator:
                 + tuple(post for post in later if post.message_id not in known),
             )
             scam_hits, scam_outcome, lines = scam_review.resolve(verdicts)
+            scam_hits = await self._one_sanction(
+                facts, key, scam_hits, first_asker, now
+            )
             hits += scam_hits
             review += lines
         if isinstance(ring_pending, rules.RingSweep):
@@ -699,6 +740,46 @@ class Coordinator:
             remaining=remaining,
         )
 
+    async def _one_sanction(
+        self,
+        facts: MessageFacts,
+        key: str,
+        scam_hits: list[RuleHit],
+        asked: asyncio.Future | None,
+        now: float,
+    ) -> list[RuleHit]:
+        """The ``scam:{key}`` claim: a post and its copies are sanctioned once,
+        with the strongest sanction (#310 re-review item 2).
+
+        A post whose escalated copy is still being checked waits for that
+        check: the copy, held and judged on every image, decides the
+        sanction when it too is a violation, so the post's weaker one is
+        not given first."""
+        sanctions = [hit.sanction for hit in scam_hits if hit.sanction is not None]
+        if not sanctions:
+            return scam_hits
+        newer = (
+            self.verdict_cache.newer(facts.guild_id, facts.author_id, key, asked)
+            if asked is not None
+            else None
+        )
+        if newer is not None:
+            try:
+                theirs = await asyncio.wait_for(
+                    asyncio.shield(newer), self.classifier.deadline
+                )
+            except TimeoutError:
+                theirs = {}
+            if any(verdict.yes for verdict in theirs.values()):
+                return rules.without_sanction(
+                    scam_hits, ", sanctioned once with its held copy"
+                )
+        if self.sanctions.claim(
+            facts.guild_id, facts.author_id, key, sanctions[0], now
+        ):
+            return scam_hits
+        return rules.without_sanction(scam_hits, ", already sanctioned for this post")
+
     async def _refusals(
         self,
         facts: MessageFacts,
@@ -741,6 +822,15 @@ def _image_sample(facts: MessageFacts, review: rules.ScamReview | None) -> int |
     ):
         return None
     return SAMPLED_IMAGES
+
+
+def _deletes(decision, message_id: str) -> bool:
+    """Whether ``decision`` removes this message."""
+    return any(
+        item.message_id == message_id
+        for target in decision.targets.values()
+        for item in target.cleanup
+    )
 
 
 def _ring_alias(guild_id: str, channel_id: str, ad_message_id: str) -> str:

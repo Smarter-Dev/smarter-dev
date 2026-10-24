@@ -158,6 +158,10 @@ class _Hold:
     channel_id: str
     incident_id: UUID | None
     noticed: bool
+    #: Messages held under this post's claim whose decision is still out (a
+    #: post and its escalated copy). Only the last one releases the claim and
+    #: closes the notice: an earlier "clean" must not lift a copy's hold.
+    pending: int = 0
 
 
 class Executor:
@@ -259,6 +263,7 @@ class Executor:
             if hold is None:
                 hold = _Hold(facts.channel_id, result.incident_id, False)
                 self._holds[hold_key] = hold
+            hold.pending += 1
             # One notice per post, where the hold was first placed (a copy
             # finds the hold already in place: covered, not confirmed).
             if (
@@ -290,7 +295,13 @@ class Executor:
         )
 
     async def _close_unfinished(
-        self, facts: MessageFacts, key: str, policy: GuildPolicy, cause: str
+        self,
+        facts: MessageFacts,
+        key: str,
+        policy: GuildPolicy,
+        cause: str,
+        *,
+        counted: bool = False,
     ) -> None:
         """A hold whose decision did not finish: a line for moderators and a
         closing notice, then the hold is forgotten. Never raises. It runs
@@ -298,7 +309,7 @@ class Executor:
         process already posted."""
         hold_key = (facts.guild_id, facts.author_id, key)
         hold = self._holds.get(hold_key)
-        if hold is None:
+        if hold is None or (not counted and self._others_pending(hold)):
             return
         try:
             gateway = self._gateway_for(policy)
@@ -359,8 +370,11 @@ class Executor:
             return
         facts = evaluation.facts
         hold_key = (facts.guild_id, facts.author_id, evaluation.key)
-        hold = self._holds.pop(hold_key, None)
-        if hold is None or not hold.noticed:
+        hold = self._holds.get(hold_key)
+        if hold is None or self._others_pending(hold):
+            return
+        del self._holds[hold_key]
+        if not hold.noticed:
             return
         try:
             await self.messenger.post(
@@ -394,6 +408,11 @@ class Executor:
         # waiting on the post's verdict, must not close it as "incomplete").
         hold_key = (facts.guild_id, facts.author_id, evaluation.key)
         hold = self._holds.get(hold_key) if provisional is not None else None
+        if hold is not None and self._others_pending(hold):
+            # Another message held under the same claim is still being
+            # decided: it releases the hold and closes the notice.
+            result, _ = await self._execute(evaluation, None, last=False)
+            return result
         closed = False
         try:
             result, closed = await self._execute(evaluation, hold)
@@ -409,12 +428,21 @@ class Executor:
                         evaluation.key,
                         policy,
                         "stopped before its decision was carried out",
+                        counted=True,
                     )
 
+    @staticmethod
+    def _others_pending(hold: _Hold) -> bool:
+        """Count one held message's decision as done; whether others remain."""
+        hold.pending -= 1
+        return hold.pending > 0
+
     async def _execute(
-        self, evaluation: Evaluation, hold: _Hold | None
+        self, evaluation: Evaluation, hold: _Hold | None, *, last: bool = True
     ) -> tuple[gw.ActResult | None, bool]:
-        """The decision, and whether its hold (if any) got its closing line."""
+        """The decision, and whether its hold (if any) got its closing line.
+        ``last=False``: other held messages share the claim; it is not
+        released here."""
         facts = evaluation.facts
         policy = evaluation.policy
         decision = evaluation.to_carry_out
@@ -489,7 +517,7 @@ class Executor:
                         target_is_bot=False,
                     )
                 )
-        if provisional is not None and provisional.resolution == RELEASED:
+        if provisional is not None and provisional.resolution == RELEASED and last:
             # Ends this post's claim only: a moderator's or a longer
             # automated timeout stays.
             proposals.append(

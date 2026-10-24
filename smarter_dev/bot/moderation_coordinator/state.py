@@ -23,6 +23,7 @@ from dataclasses import replace
 from smarter_dev.bot.moderation_coordinator.model import LabelVerdict
 from smarter_dev.bot.moderation_coordinator.model import MessageFacts
 from smarter_dev.bot.moderation_coordinator.model import RecentPost
+from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.rules import RingIncident
 from smarter_dev.bot.spam_engine import NO_SPAM_ACTION
 from smarter_dev.bot.spam_engine import SPAM_ACTION_MUTE
@@ -43,6 +44,8 @@ RECENT_POST_SECONDS = 120.0
 MAX_RECENT_POSTS = 30
 #: How long a verdict on one post is reused for its copies.
 VERDICT_TTL_SECONDS = 120.0
+#: How long a post's scam sanction is remembered against its copies.
+SANCTION_TTL_SECONDS = 600.0
 MAX_TRACKED_AUTHORS = 4096
 
 
@@ -302,15 +305,61 @@ class VerdictCache:
         now = time.time() if now is None else now
         self._prune(now)
         entry = self._entries.get((guild_id, author_id, key))
-        if entry is None or not set(reasons) - entry[2]:
-            return False
-        future = entry[1]
-        if future.done() and not future.cancelled():
-            if any(verdict.yes for verdict in future.result().values()):
-                return False
-        return True
+        return entry is not None and _adds_to(entry, reasons)
+
+    def newer(
+        self, guild_id: str, author_id: str, key: str, future: asyncio.Future
+    ) -> asyncio.Future | None:
+        """The check an escalated copy started after ``future``'s, if any."""
+        entry = self._entries.get((guild_id, author_id, key))
+        if entry is None or entry[1] is future:
+            return None
+        return entry[1]
 
     @staticmethod
     def settle(future: asyncio.Future, verdicts: dict[str, LabelVerdict]) -> None:
         if not future.done():
             future.set_result(verdicts)
+
+
+def _adds_to(entry: tuple[float, asyncio.Future, frozenset[str]], reasons) -> bool:
+    """Whether ``reasons`` go past what ``entry``'s check was asked under,
+    and that check did not already find a violation (which covers copies)."""
+    if not set(reasons) - entry[2]:
+        return False
+    future = entry[1]
+    if future.done() and not future.cancelled():
+        if any(verdict.yes for verdict in future.result().values()):
+            return False
+    return True
+
+
+class ScamSanctions:
+    """One scam sanction per post and its copies (the ``scam:{key}`` claim).
+
+    An original and its escalated copy are separate messages, so separate
+    incidents; both judged a violation would each warn or time out. The
+    first sanction is recorded here and a later one applies only when it is
+    stronger (a warn, then a held copy's timeout)."""
+
+    def __init__(self) -> None:
+        self._given: dict[tuple[str, str, str], tuple[float, Sanction]] = {}
+
+    def claim(
+        self,
+        guild_id: str,
+        author_id: str,
+        key: str,
+        sanction: Sanction,
+        now: float | None = None,
+    ) -> bool:
+        """Whether ``sanction`` applies; True records it as the post's."""
+        now = time.time() if now is None else now
+        for stale, (at, _) in list(self._given.items()):
+            if now - at > SANCTION_TTL_SECONDS:
+                del self._given[stale]
+        given = self._given.get((guild_id, author_id, key))
+        if given is not None and not sanction.stronger_than(given[1]):
+            return False
+        self._given[(guild_id, author_id, key)] = (now, sanction)
+        return True

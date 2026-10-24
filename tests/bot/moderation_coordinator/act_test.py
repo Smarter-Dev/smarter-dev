@@ -9,6 +9,7 @@ what moderators saw, from the incident's entries.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from dataclasses import field
 from dataclasses import replace
@@ -156,6 +157,8 @@ def harness(case: ReplayCase, *, extra_messages=(), owner_generation: int = 1):
         jev_model=case.jev(case.answers, calls, case.answers_by_text),
         deadline=case.deadline,
         clock=lambda: clock[0],
+        fetch_image=case.fetch_image,
+        choose_images=case.choose_images,
     )
 
     async def loader(guild_id):
@@ -979,3 +982,219 @@ async def test_the_spam_mute_lands_before_the_classifier_answers():
     assert h.calls.total == 0  # no review has answered yet
     assert h.port.count("timeout", flooder.id) >= 1
     await h.shadow.drain()
+
+
+# -- the re-review of a326953a (#310) -----------------------------------------
+
+
+def _copy_in(facts, channel_id: str, seconds: float = 2):
+    """The same post in another channel: the same files (so the same content
+    hash), served from the copy's own URLs (``/copy/``)."""
+    return replace(
+        facts,
+        message_id=str(int(facts.message_id) + 1),
+        channel_id=channel_id,
+        posted_at=facts.posted_at + seconds,
+        attachments=tuple(
+            replace(item, url=item.url.replace("/1/2/", "/1/copy/"))
+            for item in facts.attachments
+        ),
+    )
+
+
+def _shots(count: int, prefix: str = "shot"):
+    from smarter_dev.bot.moderation_coordinator.model import Attachment
+
+    return tuple(
+        Attachment(
+            f"{prefix}{i}.png",
+            "image/png",
+            20_000,
+            f"https://cdn.discordapp.com/attachments/1/2/{prefix}{i}.png",
+        )
+        for i in range(count)
+    )
+
+
+async def test_an_early_deleted_message_still_shows_the_scam_check_its_images():
+    """Re-review item 1: the mass-mention removal ran before the scam check,
+    so the CDN no longer served the images, the check was blind (unknown)
+    and the new account was not banned. The images are loaded first."""
+    from smarter_dev.bot.moderation_coordinator.replay import REPLAY_PNG
+
+    newbie = Member("imgs", 96, NOW - timedelta(days=1), NOW - timedelta(hours=1))
+    post = say(newbie, "@everyone look", NOW, attachments=_shots(4))
+    holder = {}
+
+    async def fetch(url, limit):
+        if post.message_id in holder["h"].deleted():
+            raise RuntimeError("404 Not Found")  # a deleted message's file
+        return REPLAY_PNG
+
+    case = ReplayCase(
+        name="early delete with images",
+        policy=acting(policy(ring=None)),
+        messages=[post],
+        answers={SCAM: (True, 0.95), ABUSE: (False, 0.9)},
+        reads=ReplayReads(histories={newbie.id: FIRST}),
+        fetch_image=fetch,
+    )
+    h = holder["h"] = harness(case)
+    await h.judge(post)
+
+    assert h.port.calls[0][0] == "delete"  # still removed first
+    row = h.recorder.rows[0]
+    assert row.classifier["images"]["sent"] == 4
+    assert row.classifier["images"]["unseen"] == 0
+    assert h.port.count("ban", newbie.id) == 1
+
+
+async def test_an_original_and_its_escalated_copy_are_sanctioned_once():
+    """Re-review item 2: an established member's 4-image post (unheld, one
+    sampled image) and its burst copy (held, every image) both come back as
+    violations while running side by side. The post would warn and the copy
+    time out: one sanction for the post, the strongest (the copy's 24 h
+    timeout), and both messages go."""
+    member = Member("desk", 97, NOW - timedelta(days=900), NOW - timedelta(days=800))
+    first = say(member, "my desk setup", NOW, attachments=_shots(4))
+    copy = _copy_in(first, FOURTH)
+    case = ReplayCase(
+        name="original and escalated copy",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=[first, copy],
+        # The post's one-image check answers first, the copy's later: the
+        # post's warn would land before the copy's timeout.
+        haiku=_answers(post=(True, 0.05), copy=(True, 0.3)),
+        reads=ReplayReads(histories={member.id: ESTABLISHED}),
+    )
+    h = harness(case)
+    h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
+    h.shadow.submit(first)
+    await asyncio.sleep(0.05)  # the post's check is out
+    h.shadow.submit(copy)
+    await h.shadow.drain()
+
+    assert h.calls.total == 2  # the copy escalated: asked again
+    sanctions = [
+        row.decision["targets"][member.id]["sanction"] for row in h.recorder.rows
+    ]
+    assert [s["kind"] for s in sanctions if s] == [gw.TIMEOUT]
+    assert not any("has been warned" in text for _, text in h.messenger.posts)
+    untils = [c[2] for c in h.port.calls if c[0] == "timeout" and c[2] is not None]
+    assert len([u for u in untils if u - time.time() > 3600]) == 1
+    assert {first.message_id, copy.message_id} <= h.deleted()
+
+
+def _answers(*, post, copy):
+    """Haiku answering ``scam`` per message, ``(answer, seconds)``: the post
+    and its copy (told apart by the copy's file URLs, :func:`_copy_in`)."""
+    import json
+
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    def build(answers, calls, by_text):
+        async def respond(messages, info):
+            content = messages[-1].parts[-1].content
+            prompt = content if isinstance(content, str) else content[0]
+            calls.haiku.append(prompt)
+            scam, seconds = copy if "/1/copy/" in prompt else post
+            await asyncio.sleep(seconds)
+            body = {
+                "participants": {},
+                "scam": {"answer": scam, "confidence": 0.95},
+                "abuse": {"answer": False, "confidence": 0.95},
+            }
+            return ModelResponse(parts=[TextPart(json.dumps(body))])
+
+        return FunctionModel(respond, model_name="claude-haiku-5-5")
+
+    return build
+
+
+async def test_a_clean_original_does_not_lift_its_escalated_copys_hold():
+    """Re-review item 4: a held post and its held burst copy share the hold's
+    claim. The post's clean verdict released the claim while the copy was
+    still being checked; only the last decision releases it now, and the
+    copy's confirmed scam ends in its timeout with no lift before it."""
+    newbie = Member("fresh", 98, NOW - timedelta(days=30), NOW - timedelta(hours=2))
+    # A first message with four images: held (a high-risk author's images).
+    first = say(newbie, "my setup", NOW, attachments=_shots(4))
+    copy = _copy_in(first, FOURTH)
+    case = ReplayCase(
+        name="hold shared by a post and its copy",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=[first, copy],
+        haiku=_answers(post=(False, 0.05), copy=(True, 0.3)),
+        reads=ReplayReads(histories={newbie.id: FIRST}),
+    )
+    h = harness(case)
+    h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
+    h.shadow.submit(first)
+    await asyncio.sleep(0.02)
+    h.shadow.submit(copy)
+    await h.shadow.drain()
+
+    assert h.calls.total == 2
+    lifted = [c for c in h.port.calls if c[0] == "timeout" and c[2] is None]
+    assert lifted == []
+    outcomes = {
+        row.message_id: row.classifier["scam_outcome"] for row in h.recorder.rows
+    }
+    assert outcomes == {first.message_id: "clean", copy.message_id: "violation"}
+    untils = [c[2] for c in h.port.calls if c[0] == "timeout"]
+    assert untils[-1] - time.time() > 3600  # the copy's 24 h timeout stands
+    assert copy.message_id in h.deleted()
+    assert h.executor._holds == {}
+
+
+async def test_backlogged_messages_never_wait_for_a_slot(monkeypatch):
+    """Re-review item 3: a backlog message (past MAX_PENDING) still took a
+    classifier slot after its early act, so a raid could fill MAX_BACKLOG
+    waiting. With every slot taken, the backlog still finishes."""
+    from smarter_dev.bot.moderation_coordinator import shadow as shadow_module
+
+    monkeypatch.setattr(shadow_module, "MAX_PENDING", 1)
+    blocker = Member("idle", 84, NOW - timedelta(days=400), NOW - timedelta(days=300))
+    spammer = Member("raider", 85, NOW - timedelta(days=400), NOW - timedelta(days=300))
+    stuck = say(blocker, "hello", NOW)
+    case = ReplayCase(
+        name="no slots", policy=acting(policy(ring=None)), messages=[stuck]
+    )
+    h = harness(case)
+    h.port.add_member(spammer.id)
+    h.shadow._slots = asyncio.Semaphore(0)  # every slot is taken
+    waiting = h.shadow.submit(stuck)
+    start = NOW + timedelta(seconds=30)
+    backlog = []
+    for i in range(12):
+        facts = say(spammer, f"buy now {i}", start + timedelta(seconds=i * 0.3))
+        h.port.post(facts.channel_id, facts.message_id, facts.author_id, facts.content)
+        h.clock[0] = facts.posted_at
+        h.case.reads.now = facts.posted_at
+        backlog.append(h.shadow.submit(facts))
+    try:
+        await asyncio.wait_for(asyncio.gather(*backlog), 2)
+    finally:
+        waiting.cancel()
+    assert h.shadow.backlogged == 12
+    assert h.port.count("timeout", spammer.id) == 1
+    assert len(h.recorder.rows) == 12
+
+
+async def test_a_failed_decided_check_still_judges_the_message(caplog):
+    """Re-review item 7: ``recorded()`` raising (the database is down)
+    stopped all moderation. It counts as not decided, with a WARNING."""
+    post = say(PINGER, "@everyone check this", NOW)
+    case = ReplayCase(name="db down", policy=acting(policy(ring=None)), messages=[post])
+    h = harness(case)
+
+    async def down(*args):
+        raise ConnectionRefusedError
+
+    h.recorder.recorded = down
+    with caplog.at_level("WARNING"):
+        await h.judge(post)
+    assert post.message_id in h.deleted()
+    assert any("could not check whether" in r.getMessage() for r in caplog.records)

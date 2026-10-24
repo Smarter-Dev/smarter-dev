@@ -817,9 +817,7 @@ class ModerationShadow:
         try:
             policy = await self.policies.get(facts.guild_id, facts.posted_at)
             acting = self.executor is not None and policy.acting
-            if acting and await self.recorder.recorded(
-                facts.guild_id, facts.message_id, facts.revision
-            ):
+            if acting and await self._recorded(facts):
                 # A replayed event (a handover replays what the old pod may
                 # have handled): judged and acted on already. Not judged
                 # again, so no second hold either.
@@ -913,6 +911,25 @@ class ModerationShadow:
                     )
                 self._disarm_missed_mutes(evaluation, result)
         return row
+
+    async def _recorded(self, facts: MessageFacts) -> bool:
+        """Whether this revision was decided already. A failed read (the
+        database is down) counts as not decided: the message is judged, so
+        the deterministic rules still act, and the record's unique revision
+        and the gateway's dedup absorb a replay (#310 re-review item 7)."""
+        try:
+            return await self.recorder.recorded(
+                facts.guild_id, facts.message_id, facts.revision
+            )
+        except Exception as error:  # noqa: BLE001 — judged anyway
+            logger.warning(
+                "Coordinator could not check whether message %s revision %s was "
+                "decided (%s); judging it",
+                facts.message_id,
+                facts.revision,
+                type(error).__name__,
+            )
+            return False
 
     async def _budget_exhausted(self, evaluation: Evaluation) -> None:
         """The guild's daily classifier ceiling ran out: one WARNING and one

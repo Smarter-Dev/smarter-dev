@@ -337,6 +337,9 @@ class ClassifierRequest:
     #: the first :data:`MAX_IMAGES` (Zech, Oct 23: an established member's
     #: image post is checked on one image). The rest are named, not unseen.
     sampled_images: int | None = None
+    #: Images loaded before the message was deleted (:func:`preload_images`),
+    #: by attachment index: the CDN no longer serves a deleted message's files.
+    preloaded_images: Mapping[int, bytes | None] | None = None
 
 
 @dataclass(slots=True)
@@ -468,12 +471,38 @@ class LoadedImages:
     counts: ImageCounts = ImageCounts()
 
 
+async def _load_one(item: Attachment, fetch: ImageFetcher) -> bytes | None:
+    """One image's bytes, or None when it cannot be had in time."""
+    if item.size is not None and item.size > MAX_IMAGE_BYTES:
+        return None
+    try:
+        async with asyncio.timeout(IMAGE_FETCH_SECONDS):
+            return await fetch(item.url or "", MAX_IMAGE_BYTES)
+    except Exception as error:  # noqa: BLE001 — unseen, never a retry
+        # The URL names the file; log only what went wrong.
+        logger.info("Moderation classifier image not loaded: %s", type(error).__name__)
+        return None
+
+
+async def preload_images(
+    attachments: Sequence[Attachment], fetch: ImageFetcher
+) -> dict[int, bytes | None]:
+    """The first :data:`MAX_IMAGES` images' bytes, by attachment index, for a
+    message about to be deleted before its check (#310 re-review item 1)."""
+    images = [(index, item) for index, item in enumerate(attachments) if item.is_image][
+        :MAX_IMAGES
+    ]
+    loaded = await asyncio.gather(*(_load_one(item, fetch) for _, item in images))
+    return {index: data for (index, _), data in zip(images, loaded, strict=True)}
+
+
 async def load_images(
     attachments: Sequence[Attachment],
     fetch: ImageFetcher,
     *,
     sample: int | None = None,
     choose: Callable[[list, int], list] = random.sample,
+    preloaded: Mapping[int, bytes | None] | None = None,
 ) -> LoadedImages:
     """The first :data:`MAX_IMAGES` images (or ``sample`` of them chosen at
     random), loaded in parallel and checked.
@@ -481,12 +510,19 @@ async def load_images(
     An image is what its bytes say, not its name or declared type; one that
     cannot be loaded within :data:`IMAGE_FETCH_SECONDS` is unseen. An image
     left out of a sample is only named: not seen, and not unseen either.
+    ``preloaded`` images (the message is gone) are not fetched again, and a
+    sample is drawn from them only.
     """
     images = [(index, item) for index, item in enumerate(attachments) if item.is_image]
     notes: dict[int, str] = {}
     not_sampled = 0
     if sample is not None and len(images) > sample:
-        chosen = {index for index, _ in choose(images, sample)}
+        pool = (
+            images
+            if preloaded is None
+            else [(index, item) for index, item in images if index in preloaded]
+        )
+        chosen = {index for index, _ in choose(pool, min(sample, len(pool)))}
         shown = [(index, item) for index, item in images if index in chosen]
         for index, _ in images:
             if index not in chosen:
@@ -499,20 +535,12 @@ async def load_images(
         }
     unseen = 0
 
-    async def one(item: Attachment) -> bytes | None:
-        if item.size is not None and item.size > MAX_IMAGE_BYTES:
-            return None
-        try:
-            async with asyncio.timeout(IMAGE_FETCH_SECONDS):
-                return await fetch(item.url or "", MAX_IMAGE_BYTES)
-        except Exception as error:  # noqa: BLE001 — unseen, never a retry
-            # The URL names the file; log only what went wrong.
-            logger.info(
-                "Moderation classifier image not loaded: %s", type(error).__name__
-            )
-            return None
+    async def one(index: int, item: Attachment) -> bytes | None:
+        if preloaded is not None and index in preloaded:
+            return preloaded[index]
+        return await _load_one(item, fetch)
 
-    loaded = await asyncio.gather(*(one(item) for _, item in shown))
+    loaded = await asyncio.gather(*(one(index, item) for index, item in shown))
     contents = []
     for (index, _), data in zip(shown, loaded, strict=True):
         media_type = image_type(data) if data else None
@@ -915,6 +943,12 @@ class ModerationClassifier:
             setattr(self, attr, model)
         return model
 
+    async def preload(
+        self, attachments: Sequence[Attachment]
+    ) -> dict[int, bytes | None]:
+        """:func:`preload_images` with this classifier's fetcher."""
+        return await preload_images(attachments, self.fetch_image)
+
     def budget_refusal(
         self, guild_id: str, author_id: str | None, *, acting: bool = False
     ) -> str | None:
@@ -952,6 +986,7 @@ class ModerationClassifier:
                             self.fetch_image,
                             sample=request.sampled_images,
                             choose=self.choose_images,
+                            preloaded=request.preloaded_images,
                         )
                         result.images = images.counts
                         verdicts = await self._ask_haiku(model, request, images)
