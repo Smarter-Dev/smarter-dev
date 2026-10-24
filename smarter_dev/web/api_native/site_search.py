@@ -15,7 +15,6 @@ by an opaque key it derives; Python never sees the visitor's address.
 
 from __future__ import annotations
 
-import re
 from typing import Any
 from uuid import UUID
 
@@ -54,9 +53,6 @@ from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import structured as site_snapshot
 
 SITE_SEARCH_GUARDS = [*SITE_API_GUARDS, Permission("site-search")]
-# The site's keys: SHA-256 of a chat turn's id, so one per turn and never
-# reused. The dashboard's own keys can recur for the same text; never these.
-SITE_KEY = re.compile(r"^[0-9a-f]{64}$")
 
 
 class StartSearch(BaseModel):
@@ -287,14 +283,10 @@ class SiteSearchController(Controller):
     async def remove(
         self, db_session: AsyncSession, user_id: str, run_id: str
     ) -> dict[str, str]:
-        # Lock order (dashboard_controller.create_search): the users row,
-        # then the run and its key's mark, committed with the delete.
-        user = await _member(db_session, user_id, lock=True)
+        # delete_search takes the users row, re-reads the run under it and
+        # marks a site key forgotten with the delete.
+        user = await _member(db_session, user_id)
         run = await _owned(db_session, user, run_id)
-        if SITE_KEY.match(run.submission_key):
-            # A site turn's key never names another search: forgotten, so a
-            # start retried with it (a lost reply) can't make the run again.
-            await mark_search_key_forgotten(db_session, user.id, run.submission_key)
         try:
             await delete_search(db_session, run)
         except StillRunning:

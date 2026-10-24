@@ -6,6 +6,7 @@ storage, the worker hand-off and Skrift's settings are stood in for.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC
@@ -13,6 +14,7 @@ from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -47,6 +49,8 @@ from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
+from smarter_dev.web.user_content import delete_all_searches
+from smarter_dev.web.user_content import delete_search
 
 _WORDS = "how do I size a connection pool for a burst of webhooks"
 
@@ -936,3 +940,42 @@ async def test_the_security_page_deletes_all_of_a_kind_and_says_what_it_kept(
         "Deleted 2 searches. 1 still being answered was kept; delete it once it finishes."
     ]
     assert await _count(db_session, WebSearchRun) == 1
+
+
+@pytest.mark.asyncio
+async def test_every_delete_of_a_site_search_forgets_its_key(db_session, monkeypatch):
+    """The dashboard's delete, its delete-all and the site's go through
+    delete_search: a site key (64 hex, one per chat turn) is marked
+    forgotten with the delete, so a start retried with it makes nothing; a
+    dashboard key, which can recur, is not."""
+    monkeypatch.setattr(dashboard_controller, "dispatch_one", AsyncMock())
+    user = await _user(db_session)
+    site_key = hashlib.sha256(uuid4().bytes).hexdigest()
+    dashboard_key = uuid4().hex
+    runs = []
+    for key in (site_key, dashboard_key):
+        run = await dashboard_controller.create_search(
+            db_session, user.id, "latest Python release notes", key
+        )
+        run.status = "complete"
+        runs.append(run)
+    await db_session.commit()
+    await delete_search(db_session, runs[0])
+    result = await delete_all_searches(db_session, user.id)
+    assert result.deleted == 1
+    marks = (
+        await db_session.scalars(
+            select(WebSearchForgottenKey.submission_key).where(
+                WebSearchForgottenKey.owner_user_id == user.id
+            )
+        )
+    ).all()
+    assert marks == [site_key]
+    with pytest.raises(dashboard_controller.SearchKeyForgotten):
+        await dashboard_controller.create_search(
+            db_session, user.id, "latest Python release notes", site_key
+        )
+    again = await dashboard_controller.create_search(
+        db_session, user.id, "latest Python release notes", dashboard_key
+    )
+    assert again.status == "queued"

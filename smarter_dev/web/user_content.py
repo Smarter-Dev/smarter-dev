@@ -29,6 +29,7 @@ so a run its worker abandoned never blocks a delete.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -319,9 +320,32 @@ async def mark_search_key_forgotten(
         await session.flush()
 
 
+# The site's keys: SHA-256 of a chat turn's id, so one per turn and never
+# reused. The dashboard's own keys can recur for the same text; never these.
+SITE_SEARCH_KEY = re.compile(r"^[0-9a-f]{64}$")
+
+
 async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
+    """Delete one finished search, its dispatches and, for a site key, mark
+    the key forgotten, so a start retried with it (a lost reply) can't make
+    the run again. Every delete of one run comes here: the dashboard's, the
+    site's by id or by key, and each run of a delete-all, in a transaction
+    of its own. Lock order (``dashboard_controller.create_search``): the
+    owner's users row first, then the run, re-read under it, then its mark,
+    dispatches and row, committed together."""
+    owner_id, run_id = run.owner_user_id, run.id
+    await session.execute(select(User.id).where(User.id == owner_id).with_for_update())
+    run = await session.scalar(
+        select(WebSearchRun)
+        .where(WebSearchRun.id == run_id)
+        .execution_options(populate_existing=True)
+    )
+    if run is None:
+        return
     if run.status not in FINISHED_SEARCH_STATUSES and _recent(run.updated_at):
         raise StillRunning
+    if SITE_SEARCH_KEY.match(run.submission_key):
+        await mark_search_key_forgotten(session, owner_id, run.submission_key)
     await forget_dispatches(session, "web_search.run", [run.id])
     await session.delete(run)
     await session.commit()

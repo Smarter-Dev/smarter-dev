@@ -232,3 +232,50 @@ async def test_the_account_purge_and_a_forget_never_deadlock(
     assert await _count(maker, WebSearchForgottenKey, owner) == 0
     async with maker() as s:
         assert await s.get(User, owner) is None
+
+
+async def test_a_delete_holding_the_lock_refuses_a_start_with_the_site_key(
+    db, monkeypatch
+):
+    """The dashboard's own delete of a site run (delete_search) marks the
+    key under the users-row lock: a site start retried with that key waits
+    for the delete, then gets 410, and no run is made again."""
+    maker, client = db
+    owner = await _member(maker)
+    key = "ab" * 32
+    async with maker() as s:
+        run = await dashboard_controller.create_search(s, owner, "a request", key)
+        await s.execute(
+            update(WebSearchRun)
+            .where(WebSearchRun.id == run.id)
+            .values(status="complete")
+        )
+        await s.commit()
+    held = asyncio.Event()
+    real = user_content.forget_dispatches
+
+    async def holding(*args, **kwargs):
+        held.set()
+        await asyncio.sleep(HOLD)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(user_content, "forget_dispatches", holding)
+
+    async def remove():
+        async with maker() as s:
+            found = await s.get(WebSearchRun, run.id)
+            await user_content.delete_search(s, found)
+
+    removed = asyncio.create_task(remove())
+    await held.wait()
+    started = asyncio.create_task(
+        client.post(
+            f"/api/site/search/users/{owner}/runs",
+            json={"request": "a request", "key": key},
+        )
+    )
+    await _waiting(started)
+    await removed
+    assert (await started).status_code == 410
+    assert await _count(maker, WebSearchRun, owner) == 0
+    assert await _count(maker, WebSearchForgottenKey, owner) == 1
