@@ -12,7 +12,6 @@ from typing import Annotated
 
 from litestar import Controller
 from litestar import post
-from litestar.middleware import DefineMiddleware
 from litestar.status_codes import HTTP_200_OK
 from pydantic import BaseModel
 from pydantic import ConfigDict
@@ -22,7 +21,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
-from smarter_dev.web.api_native.rate_limiting import MultiTierRateLimitMiddleware
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
 from smarter_dev.web.models import ResourceSource
 from smarter_dev.web.sdanswer import _source_to_article_card
@@ -50,7 +48,10 @@ def _source(src: ResourceSource) -> dict[str, str]:
 class SiteResourcesController(Controller):
     path = "/api/site/resources"
     exception_handlers = BOT_API_EXCEPTION_HANDLERS
-    middleware = [DefineMiddleware(MultiTierRateLimitMiddleware)]
+    # No per-key rate limiter, as the billing, search, identity and privacy
+    # site routes: its bucket is shared with the site memory routes, and the
+    # Worker calls this on every chat page load. The read is a small exact match.
+
     # As the other site routes: service responses stay out of shared caches.
     response_headers = {"Cache-Control": "private, no-store"}
 

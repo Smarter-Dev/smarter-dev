@@ -55,14 +55,6 @@ async def site_client(db_session, monkeypatch):
         ),
     )
     monkeypatch.setattr(auth, "get_db_session_context", session_factory)
-    monkeypatch.setattr(rate_limiting, "get_db_session_context", session_factory)
-    monkeypatch.setattr(
-        rate_limiting,
-        "check_rate_limits",
-        AsyncMock(
-            return_value=rate_limiting.RateLimitDecision(allowed=True, headers={})
-        ),
-    )
     app = Litestar(
         route_handlers=[SiteResourcesController],
         plugins=[PydanticPlugin()],
@@ -125,6 +117,21 @@ async def test_known_urls_in_request_order_deduped(site_client, db_session):
         ]
     }
     assert response.headers["cache-control"] == "private, no-store"
+
+
+async def test_never_consults_the_per_key_rate_limiter(site_client, monkeypatch):
+    # The limiter's bucket is per API key and shared with the site memory
+    # routes; card lookups must never spend it.
+    resolve = AsyncMock(side_effect=AssertionError("rate limiter consulted"))
+    check = AsyncMock(side_effect=AssertionError("rate limiter consulted"))
+    monkeypatch.setattr(rate_limiting, "_resolve_rate_limited_key", resolve)
+    monkeypatch.setattr(rate_limiting, "check_rate_limits", check)
+    client, _ = site_client
+    response = await client.post(URL, json={"urls": ["https://x.example/"]})
+    assert response.status_code == 200, response.text
+    assert not any(name.startswith("x-ratelimit") for name in response.headers)
+    resolve.assert_not_awaited()
+    check.assert_not_awaited()
 
 
 async def test_unknown_urls_only_return_empty(site_client):
@@ -262,14 +269,6 @@ async def test_real_skrift_site_key_authorization(test_engine, monkeypatch):
             yield session
 
     monkeypatch.setattr(auth, "get_db_session_context", maker)
-    monkeypatch.setattr(rate_limiting, "get_db_session_context", maker)
-    monkeypatch.setattr(
-        rate_limiting,
-        "check_rate_limits",
-        AsyncMock(
-            return_value=rate_limiting.RateLimitDecision(allowed=True, headers={})
-        ),
-    )
     app = Litestar(
         route_handlers=[SiteResourcesController],
         plugins=[PydanticPlugin()],

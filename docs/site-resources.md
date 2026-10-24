@@ -8,8 +8,12 @@ answer cites, it returns the catalog rows `sdanswer` reads
 
 Every route requires the site service principal (`principal_type="service"`,
 `service_name="site"`) with an explicit **site-resources** scope, and the
-owner's `site-service` role. A browser never calls these routes. Calls go
-through the same per-key rate limits as the site memory routes.
+owner's `site-service` role. A browser never calls these routes.
+
+The route deliberately has no per-key rate limit, so card lookups never share
+(or exhaust) the bucket the site memory routes use for the same key. The
+Worker bounds its own calls instead: one batched lookup per page load, at most
+5 batches of 100 URLs, and a per-visitor limit on the public share page.
 
 | Route | Body / result |
 | ----- | ------------- |
