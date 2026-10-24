@@ -47,10 +47,13 @@ async def test_sleeping_does_not_hold_a_worker():
 
 
 async def test_a_large_allocation_stops_at_the_memory_limit():
-    text, _ = await _run("x = 'a' * (300 * 1024 * 1024)\nlen(x)")
+    # 264 MiB: over chat's 256 MiB cap, under what the default budget could
+    # hold, so it is chat's own cap that stops it.
+    text, _ = await _run("x = 'a' * (264 * 1024 * 1024)\nlen(x)")
     assert text.startswith(
         "error: MontyRuntimeError: MemoryError: memory limit exceeded"
     ), text
+    assert text.endswith(f"> {256 * MIB} bytes"), text
 
 
 async def test_a_growing_list_stops_at_the_memory_limit():
@@ -257,7 +260,11 @@ async def test_a_cancelled_wait_gives_its_place_back():
         assert budget.used == 100
 
 
-async def test_a_worker_exits_when_its_run_ends():
-    # A worker that peaked at the memory limit must not linger holding it.
+async def test_a_worker_exits_when_its_run_ends(monkeypatch):
+    # A worker that peaked at the memory limit must not linger holding it:
+    # its run's own pool closes with it, so nothing has to be killed.
+    killed = []
+    monkeypatch.setattr(code_sandbox._os, "kill", lambda *args: killed.append(args))
     await _run("x = [0] * 10_000_000\nlen(x)")
     assert _monty_children() == {}
+    assert killed == []

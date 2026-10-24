@@ -7,6 +7,7 @@ was running, the sandbox stops. Real Monty, fakeredis, one event loop.
 """
 
 import asyncio
+import contextlib
 import os
 from pathlib import Path
 from types import SimpleNamespace
@@ -123,6 +124,19 @@ async def test_a_run_given_up_while_it_waits_never_starts(
 
 async def test_a_run_given_up_while_it_runs_is_stopped(redis, started, monkeypatch):
     monkeypatch.setattr(site_code, "HEARTBEAT_SECONDS", 0.1)
+    # The workers still alive at the moment each run gives its place back.
+    at_release: list[list[int]] = []
+    reserve = code_sandbox._Budget.reserve
+
+    @contextlib.asynccontextmanager
+    async def watched(self, size):
+        async with reserve(self, size):
+            try:
+                yield
+            finally:
+                at_release.append(_live_monty_children())
+
+    monkeypatch.setattr(code_sandbox._Budget, "reserve", watched)
     run_id, job = await _job(redis, "while True:\n    pass\n")
     for _ in range(100):
         await asyncio.sleep(0.02)
@@ -138,7 +152,7 @@ async def test_a_run_given_up_while_it_runs_is_stopped(redis, started, monkeypat
     # place given back only once its worker had exited.
     assert loop.time() - began < 2
     assert code_sandbox._budget().used == 0
-    assert _live_monty_children() == []
+    assert at_release == [[]]
     assert await redis.llen(site_code.result_key(run_id)) == 0
 
 
