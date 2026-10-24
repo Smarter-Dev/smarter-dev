@@ -201,10 +201,17 @@ def test_scam_gate_needs_content_and_a_reason_to_look():
     moderated = AuthorHistory(
         is_first_message=False,
         days_since_last_message=0,
-        actions=(PastAction("warn", NOW - timedelta(days=10)),),
+        actions=(PastAction("timeout", NOW - timedelta(days=10)),),
     )
     review, _ = _review(REGULAR, "airdrop", history=moderated)
     assert review is not None and review.repeat
+    # A warning is a day of risk only (Zech, Oct 24).
+    warned = AuthorHistory(
+        is_first_message=False,
+        days_since_last_message=0,
+        actions=(PastAction("warn", NOW - timedelta(days=10)),),
+    )
+    assert _review(REGULAR, "airdrop", history=warned)[0] is None
     images = tuple(Attachment(f"{i}.png", "image/png") for i in range(4))
     review, _ = _review(REGULAR, "", attachments=images)
     assert review.suspect == ("four or more images",)

@@ -323,24 +323,27 @@ async def test_the_same_screenshots_from_a_new_joiner_are_held():
     assert evaluation.decision.provisional is not None
 
 
-async def test_the_same_screenshots_from_a_member_warned_10_days_ago_are_held():
+@pytest.mark.parametrize(("action", "held"), [("timeout", True), ("warn", False)])
+async def test_the_same_screenshots_from_a_member_moderated_10_days_ago(action, held):
+    """Zech, Oct 24: a timeout 10 days ago still makes the author high risk
+    (held on every image); a warning 10 days ago no longer does (24 h)."""
     from datetime import UTC
     from datetime import datetime
 
     from smarter_dev.bot.moderation_coordinator.model import PastAction
 
-    warned = AuthorHistory(
+    moderated = AuthorHistory(
         is_first_message=False,
         days_since_last_message=0,
         actions=(
             PastAction(
-                "warn",
+                action,
                 datetime.fromtimestamp(NOW.timestamp(), UTC) - timedelta(days=10),
             ),
         ),
     )
-    evaluation, _ = await _image_post(warned)
-    assert evaluation.decision.provisional is not None
+    evaluation, _ = await _image_post(moderated)
+    assert (evaluation.decision.provisional is not None) is held
 
 
 async def test_a_burst_still_holds_an_established_member():
@@ -534,7 +537,7 @@ async def test_a_copy_of_a_confirmed_scam_is_removed_but_not_punished_again():
         days_since_last_message=0,
         actions=(
             PastAction(
-                "warn",
+                "timeout",
                 datetime.fromtimestamp(NOW.timestamp(), UTC) - timedelta(days=10),
             ),
         ),
@@ -561,15 +564,23 @@ async def test_a_copy_of_a_confirmed_scam_is_removed_but_not_punished_again():
     assert posts[1].message_id in {item.message_id for item in copy.cleanup}
 
 
-# -- a removed @everyone makes the author high risk for a day (#310 item 10b) --
+# -- a warning makes the author high risk for a day (Zech, Oct 24) ------------
 
 
 def _pinged(hours_ago: float) -> AuthorHistory:
+    """Warned (as for a removed @everyone) ``hours_ago``."""
     return AuthorHistory(
         is_first_message=False,
         days_since_last_message=0,
-        pinged_everyone_at=datetime.fromtimestamp(NOW.timestamp(), UTC)
-        - timedelta(hours=hours_ago),
+        actions=(
+            PastAction(
+                "warn",
+                datetime.fromtimestamp(NOW.timestamp(), UTC)
+                - timedelta(hours=hours_ago),
+                "@everyone and @here pings aren't allowed in this server, "
+                "so your message was removed.",
+            ),
+        ),
     )
 
 

@@ -42,16 +42,13 @@ import logging
 import os
 import time
 from collections.abc import Iterable
-from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from typing import Any
 
 import hikari
-from sqlalchemy import and_
 from sqlalchemy import func
-from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -72,9 +69,6 @@ from smarter_dev.bot.moderation_coordinator.model import PastAction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
-from smarter_dev.bot.moderation_coordinator.rules import MASS_MENTION_REASON
-from smarter_dev.bot.moderation_coordinator.rules import MASS_MENTION_WARNING
-from smarter_dev.bot.moderation_coordinator.rules import PINGED_EVERYONE_SECONDS
 from smarter_dev.bot.moderation_coordinator.rules import SANCTION_ACTIONS
 from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.shared.exception_logging import log_exception
@@ -270,57 +264,37 @@ class BotReads:
                     )
                 )
             ).first()
-            actions = (
+            # A review hold (the gateway's provisional timeout) and its
+            # release are no action on the member: told apart by their
+            # operation, never by reason text. Read past them to the ten.
+            found = (
                 await session.execute(
                     select(
                         ModerationAction.action_type,
                         ModerationAction.created_at,
                         ModerationAction.reason,
+                        ModerationOperation.kind,
+                        ModerationOperation.requested,
+                    )
+                    .outerjoin(
+                        ModerationOperation,
+                        ModerationOperation.id == ModerationAction.operation_id,
                     )
                     .where(
                         ModerationAction.guild_id == guild_id,
                         ModerationAction.target_user_id == user_id,
                         ModerationAction.action_type.in_(SANCTION_ACTIONS),
-                        # A mass-mention warning is a day of risk (below),
-                        # not a sanction "in the last 30 days".
-                        or_(
-                            ModerationAction.action_type != gw.WARN,
-                            ModerationAction.reason.is_(None),
-                            ModerationAction.reason != MASS_MENTION_WARNING,
-                        ),
                     )
                     .order_by(ModerationAction.created_at.desc())
-                    .limit(10)
+                    .limit(HISTORY_READ_LIMIT)
                 )
             ).all()
-            # A removed @everyone/@here in the day before this message (its
-            # removal, or its warning): the coordinator's own record, so it
-            # holds across a restart. Read apart from the sanctions above.
-            pinged_everyone_at = (
-                await session.execute(
-                    select(func.max(ModerationAction.created_at)).where(
-                        ModerationAction.guild_id == guild_id,
-                        ModerationAction.target_user_id == user_id,
-                        or_(
-                            and_(
-                                ModerationAction.action_type.in_((gw.DELETE, gw.PURGE)),
-                                ModerationAction.reason.contains(MASS_MENTION_REASON),
-                            ),
-                            and_(
-                                ModerationAction.action_type == gw.WARN,
-                                ModerationAction.reason == MASS_MENTION_WARNING,
-                            ),
-                        ),
-                        ModerationAction.created_at
-                        >= before - timedelta(seconds=PINGED_EVERYONE_SECONDS),
-                        ModerationAction.created_at < before,
-                    )
-                )
-            ).scalar_one_or_none()
-        history = author_history_from(row, actions, before)
-        if pinged_everyone_at is None:
-            return history
-        return replace(history, pinged_everyone_at=_utc(pinged_everyone_at))
+            actions = [
+                (action_type, created_at, reason)
+                for action_type, created_at, reason, kind, requested in found
+                if not is_review_hold(kind, requested)
+            ][:HISTORY_ACTIONS]
+        return author_history_from(row, actions, before)
 
     async def channel_window(
         self,
@@ -359,6 +333,24 @@ class BotReads:
                 level=logging.WARNING,
             )
             return None
+
+
+#: The actions an author's history keeps, and how many rows are read to
+#: find them past review holds.
+HISTORY_ACTIONS = 10
+HISTORY_READ_LIMIT = 50
+
+
+def is_review_hold(kind: str | None, requested: dict | None) -> bool:
+    """Whether an action row is a review hold or its release: the gateway's
+    provisional timeout (the coordinator's and the handlers' ``hold:``
+    claims), or an untimeout (a release shortened to another claim is
+    recorded as a timeout)."""
+    if kind is None:
+        return False  # recorded outside the gateway: a moderator's own
+    if kind == gw.UNTIMEOUT:
+        return True
+    return kind == gw.TIMEOUT and bool((requested or {}).get("provisional"))
 
 
 def _utc(moment: datetime) -> datetime:

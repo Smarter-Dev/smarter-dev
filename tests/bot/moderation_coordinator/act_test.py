@@ -909,51 +909,158 @@ async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_rep
     assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
 
 
-async def test_a_ping_removal_is_read_back_as_24_hours_of_risk_not_30_days():
-    """#310 item 10b: the removal persists in moderation_actions, so the
-    author's history (read from the database, as after a restart) carries
-    it for a day; it is not a sanction, so not "moderated in 30 days"."""
+# -- risk from earlier actions, by type (Zech, Oct 24) -------------------------
+
+
+async def _record(*rows: tuple[str, timedelta]) -> None:
+    """Moderation actions on PINGER as a moderator records them: each
+    ``(action_type, how long before NOW)``."""
+    async with default_session_factory()() as session:
+        for action_type, ago in rows:
+            session.add(
+                ModerationAction(
+                    guild_id=GUILD,
+                    target_user_id=PINGER.id,
+                    target_username=PINGER.name,
+                    moderator_user_id="1",
+                    moderator_username="a mod",
+                    action_type=action_type,
+                    reason="by hand",
+                    source="manual",
+                    created_at=NOW - ago,
+                )
+            )
+        await session.commit()
+
+
+async def _risk(at=NOW) -> tuple[str, ...]:
+    """PINGER's risk reasons at ``at``, from the history read back from the
+    database (as after a restart); a known member, so only the record
+    counts."""
+    from smarter_dev.bot.moderation_coordinator.shadow import BotReads
+
+    history = await BotReads(bot=None).author_history(GUILD, PINGER.id, at)
+    history = replace(history, is_first_message=False, days_since_last_message=0)
+    return rules.scam_risky_author(say(PINGER, "hi", at), history, at)
+
+
+@pytest.mark.parametrize(
+    ("rows", "risky"),
+    [
+        ([("warn", timedelta(hours=2))], True),
+        ([("warn", timedelta(days=2))], False),
+        ([("timeout", timedelta(days=20))], True),
+        ([("kick", timedelta(days=20))], True),
+        ([("ban", timedelta(days=20))], True),
+        ([("timeout", timedelta(days=40))], False),
+        ([("kick", timedelta(days=40))], False),
+        ([("ban", timedelta(days=40))], False),
+        # Unbanned since: the ban still counts.
+        ([("ban", timedelta(days=10)), ("unban", timedelta(days=9))], True),
+        ([("untimeout", timedelta(hours=1)), ("unban", timedelta(hours=1))], False),
+    ],
+    ids=[
+        "warn 2h",
+        "warn 2d",
+        "timeout 20d",
+        "kick 20d",
+        "ban 20d",
+        "timeout 40d",
+        "kick 40d",
+        "ban 40d",
+        "unbanned, banned 10d",
+        "lifts only",
+    ],
+)
+async def test_earlier_actions_make_an_author_risky_by_their_type(rows, risky):
+    """A warning leaves the author high risk for 24 h; a timeout, kick or
+    ban for 30 days. One reason, keyed on the action's type."""
+    await _record(*rows)
+    reasons = await _risk()
+    assert reasons == ((rules.RECENTLY_MODERATED,) if risky else ())
+
+
+async def test_a_review_hold_is_no_moderation_action():
+    """A post held while it was checked and found clean: its 5-minute hold
+    and the hold's release are on record, but neither is an action on the
+    member. An hour later the author is not high risk and their history
+    lists nothing. (Before, the hold's ``timeout`` row counted as
+    "moderated in the last 30 days".)"""
     from datetime import UTC
     from datetime import datetime
 
-    from smarter_dev.bot.moderation_coordinator import rules
+    newbie = Member("held", 101, NOW - timedelta(days=30), NOW - timedelta(hours=2))
+    post = say(newbie, "my setup", NOW, attachments=_shots(4))
+    case = ReplayCase(
+        name="clean after a hold",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=[post],
+        answers={SCAM: (False, 0.95), ABUSE: (False, 0.9)},
+        reads=ReplayReads(histories={newbie.id: FIRST}),
+    )
+    h = harness(case)
+    await h.judge(post)
+    timeouts = [call[2] for call in h.port.calls if call[0] == "timeout"]
+    assert len(timeouts) == 2 and timeouts[1] is None  # held, then released
+    async with default_session_factory()() as session:
+        recorded = (
+            await session.execute(select(ModerationAction.action_type))
+        ).scalars()
+        assert "timeout" in set(recorded)  # the hold is on record
+
     from smarter_dev.bot.moderation_coordinator.shadow import BotReads
 
-    post = say(PINGER, "@everyone check this", NOW)
-    await _ping_case(post)
-    async with default_session_factory()() as session:
-        removed_at = (
-            await session.execute(
-                select(ModerationAction.created_at).where(
-                    ModerationAction.action_type == gw.DELETE
-                )
-            )
-        ).scalar_one()
-    removed_at = removed_at if removed_at.tzinfo else removed_at.replace(tzinfo=UTC)
+    hour_later = datetime.now(UTC) + timedelta(hours=1)
+    history = await BotReads(bot=None).author_history(GUILD, newbie.id, hour_later)
+    assert history.actions == ()
+    history = replace(history, is_first_message=False, days_since_last_message=0)
+    facts = say(newbie, "hi", hour_later)
+    assert rules.scam_risky_author(facts, history, hour_later) == ()
 
-    reads = BotReads(bot=None)
-    hour = await reads.author_history(GUILD, PINGER.id, removed_at + timedelta(hours=1))
-    later = await reads.author_history(
-        GUILD, PINGER.id, removed_at + timedelta(hours=25)
-    )
-    before = await reads.author_history(
-        GUILD, PINGER.id, removed_at - timedelta(minutes=1)
-    )
 
-    assert hour.pinged_everyone_at is not None and hour.actions == ()  # no warn
-    assert later.pinged_everyone_at is None
-    assert before.pinged_everyone_at is None
-    facts = say(PINGER, "hi", datetime.fromtimestamp(0, UTC))
-    reasons = rules.scam_risky_author(facts, hour, removed_at + timedelta(hours=1))
-    assert rules.PINGED_EVERYONE in reasons
-    assert "moderated in the last 30 days" not in reasons
+def test_review_holds_are_told_apart_by_their_operation_not_their_reason():
+    from smarter_dev.bot.moderation_coordinator.shadow import is_review_hold
+
+    assert is_review_hold("timeout", {"provisional": True, "until": 1.0})
+    # A release, also when it was shortened to another claim (then recorded
+    # as a timeout row).
+    assert is_review_hold("untimeout", {"until": 1.0})
+    assert not is_review_hold("timeout", {"duration_seconds": 86400})
+    assert not is_review_hold("timeout", None)
+    assert not is_review_hold("warn", {"provisional": True})
+    assert not is_review_hold(None, None)  # a moderator's, outside the gateway
+
+
+async def test_a_hold_that_ends_in_a_timeout_counts_the_timeout():
+    """A held post confirmed a scam: the hold is still no action, the 24 h
+    timeout it became is one (30 days of risk)."""
+    from datetime import UTC
+    from datetime import datetime
+
+    from smarter_dev.bot.moderation_coordinator.shadow import BotReads
+
+    newbie = Member("held2", 102, NOW - timedelta(days=30), NOW - timedelta(hours=2))
+    post = say(newbie, "my setup", NOW, attachments=_shots(4))
+    case = ReplayCase(
+        name="scam after a hold",
+        policy=acting(policy(ring=None, spam=None)),
+        messages=[post],
+        answers={SCAM: (True, 0.95), ABUSE: (False, 0.9)},
+        reads=ReplayReads(histories={newbie.id: FIRST}),
+    )
+    h = harness(case)
+    await h.judge(post)
+    later = datetime.now(UTC) + timedelta(days=20)
+    history = await BotReads(bot=None).author_history(GUILD, newbie.id, later)
+    assert [action.action_type for action in history.actions] == ["timeout"]
+    history = replace(history, is_first_message=False, days_since_last_message=0)
+    facts = say(newbie, "hi", later)
+    assert rules.scam_risky_author(facts, history, later) == (rules.RECENTLY_MODERATED,)
 
 
 async def test_a_ping_warning_is_a_day_of_risk_not_30_days():
-    """Zech, Oct 24: the mass-mention warning is on mod history, but it puts
-    the author in high risk for 24 h only. Read from the database: two hours
-    after it, risky (the ping); two days after it, not risky at all, and
-    never "moderated in the last 30 days"."""
+    """The mass-mention warning is a warning like any other: two hours after
+    it the author is high risk, two days after it not."""
     from datetime import UTC
     from datetime import datetime
 
@@ -965,55 +1072,22 @@ async def test_a_ping_warning_is_a_day_of_risk_not_30_days():
         warned_at = (
             await session.execute(
                 select(ModerationAction.created_at).where(
-                    ModerationAction.action_type == gw.WARN,
-                    ModerationAction.reason == rules.MASS_MENTION_WARNING,
+                    ModerationAction.action_type == gw.WARN
                 )
             )
         ).scalar_one()
     warned_at = warned_at if warned_at.tzinfo else warned_at.replace(tzinfo=UTC)
-
     reads = BotReads(bot=None)
     facts = say(PINGER, "hi", datetime.fromtimestamp(0, UTC))
-    two_hours = warned_at + timedelta(hours=2)
-    two_days = warned_at + timedelta(days=2)
-    soon = await reads.author_history(GUILD, PINGER.id, two_hours)
-    later = await reads.author_history(GUILD, PINGER.id, two_days)
-    assert soon.actions == later.actions == ()  # the warning is not a sanction
-    # (No member_activity row here, so "first message" stands apart.)
-    soon_reasons = set(rules.scam_risky_author(facts, soon, two_hours))
-    later_reasons = set(rules.scam_risky_author(facts, later, two_days))
-    assert soon_reasons - {"first message"} == {rules.PINGED_EVERYONE}
-    assert later_reasons - {"first message"} == set()
-
-    # The warning alone carries the day (a removal that found the message
-    # already gone leaves no delete row).
-    from sqlalchemy import delete
-
-    async with default_session_factory()() as session:
-        await session.execute(
-            delete(ModerationAction).where(ModerationAction.action_type == gw.DELETE)
-        )
-        await session.commit()
-    alone = await reads.author_history(GUILD, PINGER.id, two_hours)
-    assert alone.pinged_everyone_at is not None
-    assert rules.PINGED_EVERYONE in rules.scam_risky_author(facts, alone, two_hours)
-
-    # The same at the rule, for any history reader: a mass-mention warning
-    # two days ago is no "moderated in the last 30 days"; a scam warning is.
-    def warned(reason):
-        return AuthorHistory(
+    for after, risky in ((timedelta(hours=2), True), (timedelta(days=2), False)):
+        at = warned_at + after
+        history = replace(
+            await reads.author_history(GUILD, PINGER.id, at),
             is_first_message=False,
             days_since_last_message=0,
-            actions=(PastAction(gw.WARN, two_days - timedelta(days=2), reason),),
         )
-
-    assert (
-        rules.scam_risky_author(facts, warned(rules.MASS_MENTION_WARNING), two_days)
-        == ()
-    )
-    assert rules.scam_risky_author(facts, warned("confirmed scam"), two_days) == (
-        "moderated in the last 30 days",
-    )
+        reasons = rules.scam_risky_author(facts, history, at)
+        assert reasons == ((rules.RECENTLY_MODERATED,) if risky else ())
 
 
 async def test_a_ping_warning_with_closed_dms_is_still_recorded_and_reported():
