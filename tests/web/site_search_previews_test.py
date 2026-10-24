@@ -268,7 +268,7 @@ INVALID_BODIES = [
 async def test_an_invalid_request_is_refused_quoting_nothing(api, monkeypatch, body):
     lookup = AsyncMock()
     monkeypatch.setattr(site_search, "find_search_preview", lookup)
-    raw = body if isinstance(body, (str, bytes)) else json.dumps(body)
+    raw = body if isinstance(body, str | bytes) else json.dumps(body)
     response = api.tc.post(
         PATH, content=raw, headers={"Content-Type": "application/json"}
     )
@@ -333,7 +333,7 @@ async def test_no_log_record_or_traceback_holds_the_token(api, caplog, monkeypat
     await _preview(api.session, results=RESULTS)
     caplog.set_level(logging.DEBUG)
     bodies = [
-        *(b if isinstance(b, (str, bytes)) else json.dumps(b) for b in INVALID_BODIES),
+        *(b if isinstance(b, str | bytes) else json.dumps(b) for b in INVALID_BODIES),
         json.dumps({"token": TOKEN, "visitor": VISITOR}),
         json.dumps({"token": "Q" * 43, "visitor": VISITOR}),
         json.dumps({"token": TOKEN + "!", "visitor": VISITOR}),
