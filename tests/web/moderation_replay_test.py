@@ -284,7 +284,7 @@ async def _assert_one_action_one_report(world: _World) -> list[ModerationAction]
     assert len(world.report_posts()) == 1
     assert not [m for m in world.handler_messages.messages if m[0] == REPORT_CHANNEL]
     report = world.discord.latest_report_text()
-    assert "ban: confirmed" in report
+    assert "Banned <@" in report
     assert "scam-banner" in report and "spam engine" in report, report
     assert "https://dlscord.gift" not in report
     return rows

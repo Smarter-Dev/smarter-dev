@@ -16,8 +16,11 @@ What this adds is the coordinator's side of the old actors' behaviour:
   closing line, so it never hangs (#302).
 * **One decision** (:meth:`Executor.execute`): every target's sanction and
   cleanup in one gateway call, then the warn notices, the member messages
-  and the report lines: the provisional outcome with its cause, the review
-  lines, and a history note drawn from the record (no model call).
+  (each DM's delivery recorded on the incident) and the report lines: an
+  alert when a hold ran out without a verdict, the review lines, the
+  member's history drawn from the record (no model call) and how the
+  report's summary begins. The hold's other outcomes need no line: the
+  report's timeline shows the timeout, its upgrade or its lift (#333).
 * **A failed evaluation after a hold** (:meth:`Executor.evaluation_failed`):
   a line for moderators and a closing notice.
 
@@ -43,7 +46,6 @@ from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
 from smarter_dev.bot.moderation_coordinator.decide import EXPIRED
 from smarter_dev.bot.moderation_coordinator.decide import RELEASED
-from smarter_dev.bot.moderation_coordinator.decide import UPGRADED
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
@@ -83,17 +85,63 @@ SCAM_REMOVED_TEXT = (
     "Your message was removed after a clear scam or abusive-content review. "
     "Please review the server rules before posting again."
 )
+#: The public reason a likely hacked account's warning gives in the channel.
+#: The member's DM says much more (:func:`hacked_account_dm`).
 SECURE_ACCOUNT_TEXT = (
     "Your scam-like post suggests your account may be compromised. Please "
     "secure your account before posting again."
 )
-HOLD_REASON = "Held while a possible scam is reviewed"
+SECURE_ACCOUNT_STEPS = (
+    "To secure it: change your Discord password (this logs out other "
+    "sessions), turn on two-factor authentication, check Settings → "
+    "Authorized Apps and Devices and remove anything you don't recognise, "
+    'and run a malware scan if you ran any file or "game test" someone sent '
+    "you."
+)
 EDIT_PING_TEXT = (
     "<@{user}> please don't edit a server-wide mention into a message after "
     "posting it — that edit has been removed. Ask a moderator if you need to "
     "reach everyone."
 )
 HISTORY_LINES = 5
+
+
+def hold_reason(reasons) -> str:
+    """Why a hold was placed: its audit reason, its incident's reason, and the
+    words the report's "Held … for review" line gives."""
+    return "possible scam under review: " + ", ".join(reasons)
+
+
+def hacked_account_dm(
+    guild_name: str | None, removed: int, until: float | None, *, timed_out: bool
+) -> str:
+    """What a likely hacked account is told (#333): what happened, and how to
+    take the account back. ``removed``: how many of its messages went;
+    ``until``: when its timeout ends (a warn has none)."""
+    server = f"**{guild_name}**" if guild_name else "the server"
+    if removed > 1:
+        what = f"we removed those messages ({removed})"
+    elif removed == 1:
+        what = "we removed that message"
+    else:
+        what = ""
+    if timed_out:
+        when = f"until <t:{int(until)}:f>" if until else "for now"
+        what = (
+            f"{what} and timed you out {when}" if what else f"we timed you out {when}"
+        )
+    opening = f"Your account posted what looks like a scam in {server}" + (
+        f", so {what}." if what else "."
+    )
+    closing = (
+        "If this was a mistake, reply to a moderator once the timeout ends."
+        if timed_out
+        else "If this was a mistake, reply to a moderator."
+    )
+    return (
+        f"{opening} This usually means someone else has access to your account.\n\n"
+        f"{SECURE_ACCOUNT_STEPS}\n\n{closing}"
+    )
 
 
 def provisional_claim(key: str) -> str:
@@ -153,6 +201,14 @@ class Messenger:
             # Closed DMs are an expected outcome, not an error.
             return False
         return True
+
+    def guild_name(self, guild_id: str) -> str | None:
+        """The server's name from the bot's cache, for a member's DM."""
+        try:
+            guild = self.bot.cache.get_guild(int(guild_id))
+        except Exception:  # noqa: BLE001 — a DM without the name is fine
+            return None
+        return getattr(guild, "name", None) or None
 
 
 @dataclass(slots=True)
@@ -264,16 +320,13 @@ class Executor:
                 return
             gateway = self._gateway_for(policy)
             result = await gateway.act(
-                self._trigger(
-                    facts,
-                    reason="held while under review: " + ", ".join(provisional.reasons),
-                ),
+                self._trigger(facts, reason=hold_reason(provisional.reasons)),
                 [
                     Proposal(
                         kind=gw.TIMEOUT,
                         target_user_id=facts.author_id,
                         target_username=facts.author_name or None,
-                        reason=HOLD_REASON,
+                        reason=hold_reason(provisional.reasons),
                         duration_seconds=provisional.duration_seconds,
                         claim=provisional_claim(key),
                         provisional=True,
@@ -496,7 +549,8 @@ class Executor:
         )
         trigger = self._trigger(
             facts,
-            reason=_reason(decision.targets.values()) or "coordinator decision",
+            # No reason (a clean release alone) writes no reason line.
+            reason=_reason(decision.targets.values()),
             report_channel_id=policy.report_channel_id if reportable else None,
             ping_role_id=_ping_role(policy, targets),
             source=gw.SOURCE_AI
@@ -599,21 +653,28 @@ class Executor:
         deleted: set[str],
     ) -> None:
         notices = list(dict.fromkeys(target.notices))
+        hacked = NOTICE_SECURE_ACCOUNT in notices
         scam_text = (
             SECURE_ACCOUNT_TEXT
-            if NOTICE_SECURE_ACCOUNT in notices
+            if hacked
             else SCAM_REMOVED_TEXT
             if NOTICE_SCAM_REMOVED in notices
             else None
         )
+        removed = _removed(target, result, deleted)
         if target.sanction is not None and target.sanction.kind == gw.WARN:
             if scam_text is not None:
                 notice = (
                     f"⚠️ <@{target.user_id}> has been warned.\n**Reason:** {scam_text}"
                 )
-                await self._warn(
-                    gateway, trigger, target, facts, notice, _warning_dm(scam_text)
+                dm = (
+                    hacked_account_dm(
+                        self._guild_name(facts), removed, None, timed_out=False
+                    )
+                    if hacked
+                    else _warning_dm(scam_text)
                 )
+                await self._warn(gateway, trigger, target, facts, notice, dm)
             elif NOTICE_MASS_MENTION in notices:
                 await self._warn_by_dm(
                     gateway, trigger, target, facts, policy, rules.MASS_MENTION_WARNING
@@ -624,14 +685,18 @@ class Executor:
         elif scam_text is not None and target.sanction is not None:
             # A timeout (high-signal or repeat): the member is told by DM,
             # once it took effect (never after a staff refusal or a reversal).
-            applied = any(
-                outcome.kind == target.sanction.kind
-                and outcome.target_user_id == target.user_id
-                and outcome.applied
-                for outcome in result.outcomes
+            applied = next(
+                (
+                    outcome
+                    for outcome in result.outcomes
+                    if outcome.kind == target.sanction.kind
+                    and outcome.target_user_id == target.user_id
+                    and outcome.applied
+                ),
+                None,
             )
             if (
-                applied
+                applied is not None
                 and result.incident_id is not None
                 and await gateway.claim_member_message(
                     result.incident_id,
@@ -639,7 +704,26 @@ class Executor:
                     target_user_id=target.user_id,
                 )
             ):
-                await self._dm(target.user_id, scam_text)
+                if hacked:
+                    until = (
+                        applied.expires_at.timestamp() if applied.expires_at else None
+                    )
+                    text = hacked_account_dm(
+                        self._guild_name(facts),
+                        removed,
+                        until,
+                        timed_out=target.sanction.kind == gw.TIMEOUT,
+                    )
+                else:
+                    text = scam_text
+                await self._dm_and_record(
+                    gateway,
+                    result.incident_id,
+                    gw.MESSAGE_DM,
+                    target.user_id,
+                    text,
+                    report_channel_id=policy.report_channel_id,
+                )
 
         user = f"<@{target.user_id}>"
         if NOTICE_ATTACHMENT_BLOCKED in notices and facts.message_id in deleted:
@@ -740,7 +824,48 @@ class Executor:
                 incident_id, kind=gw.MESSAGE_DM, target_user_id=target.user_id
             )
         ):
-            await self._dm(target.user_id, dm)
+            await self._dm_and_record(
+                gateway,
+                incident_id,
+                gw.MESSAGE_DM,
+                target.user_id,
+                dm,
+                report_channel_id=trigger.report_channel_id,
+            )
+
+    def _guild_name(self, facts: MessageFacts) -> str | None:
+        name = getattr(self.messenger, "guild_name", None)
+        return name(facts.guild_id) if name is not None else None
+
+    async def _dm_and_record(
+        self,
+        gateway,
+        incident_id: UUID,
+        kind: str,
+        user_id: str,
+        content: str,
+        *,
+        report_channel_id: str | None,
+    ) -> bool:
+        """A claimed DM, then whether it arrived, on the incident (#333)."""
+        delivered = await self._dm(user_id, content)
+        try:
+            await gateway.record_member_message(
+                incident_id,
+                kind=kind,
+                target_user_id=user_id,
+                delivered=delivered,
+                source=ACTOR,
+                report_channel_id=report_channel_id,
+            )
+        except Exception:  # noqa: BLE001 — the DM went (or not) either way
+            log_exception(
+                logger,
+                "Coordinator could not record the DM to %s",
+                user_id,
+                level=logging.WARNING,
+            )
+        return delivered
 
     async def _dm(self, user_id: str, content: str) -> bool:
         """A DM to the member; never raises. False when it was not delivered
@@ -770,7 +895,7 @@ class Executor:
         fences a post's copies and a second pod. It is ``dm_only`` with its
         own DM claim, so a scam decision on the same message still posts its
         notice and sends its DM. An undelivered DM still leaves the warning
-        recorded, and the report says the member was not told."""
+        recorded; either way the report says whether the member was told."""
         async with gateway.reserve(
             trigger,
             Proposal(
@@ -792,42 +917,41 @@ class Executor:
             incident_id, kind=gw.MESSAGE_WARNING_DM, target_user_id=target.user_id
         ):
             return
-        if await self._dm(target.user_id, _warning_dm(reason)):
-            return
-        await gateway.add_notes(
+        await self._dm_and_record(
+            gateway,
             incident_id,
-            source=ACTOR,
-            notes=[
-                (
-                    gw.ENTRY_NOTE,
-                    f"The warning DM to <@{target.user_id}> was not delivered "
-                    "(their DMs may be closed, or Discord refused it); it is "
-                    "recorded on their history.",
-                )
-            ],
+            gw.MESSAGE_WARNING_DM,
+            target.user_id,
+            _warning_dm(reason),
             report_channel_id=policy.report_channel_id,
-            target_user_id=target.user_id,
         )
 
     # ------------------------------------------------------------------
     # Report lines
     # ------------------------------------------------------------------
 
-    def _report_lines(self, evaluation: Evaluation) -> list[tuple[str, str]]:
+    def _report_lines(self, evaluation: Evaluation) -> list[tuple]:
         decision = evaluation.to_carry_out
         facts = evaluation.facts
-        lines: list[tuple[str, str]] = []
+        lines: list[tuple] = []
         provisional = decision.provisional
-        if provisional is not None:
-            lines.append(_provisional_line(provisional, evaluation))
+        if provisional is not None and provisional.resolution == EXPIRED:
+            lines.append(_expired_line(provisional, evaluation))
         lines.extend((gw.ENTRY_NOTE, line) for line in decision.review)
         scam_fired = any(
             line.startswith(rules.SCAM_GATE) for line in decision.rules_fired
         )
         if evaluation.history is not None and (scam_fired or provisional is not None):
             lines.append(
-                (gw.ENTRY_NOTE, history_note(facts.author_id, evaluation.history))
+                (
+                    gw.ENTRY_HISTORY,
+                    history_note(facts.author_id, evaluation.history),
+                    {"count": len(evaluation.history.actions)},
+                )
             )
+        lead = _summary_lead(evaluation)
+        if lead is not None:
+            lines.append((gw.ENTRY_SUMMARY, lead))
         return lines
 
     def _trigger(
@@ -851,6 +975,12 @@ class Executor:
             message_id=facts.message_id,
             author_id=facts.author_id,
             content=facts.content or None,
+            attachments=tuple(
+                gw.attachment_signature(
+                    item.filename, item.size, item.width, item.height
+                )
+                for item in facts.attachments
+            ),
             aliases=(alias,) if alias else (),
             related_message_ids=tuple(
                 dict.fromkeys(m for m in related if m != facts.message_id)
@@ -876,8 +1006,50 @@ def _warning_dm(reason: str) -> str:
     )
 
 
+def _removed(target: TargetDecision, result: gw.ActResult, deleted: set[str]) -> int:
+    """How many of the target's messages are gone, for their DM: every one
+    the decision removes, unless a removal failed (then those confirmed)."""
+    wanted = {item.message_id for item in target.cleanup}
+    failed = any(
+        outcome.kind in gw.CLEANUP_KINDS
+        and outcome.target_user_id == target.user_id
+        and outcome.state in (gw.FAILED, gw.UNKNOWN)
+        for outcome in result.outcomes
+    )
+    return len(wanted & deleted) if failed else len(wanted)
+
+
+def _summary_lead(evaluation: Evaluation) -> str | None:
+    """How the report's summary begins, for a scam check whose decision
+    holds the outcome: a sanction, a clean release, or no verdict."""
+    decision = evaluation.to_carry_out
+    provisional = decision.provisional
+    sanctioned = [t for t in decision.targets.values() if t.sanction is not None]
+    if evaluation.scam_outcome == "violation" and sanctioned:
+        hacked = any(NOTICE_SECURE_ACCOUNT in t.notices for t in sanctioned)
+        return (
+            "Confirmed scam from a likely hacked account"
+            if hacked
+            else "Confirmed scam"
+        )
+    if provisional is not None and provisional.resolution == RELEASED:
+        return "Scam check found nothing"
+    if provisional is not None and provisional.resolution == EXPIRED:
+        return "Scam check incomplete"
+    return None
+
+
 def _reason(targets) -> str:
-    return "; ".join(dict.fromkeys(reason for t in targets for reason in t.reasons))
+    """The targets' reasons, as the incident and the audit log carry them. A
+    copy's "already sanctioned" qualifier is dropped: it says why this
+    decision carries no sanction, not why anything was done."""
+    return "; ".join(
+        dict.fromkeys(
+            reason.removesuffix(rules.ALREADY_SANCTIONED)
+            for t in targets
+            for reason in t.reasons
+        )
+    )
 
 
 def _spam_reasons(target: TargetDecision) -> list[str]:
@@ -969,29 +1141,9 @@ def _unknown_cause(evaluation: Evaluation) -> str:
     return (evaluation.classifier.outcome or "no answer").replace("_", " ")
 
 
-def _provisional_line(
-    provisional: Provisional, evaluation: Evaluation
-) -> tuple[str, str]:
+def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str, str]:
+    """The alert for a hold left without a verdict."""
     user = f"<@{provisional.user_id}>"
-    if provisional.resolution == UPGRADED:
-        target = evaluation.to_carry_out.targets.get(provisional.user_id)
-        sanction = target.sanction if target is not None else None
-        what = (
-            "a ban"
-            if sanction is not None and sanction.kind == gw.BAN
-            else "a 24-hour timeout"
-            if sanction is not None and (sanction.duration_seconds or 0) >= 86400
-            else "a longer sanction"
-        )
-        return (
-            gw.ENTRY_NOTE,
-            f"Provisional hold on {user} upgraded to {what}.",
-        )
-    if provisional.resolution == RELEASED:
-        return (
-            gw.ENTRY_NOTE,
-            f"Provisional hold on {user} released: the scam check found nothing.",
-        )
     return (
         gw.ENTRY_ALERT,
         f"Provisional hold on {user} expired without a verdict "
@@ -1004,7 +1156,7 @@ def _closing(provisional: Provisional | None, evaluation: Evaluation) -> str:
     resolution = provisional.resolution if provisional is not None else EXPIRED
     if resolution == RELEASED:
         return CLOSED_CLEAN
-    if resolution == UPGRADED or evaluation.scam_outcome == "violation":
+    if resolution != EXPIRED or evaluation.scam_outcome == "violation":
         return CLOSED_REMOVED
     return CLOSED_UNKNOWN
 

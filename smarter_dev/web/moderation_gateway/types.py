@@ -55,7 +55,18 @@ ENTRY_NOTE = "note"
 #: A note a moderator must act on (something failed or was left undone): kept
 #: like a note, and never trimmed from the report.
 ENTRY_ALERT = "alert"
-NOTE_KINDS = frozenset({ENTRY_NOTE, ENTRY_ALERT})
+#: Whether a member-facing DM reached the member (``details.delivered``,
+#: ``details.message``: the outbox kind).
+ENTRY_DELIVERY = "delivery"
+#: The member's earlier moderation actions, from the record
+#: (``details.count``); the report's summary says how many.
+ENTRY_HISTORY = "history"
+#: How the report's summary begins (``Confirmed scam``); the newest wins.
+ENTRY_SUMMARY = "summary"
+#: The system's own words, kept with the incident like a note.
+NOTE_KINDS = frozenset(
+    {ENTRY_NOTE, ENTRY_ALERT, ENTRY_DELIVERY, ENTRY_HISTORY, ENTRY_SUMMARY}
+)
 
 # The member-facing messages of a warn that ModerationGateway.claim_member_message
 # dedupes per member per incident (outbox rows of these kinds).
@@ -71,18 +82,37 @@ ENTRY_ASSESSMENT = "assessment"
 _WHITESPACE = re.compile(r"\s+")
 
 
-def fingerprint(author_id: str | int | None, content: str | None) -> str | None:
+def fingerprint(
+    author_id: str | int | None,
+    content: str | None,
+    attachments: tuple[str, ...] = (),
+) -> str | None:
     """How a post looks, for joining copies of it into one incident.
 
     The same author posting the same text (whitespace and case aside) in
-    several channels yields one fingerprint. Empty text yields none: two
-    image-only posts are not the same post.
+    several channels yields one fingerprint. A post with no text is told by
+    its files instead (``attachments``: each file's name, size and
+    dimensions, see :func:`attachment_signature`), so one image-only burst is
+    one incident (#333). No text and no files yields none.
     """
     text = _WHITESPACE.sub(" ", (content or "").strip().casefold())
-    if not author_id or not text:
+    if not author_id:
         return None
-    digest = hashlib.sha256(f"{author_id}\x00{text}".encode()).hexdigest()
-    return digest[:32]
+    if text:
+        carried = f"{author_id}\x00{text}"
+    elif attachments:
+        carried = f"{author_id}\x00files\x00" + "\x00".join(sorted(attachments))
+    else:
+        return None
+    return hashlib.sha256(carried.encode()).hexdigest()[:32]
+
+
+def attachment_signature(
+    filename: str, size: int | None, width: int | None, height: int | None
+) -> str:
+    """One file as :func:`fingerprint` compares it: what Discord says about
+    it, never its bytes. Two different files can share one."""
+    return f"{filename}:{size or 0}:{width or 0}x{height or 0}"
 
 
 def epoch(moment: datetime) -> float:
@@ -133,6 +163,9 @@ class Trigger:
     message_id: str | None = None
     author_id: str | None = None
     content: str | None = None
+    #: The post's files (:func:`attachment_signature`): what joins copies of
+    #: a post with no text.
+    attachments: tuple[str, ...] = ()
     aliases: tuple[str, ...] = ()
     related_message_ids: tuple[str, ...] = ()
     evidence: tuple[Evidence, ...] = ()
@@ -143,7 +176,7 @@ class Trigger:
 
     @property
     def fingerprint(self) -> str | None:
-        return fingerprint(self.author_id, self.content)
+        return fingerprint(self.author_id, self.content, self.attachments)
 
     @property
     def is_manual(self) -> bool:

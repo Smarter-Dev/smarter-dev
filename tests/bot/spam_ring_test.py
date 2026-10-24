@@ -514,7 +514,7 @@ async def test_three_account_ring_is_swept_with_followups_folded_into_one_report
     transcript = bytes(attachment.data).decode()
     for message in (q1, chat, q2, ad, followup_1):
         assert message.content in transcript
-    assert "timeout 7 days" in report["content"]
+    assert "for 7 days" in report["content"]
     assert "Remove Timeout" in report["content"]
     assert sum(len(a.evidence["deleted_message_ids"]) for a in harness.deletions) == 5
 

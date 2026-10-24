@@ -171,7 +171,7 @@ async def test_a_later_ban_upgrades_the_incident_and_edits_the_same_report(
     assert discord.count("ban") == 1
     assert len(discord.reports()) == 1
     text = discord.latest_report_text()
-    assert "ban: confirmed" in text
+    assert f"Banned <@{SCAMMER}>" in text
     assert "scam-banner" in text and "spam engine" in text
 
 
@@ -238,6 +238,46 @@ async def test_a_copy_of_the_post_in_another_channel_joins_the_incident(
 
     assert copy.incident_id == first.incident_id
     assert unrelated.incident_id != first.incident_id
+
+
+async def test_an_image_only_copy_joins_the_incident_by_its_files(discord, db, clock):
+    """#333: incident 4d3f0c64's burst had no text, so it had no fingerprint
+    and its copy opened a second incident (one never reported)."""
+    gateway = make_gateway(discord, db, clock)
+    files = tuple(
+        t.attachment_signature(f"IMG_{i}.png", 480_000 + i, 1080, 1920)
+        for i in range(4)
+    )
+    first = await gateway.act(spam_trigger(content=None, attachments=files), [])
+    copy = await gateway.act(
+        spam_trigger(
+            channel_id="7002",
+            message_id="8002",
+            content=None,
+            attachments=tuple(reversed(files)),
+        ),
+        [],
+    )
+    other_files = await gateway.act(
+        spam_trigger(
+            channel_id="7003",
+            message_id="8003",
+            content=None,
+            attachments=(t.attachment_signature("cat.png", 1234, 64, 64),),
+        ),
+        [],
+    )
+
+    assert copy.incident_id == first.incident_id
+    assert other_files.incident_id != first.incident_id
+
+
+def test_text_still_decides_a_posts_fingerprint_over_its_files():
+    files = (t.attachment_signature("a.png", 1, 2, 3),)
+    assert t.fingerprint(SCAMMER, "hello", files) == t.fingerprint(SCAMMER, "hello")
+    assert t.fingerprint(SCAMMER, "", files) is not None
+    assert t.fingerprint(SCAMMER, "", ()) is None
+    assert t.fingerprint("5002", "", files) != t.fingerprint(SCAMMER, "", files)
 
 
 async def test_an_alias_finds_the_incident_from_another_target(discord, db, clock):
@@ -957,7 +997,7 @@ async def test_a_deleted_report_is_posted_anew(discord, db, clock):
     await gateway.act(handler_trigger(), [Proposal(kind=t.BAN, target_user_id=SCAMMER)])
 
     assert len(discord.reports()) == 2
-    assert "ban: confirmed" in discord.reports()[-1]["content"]
+    assert f"Banned <@{SCAMMER}>" in discord.reports()[-1]["content"]
     assert result.incident_id is not None
 
 
@@ -972,7 +1012,7 @@ async def test_the_report_keeps_its_marker_and_newest_effect_when_too_long(
     text = discord.latest_report_text()
     assert len(text) <= 2000
     assert "-# Incident " in text
-    assert "ban: confirmed" in text
+    assert f"Banned <@{SCAMMER}>" in text
 
 
 async def test_a_kick_whose_answer_was_lost_is_recorded_once_checked(
@@ -1045,6 +1085,188 @@ async def test_a_retried_delete_belongs_to_the_incident_that_retried_it(
     assert second.incident_id != first.incident_id
     [action] = await rows(db, ModerationAction)
     assert action.incident_id == second.incident_id
+
+
+def test_the_report_is_a_timeline_then_a_summary():
+    """#333: Zech found incident 4d3f0c64's report noisy (three reasons, an
+    "already covered" row, a contradictory note, the history twice). It is
+    one stamped line per step in time order, then one summary line."""
+    from uuid import UUID
+
+    from smarter_dev.web.moderation_gateway.report import ReportEntry
+    from smarter_dev.web.moderation_gateway.report import ReportFacts
+    from smarter_dev.web.moderation_gateway.report import ReportOperation
+    from smarter_dev.web.moderation_gateway.report import render_report
+
+    user, start = "1024298331503083550", 1_792_849_330.0
+    hold = "possible scam under review: four or more images"
+
+    def op(kind, state, at, **values):
+        fields = {
+            "kind": kind,
+            "state": state,
+            "actor": "coordinator",
+            "target_user_id": user,
+            "target_username": "luluhoney",
+            "detail": None,
+            "channel_id": None,
+            "message_ids": (),
+            "deleted": (),
+            "duration_seconds": None,
+            "expires_at": None,
+            "at": start + at,
+        }
+        fields.update(values)
+        return ReportOperation(**fields)
+
+    def entry(kind, at, rule, details=None):
+        return ReportEntry(
+            kind=kind,
+            source="coordinator",
+            rule=rule,
+            content=None,
+            target_user_id=user,
+            channel_id=None,
+            message_id=None,
+            at=start + at,
+            details=details,
+        )
+
+    history = f"History: no earlier moderation actions on record for <@{user}>."
+    facts = ReportFacts(
+        incident_id=UUID("4d3f0c64-5dd1-4ac0-8daf-a6e207e85347"),
+        guild_id=GUILD,
+        subject_user_id=user,
+        channel_id="7001",
+        trigger_message_id="8001",
+        opened_at=start,
+        ping_role_id=None,
+        entries=(
+            entry(t.ENTRY_REASON, 0.1, hold),
+            entry(t.ENTRY_REASON, 4.1, "confirmed scam"),
+            entry(t.ENTRY_HISTORY, 8, history, {"count": 0}),
+            entry(t.ENTRY_SUMMARY, 8, "Confirmed scam from a likely hacked account"),
+            entry(
+                t.ENTRY_DELIVERY,
+                7,
+                f"DM to <@{user}> delivered.",
+                {"delivered": True, "message": t.MESSAGE_DM},
+            ),
+            entry(t.ENTRY_HISTORY, 10, history, {"count": 0}),
+        ),
+        operations=(
+            op(
+                t.TIMEOUT,
+                t.CONFIRMED,
+                0.5,
+                duration_seconds=300,
+                expires_at=start + 300,
+                reason=hold,
+                provisional=True,
+            ),
+            op(
+                t.TIMEOUT,
+                t.COVERED,
+                2.6,
+                duration_seconds=300,
+                provisional=True,
+                detail="already timed out",
+            ),
+            op(
+                t.TIMEOUT,
+                t.CONFIRMED,
+                4.7,
+                duration_seconds=86400,
+                expires_at=start + 86404,
+                reason="confirmed scam",
+            ),
+            op(
+                t.DELETE,
+                t.CONFIRMED,
+                5.2,
+                channel_id="7001",
+                message_ids=("8001",),
+                deleted=("8001",),
+            ),
+            op(
+                t.DELETE,
+                t.CONFIRMED,
+                5.9,
+                channel_id="7002",
+                message_ids=("8002",),
+                deleted=("8002",),
+            ),
+            op(
+                t.DELETE,
+                t.SKIPPED,
+                6.3,
+                channel_id="7002",
+                message_ids=("8002",),
+                detail="already deleted",
+            ),
+        ),
+    )
+
+    who = f"<@{user}> luluhoney"
+    link = f"https://discord.com/channels/{GUILD}"
+    assert render_report(facts).splitlines() == [
+        "🛡️ **Moderation incident** in <#7001> · <t:1792849330:f>",
+        f"**Member:** <@{user}> ({user})",
+        f"**Message:** {link}/7001/8001",
+        f"- <t:1792849330:T> Held {who} for 5 minutes: {hold}",
+        f"- <t:1792849334:T> Hold on {who} upgraded to a 24-hour timeout "
+        "(until <t:1792935734:f>): confirmed scam",
+        f"- <t:1792849335:T> Deleted a message from {who}: {link}/7001/8001",
+        f"- <t:1792849335:T> Deleted a message from {who}: {link}/7002/8002",
+        f"- <t:1792849337:T> DM to <@{user}> delivered.",
+        "**Summary:** Confirmed scam from a likely hacked account: 2 messages "
+        "removed, timed out for 24 hours, told by DM. No earlier actions.",
+        "To undo a timeout: open the member and choose Remove Timeout.",
+        "-# Incident 4d3f0c64 · edited as it develops",
+    ]
+
+
+def test_a_refusal_to_act_on_staff_still_shows_while_no_ops_do_not():
+    from uuid import uuid4
+
+    from smarter_dev.web.moderation_gateway.report import ReportFacts
+    from smarter_dev.web.moderation_gateway.report import ReportOperation
+    from smarter_dev.web.moderation_gateway.report import render_report
+
+    def timeout(state, detail):
+        return ReportOperation(
+            kind=t.TIMEOUT,
+            state=state,
+            actor="coordinator",
+            target_user_id=SCAMMER,
+            target_username=None,
+            detail=detail,
+            channel_id=None,
+            message_ids=(),
+            deleted=(),
+            duration_seconds=86400,
+            expires_at=None,
+        )
+
+    text = render_report(
+        ReportFacts(
+            incident_id=uuid4(),
+            guild_id=GUILD,
+            subject_user_id=SCAMMER,
+            channel_id=CHANNEL,
+            trigger_message_id=MESSAGE,
+            opened_at=1_790_000_000.0,
+            ping_role_id=None,
+            operations=(
+                timeout(t.SKIPPED, "protected: staff role"),
+                timeout(t.COVERED, "already timed out"),
+                timeout(t.SKIPPED, "not a member"),
+            ),
+        )
+    )
+
+    assert f"<@{SCAMMER}>: timeout 1 day: not done (protected: staff role)" in text
+    assert "already timed out" not in text and "not a member" not in text
 
 
 def test_trimming_keeps_failures_and_alerts_and_drops_the_least_important_first():
@@ -1126,7 +1348,7 @@ def test_trimming_keeps_failures_and_alerts_and_drops_the_least_important_first(
     assert "The participant check failed" in text
     assert "-# Incident " in text
     # The newest effect stays; what was dropped is counted, not hidden.
-    assert f"<@{users[-1]}>" in text and "delete message" in text
+    assert f"Deleted a message from <@{users[-1]}>" in text
     assert "more (" in text and "confirmed" in text
     # Quotes and the long assessment went before any failure did.
     assert "join our hackathon" not in text
@@ -1257,7 +1479,7 @@ def test_the_newest_failure_stays_while_the_alerts_shrink():
 
     assert len(text) <= 2000
     assert f"<@{users[9]}> member{users[9]}: timeout 7 days: **failed**" in text
-    assert f"<@{users[10]}> member{users[10]}: timeout 7 days" in text
+    assert f"Timed out <@{users[10]}> member{users[10]} for 7 days" in text
     assert "- …and 9 more (**9 failed or unresolved**)" in text
     assert "Check 5 failed" in text
     assert "…and 3 earlier alert(s)" in text
@@ -1267,7 +1489,7 @@ def test_the_newest_failure_stays_while_the_alerts_shrink():
 
     assert len(tight) <= 1000
     assert "- …and 10 more (**10 failed or unresolved**)" in tight
-    assert f"<@{users[10]}> member{users[10]}: timeout 7 days" in tight
+    assert f"Timed out <@{users[10]}> member{users[10]} for 7 days" in tight
     assert "Check 5 failed" in tight
     assert "…and 5 earlier alert(s)" in tight
     assert "…\n" not in tight  # no blind cut from the middle
@@ -1305,4 +1527,4 @@ async def test_the_spam_engines_ping_goes_out_when_it_joins_a_posted_report(
     assert ping["role_mention_ids"] == ["644390354157568014"]
     report_id = discord.reports()[0]["message_id"]
     assert ping["content"].endswith(f"/{REPORT_CHANNEL}/{report_id}")
-    assert "ban: confirmed" in discord.latest_report_text()
+    assert f"Banned <@{SCAMMER}>" in discord.latest_report_text()

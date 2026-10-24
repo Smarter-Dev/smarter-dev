@@ -304,8 +304,10 @@ class Provisional:
     is what the decision did with it: ``upgraded`` (a ban or a longer
     timeout replaced it, whether the verdict or a deterministic rule asked
     for it), ``released`` (judged clean and nothing else holds the author:
-    the claim is lifted; a moderator's or a longer automated timeout stays)
-    or ``expired`` (no verdict and nothing stronger: it runs out on its own).
+    the claim is lifted; a moderator's or a longer automated timeout stays),
+    ``decided`` (judged a scam, but the sanction is held elsewhere in the
+    incident or is no longer than the hold: it stays until it runs out) or
+    ``expired`` (no verdict and nothing stronger: it runs out on its own).
     """
 
     user_id: str
