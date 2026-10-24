@@ -17,18 +17,45 @@ Worker bounds its own calls instead: one batched lookup per page load, at most
 
 | Route | Body / result |
 | ----- | ------------- |
-| `POST /api/site/resources/sources` | `{urls}` → 200 `{sources}`. |
+| `POST /api/site/resources/sources` | `{urls}` → 200 `{sources, omitted}`. |
 
 `urls` is a list of 1–100 strings, each 1–500 characters; any other field,
 a non-string entry or a list outside those limits is a 422 with the API's
 usual validation body. Repeated URLs are looked up once.
 
+```json
+{
+  "sources": [
+    {"url": "…", "title": "…", "byline": "…", "blurb": "…",
+     "learning_type": "…", "track_key": "…"}
+  ],
+  "omitted": ["…"]
+}
+```
+
 `sources` holds one entry per requested URL found in the catalog, in the order
-of the request, with `url`, `title`, `byline`, `blurb`, `learning_type` and
-`track_key`. `byline` and `blurb` are `""` when empty, as on the article card.
-URLs must match exactly (no normalisation); unknown URLs are left out, so the
-Worker decides what to show for them. If two catalog rows share a URL, the one
-with the lowest `track_key` is returned.
+of the request. Each entry is exactly the article card Python's renderer
+builds (`_source_to_article_card`) without its `type`. `byline` and `blurb` are
+`""` when empty. URLs must match exactly (no normalisation); unknown URLs are
+left out of both lists, so the Worker decides what to show for them.
+
+If several catalog rows share a URL, the one with the lowest `track_key` is
+used, here and in the renderer (`sdanswer.pick_sources`). `track_key` is
+unique, so the pick does not depend on row order.
+`scripts/parity/pick_sources.py <catalog.json>` prints that pick for every
+duplicated URL in a catalog export, as a fixture for the site's own pick.
+
+**Limits.** The card caps each field in one place, for the renderer and this
+route alike: `title` 512 characters, `byline` 256, `blurb` 2,000,
+`learning_type` 32, `track_key` 200. Longer values are cut to the cap. `url`
+is never cut, so it stays a working link; it is bounded here because only
+requested URLs of at most 500 characters can match. The whole encoded JSON
+body is at most 1 MiB: sources are added in request order, and once the next
+one would take the body past 1 MiB, it and every later found URL go in
+`omitted`, in request order. `omitted` is always present and normally `[]`.
+An omitted URL was **not answered here**; it does not mean the URL is missing
+from the catalog. The Worker treats omitted URLs as unknown and falls back for
+them.
 
 ## Enabling it
 
@@ -37,16 +64,10 @@ The site guard (`site_guards.py`) checks the key's own
 authorize the existing site key. No re-mint is needed: add `site-resources` to
 the existing site key's scopes in place, which keeps its secret (and the
 Worker's `SKRIFT_SITE_KEY`) unchanged. Either use the Skrift
-`/admin/api-keys/{id}/edit` form, or run a one-off Job (as in
-[admin-host.md](admin-host.md)) calling
-
-```python
-from skrift.db.services.api_key_service import update_api_key
-
-await update_api_key(
-    session, key, scoped_permissions=[*key.scoped_permission_list, "site-resources"]
-)
-```
+`/admin/api-keys/{id}/edit` form, or run the one-off Job in [Adding a scope to
+the existing site key](admin-host.md#adding-a-scope-to-the-existing-site-key),
+which calls `update_api_key` to append `site-resources` to the active site
+key's `scoped_permissions` and never prints a key.
 
 Until then the Worker's lookups receive 401 and it falls back to its bundled
 catalog.

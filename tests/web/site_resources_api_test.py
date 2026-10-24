@@ -1,6 +1,7 @@
 """Site resources lookup: site principal isolation, exact-URL matches in request
 order, sdanswer card fields and request limits."""
 
+import json
 from contextlib import asynccontextmanager
 from datetime import date
 from types import SimpleNamespace
@@ -12,16 +13,22 @@ from litestar import Litestar
 from litestar.datastructures import State
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
+from litestar.serialization import encode_json
 from litestar.testing import AsyncTestClient
 from skrift.auth.services import UserPermissions
 from skrift.db.services import api_key_service
 
 from smarter_dev.web.api_native import auth
 from smarter_dev.web.api_native import rate_limiting
+from smarter_dev.web.api_native import site_resources
+from smarter_dev.web.api_native.site_resources import MAX_RESPONSE_BYTES
 from smarter_dev.web.api_native.site_resources import SiteResourcesController
 from smarter_dev.web.api_native.site_resources import _source
 from smarter_dev.web.models import ResourceSource
+from smarter_dev.web.sdanswer import ARTICLE_CARD_CAPS
+from smarter_dev.web.sdanswer import _load_sources
 from smarter_dev.web.sdanswer import _source_to_article_card
+from smarter_dev.web.sdanswer import pick_sources
 
 URL = "/api/site/resources/sources"
 
@@ -114,7 +121,8 @@ async def test_known_urls_in_request_order_deduped(site_client, db_session):
         "sources": [
             wire("b", "https://b.example/two", blurb=""),
             wire("a", "https://a.example/one"),
-        ]
+        ],
+        "omitted": [],
     }
     assert response.headers["cache-control"] == "private, no-store"
 
@@ -138,15 +146,110 @@ async def test_unknown_urls_only_return_empty(site_client):
     client, _ = site_client
     response = await client.post(URL, json={"urls": ["https://nope.example/"]})
     assert response.status_code == 200
-    assert response.json() == {"sources": []}
+    assert response.json() == {"sources": [], "omitted": []}
 
 
-async def test_shared_url_returns_lowest_track_key(site_client, db_session):
+async def test_shared_url_matches_the_renderers_pick(site_client, db_session):
     client, _ = site_client
-    await seed_source(db_session, "z-later", "https://same.example/")
-    await seed_source(db_session, "a-first", "https://same.example/")
-    body = (await client.post(URL, json={"urls": ["https://same.example/"]})).json()
-    assert body == {"sources": [wire("a-first", "https://same.example/")]}
+    url = "https://same.example/"
+    # Inserted first, so a last-row-wins pick would choose z-last.
+    await seed_source(db_session, "a-first", url, blurb="First blurb")
+    await seed_source(db_session, "z-last", url, blurb="Last blurb")
+    body = (await client.post(URL, json={"urls": [url]})).json()
+    rendered = _source_to_article_card((await _load_sources(db_session, {url}))[url])
+    rendered.pop("type")
+    assert body == {"sources": [rendered], "omitted": []}
+    assert body["sources"][0] == wire("a-first", url, blurb="First blurb")
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_pick_sources_keeps_lowest_track_key_in_any_order(reverse):
+    rows = [
+        SimpleNamespace(url="u", track_key="b"),
+        SimpleNamespace(url="u", track_key="a"),
+        SimpleNamespace(url="u", track_key="c"),
+        SimpleNamespace(url="v", track_key="z"),
+    ]
+    picked = pick_sources(reversed(rows) if reverse else rows)
+    assert {url: src.track_key for url, src in picked.items()} == {"u": "a", "v": "z"}
+
+
+async def test_field_caps_match_the_renderers_card(site_client, db_session):
+    client, _ = site_client
+    url = "https://big.example/"
+    await seed_source(db_session, "big", url, blurb="é" * (2 * 1024 * 1024))
+    response = await client.post(URL, json={"urls": [url]})
+    assert response.status_code == 200
+    (source,) = response.json()["sources"]
+    assert source["blurb"] == "é" * ARTICLE_CARD_CAPS["blurb"] == "é" * 2000
+    rendered = _source_to_article_card((await _load_sources(db_session, {url}))[url])
+    rendered.pop("type")
+    assert source == rendered
+    assert len(response.content) < 10_000
+
+
+def test_card_caps_every_text_field_but_the_url():
+    url = "https://x.example/" + "u" * 3000
+    src = ResourceSource(
+        track_key="k" * 300,
+        title="t" * 600,
+        url=url,
+        byline="b" * 300,
+        blurb="z" * 3000,
+        learning_type="l" * 40,
+    )
+    card = _source_to_article_card(src)
+    assert card["url"] == url
+    assert {name: len(card[name]) for name in ARTICLE_CARD_CAPS} == ARTICLE_CARD_CAPS
+
+
+async def test_body_stays_within_the_cap_and_lists_the_rest(site_client, db_session):
+    client, _ = site_client
+    # 99 large sources (about 11 KB each) plus one unknown URL.
+    urls = [f"https://many.example/{n:03d}" for n in range(99)]
+    for n, url in enumerate(urls):
+        db_session.add(
+            ResourceSource(
+                track_key=f"many-{n:03d}",
+                title="🦀" * 512,
+                url=url,
+                byline="🦀" * 256,
+                blurb="🦀" * 2000,
+                learning_type="article",
+                first_indexed_at=date(2026, 10, 1),
+            )
+        )
+    await db_session.commit()
+    # Unknown URLs are neither answered nor omitted.
+    response = await client.post(URL, json={"urls": [*urls, "https://nope.example/"]})
+    assert response.status_code == 200
+    assert len(response.content) <= MAX_RESPONSE_BYTES
+    body = response.json()
+    sources, omitted = body["sources"], body["omitted"]
+    assert sources and omitted
+    assert [s["url"] for s in sources] + omitted == urls
+    assert all(s["blurb"] == "🦀" * 2000 for s in sources)
+    # The next source would not have fit: answering it grows the body by its
+    # encoded size less its omitted URL (every source here is the same size).
+    grows = len(encode_json(sources[0])) - len(encode_json(sources[0]["url"]))
+    assert len(response.content) + grows > MAX_RESPONSE_BYTES
+
+
+async def test_smaller_cap_omits_from_the_first_that_does_not_fit(
+    site_client, db_session, monkeypatch
+):
+    client, _ = site_client
+    urls = [f"https://few.example/{n}" for n in range(4)]
+    for n, url in enumerate(urls):
+        await seed_source(db_session, f"few-{n}", url, blurb="x" * 1000)
+    monkeypatch.setattr(site_resources, "MAX_RESPONSE_BYTES", 2500)
+    response = await client.post(URL, json={"urls": urls})
+    assert len(response.content) <= 2500
+    assert [s["url"] for s in response.json()["sources"]] == urls[:2]
+    assert response.json()["omitted"] == urls[2:]
+    monkeypatch.setattr(site_resources, "MAX_RESPONSE_BYTES", 10)
+    response = await client.post(URL, json={"urls": urls})
+    assert response.json() == {"sources": [], "omitted": urls}
 
 
 def test_fields_match_the_sdanswer_article_card():
@@ -292,7 +395,30 @@ async def test_real_skrift_site_key_authorization(test_engine, monkeypatch):
                 )
                 if name == "site":
                     assert response.json() == {
-                        "sources": [wire("a", "https://a.example/")]
+                        "sources": [wire("a", "https://a.example/")],
+                        "omitted": [],
                     }
     finally:
         invalidate_user_permissions_cache()
+
+
+def test_parity_script_prints_the_pick_for_duplicated_urls_only(tmp_path, capsys):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parents[2] / "scripts" / "parity" / "pick_sources.py"
+    spec = importlib.util.spec_from_file_location("pick_sources_script", path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    rows = [
+        {"url": "https://dup.example/", "track_key": "z-last", "title": "Z"},
+        {"url": "https://one.example/", "track_key": "only"},
+        {"url": "https://dup.example/", "track_key": "a-first", "title": "A"},
+    ]
+    catalog = tmp_path / "resources-catalog.json"
+    for data in (rows, {"resource_sources": rows}):
+        catalog.write_text(json.dumps(data))
+        assert script.main(["pick_sources.py", str(catalog)]) == 0
+        assert json.loads(capsys.readouterr().out) == {
+            "https://dup.example/": "a-first"
+        }
