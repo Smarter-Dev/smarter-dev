@@ -202,6 +202,11 @@ spec:
                         key: resend-api-key
                   - name: SKRIFT_ENV
                     value: "production"
+                  # Memory a sub-agent's run_code sandboxes may hold at once
+                  # (code_sandbox.py). Limit 1Gi, 364Mi in use (2026-10-24):
+                  # one 256 MiB run at a time.
+                  - name: CODE_SANDBOX_BUDGET_MIB
+                    value: "300"
                 resources:
                     requests:
                         cpu: 100m

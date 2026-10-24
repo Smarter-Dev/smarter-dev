@@ -144,7 +144,9 @@ def check_static(script: str) -> str | None:
 # functions here, so even a parse Monty defers to run time could do nothing.
 _COMPILED_SENTINEL = "handler-lint: parsed"
 _PARSE_ONLY_PREFIX = f"raise RuntimeError({_COMPILED_SENTINEL!r})\n"
-_PARSE_LIMITS = {"max_memory": 64 * 1024 * 1024, "max_feed_duration_secs": 5.0}
+# Parsing stops at the first line, so the worker stays near its ~9 MiB start
+# (the web pod, which lints, has little room).
+_PARSE_LIMITS = {"max_memory": 16 * 1024 * 1024, "max_feed_duration_secs": 5.0}
 
 
 def compiles(script: str) -> str | None:

@@ -234,6 +234,12 @@ spec:
                         key: resend-api-key
                   - name: SKRIFT_ENV
                     value: "production"
+                  # Memory sandboxes may hold at once (chat and site run_code
+                  # at 256 MiB, handler fires at 64; code_sandbox.py). Limit
+                  # 1Gi, 365Mi in use (2026-10-24): one chat run beside a few
+                  # fires, leaving ~260Mi for this pod's own agent runs.
+                  - name: CODE_SANDBOX_BUDGET_MIB
+                    value: "400"
                 resources:
                     requests:
                         cpu: 250m

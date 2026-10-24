@@ -63,6 +63,8 @@ async def env(test_engine, db_session, monkeypatch):
         if state.fail_submit:
             raise ConnectionError("queue down")
         state.submitted.append({"job_type": job_type, **payload, **options})
+        if state.worker == "claim-and-die":
+            await site_code.take_request(app_redis, payload["run_id"])
         if state.worker == "run":
             state.jobs.append(
                 asyncio.ensure_future(
@@ -196,8 +198,8 @@ async def test_a_member_runs_at_most_two_at_once(env):
     assert _run(env.tc, user.id).status_code == 200
 
 
-async def test_the_service_runs_at_most_four_at_once(env):
-    for ticket in "abcd":
+async def test_the_service_runs_at_most_three_at_once(env):
+    for ticket in "abc":
         assert await site_code.admit(env.redis, uuid4(), ticket) is None
     user = await _member(env.session)
     response = _run(env.tc, user.id)
@@ -243,7 +245,45 @@ async def test_a_timed_out_run_is_abandoned_and_a_late_job_runs_nothing(
         site_code_jobs.SiteCodePayload(run_id=job["run_id"])
     )
     assert late == {"status": "expired"}
-    assert await env.redis.keys("*") == []
+    assert await _only_the_abandon_mark(env.redis)
+
+
+async def test_an_admission_failure_is_a_plain_503(env, monkeypatch):
+    user = await _member(env.session)
+
+    async def broken(*args, **kwargs):
+        raise ConnectionError("redis down")
+
+    monkeypatch.setattr(site_code, "admit", broken)
+    response = _run(env.tc, user.id, code=SECRET_CODE)
+    assert response.status_code == 503
+    assert response.json() == {"detail": site_code_api.START_FAILED}
+    assert env.state.submitted == []
+
+
+async def test_a_worker_that_dies_holding_the_run_is_a_plain_503(env, monkeypatch):
+    # A job that took the call and stopped without a result: its heartbeat
+    # lapses, and the route says so well before its 45 s wait.
+    user = await _member(env.session)
+    monkeypatch.setattr(site_code, "HEARTBEAT_SECONDS", 0.2)
+    monkeypatch.setattr(site_code, "HEARTBEAT_TTL_SECONDS", 1)
+    env.state.worker = "claim-and-die"
+    response = _run(env.tc, user.id, code=SECRET_CODE)
+    assert response.status_code == 503
+    assert response.json() == {"detail": site_code.STOPPED}
+    assert await _only_the_abandon_mark(env.redis)
+
+
+async def _only_the_abandon_mark(redis) -> bool:
+    """Nothing of the run is left but its abandon mark, which holds no code
+    and lapses with the call's own TTL."""
+    keys = sorted(await redis.keys("*"))
+    if not all(key.startswith("site-code:abandoned:") for key in keys):
+        return False
+    for key in keys:
+        assert await redis.get(key) == "1"
+        assert 0 < await redis.ttl(key) <= site_code.REQUEST_TTL_SECONDS
+    return True
 
 
 async def test_an_unqueued_run_is_a_plain_503(env):
@@ -252,7 +292,7 @@ async def test_an_unqueued_run_is_a_plain_503(env):
     response = _run(env.tc, user.id, code=SECRET_CODE)
     assert response.status_code == 503
     assert response.json() == {"detail": site_code_api.START_FAILED}
-    assert await env.redis.keys("*") == []
+    assert await _only_the_abandon_mark(env.redis)
 
 
 async def test_nothing_logs_the_code_its_reason_or_its_output(env, caplog):

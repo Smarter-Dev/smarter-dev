@@ -519,6 +519,24 @@ async def test_random_globals_available_without_import():
     assert emitter.messages[0][1] == "5only12"
 
 
+async def test_a_fire_is_capped_at_its_own_small_memory_limit():
+    # 64 MiB: a fire shares the agent worker's sandbox budget (code_sandbox).
+    from smarter_dev.web.handler_runtime import SANDBOX_MAX_MEMORY
+
+    assert SANDBOX_MAX_MEMORY == 64 * 1024 * 1024
+    result, emitter, _ = await _run(
+        "x = 'a' * (80 * 1024 * 1024)\nawait send_message('x')\n"
+    )
+    assert result.outcome == "error"
+    assert (result.error or "").startswith("runtime: MemoryError:")
+    assert emitter.messages == []
+    small, emitter, _ = await _run(
+        "x = 'a' * (40 * 1024 * 1024)\nawait send_message(str(len(x)))\n"
+    )
+    assert small.outcome == "ok", small.error
+    assert emitter.messages[0][1] == str(40 * 1024 * 1024)
+
+
 async def test_import_of_a_host_module_still_errors():
     # Monty 1.x bundles more of the stdlib (random, time, hashlib...), all pure
     # compute; the judge still rejects any import beyond re/datetime/json/math.

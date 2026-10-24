@@ -138,10 +138,12 @@ def _monty_children() -> dict[int, int]:
     return out
 
 
-async def test_parallel_runs_stay_within_the_concurrency_and_memory_bound():
-    # Eight members each fill the memory limit at once. Without the bound,
-    # eight workers near 256 MiB would coexist (about 2 GiB in one pod).
-    hog = "x = []\nwhile True:\n    x.append('abcdefgh' * 100)\n"
+HOG = "x = []\nwhile True:\n    x.append('abcdefgh' * 100)\n"
+
+
+async def _hogs(count: int) -> tuple[list[str], int, int]:
+    """``count`` members filling their memory cap at once: each one's text,
+    the most workers alive at once and their most RSS together."""
     peak_workers = 0
     peak_rss = 0
     done = False
@@ -157,17 +159,102 @@ async def test_parallel_runs_stay_within_the_concurrency_and_memory_bound():
     sampler = asyncio.create_task(sample())
     try:
         results = await asyncio.wait_for(
-            asyncio.gather(*(run_code("hog", hog) for _ in range(8))), timeout=120
+            asyncio.gather(*(run_code("hog", HOG) for _ in range(count))), timeout=180
         )
     finally:
         done = True
         await sampler
-    assert all("MemoryError: memory limit exceeded" in text for text in results)
-    assert peak_workers <= code_sandbox.MAX_CONCURRENT_RUNS
-    assert peak_rss > MONTY_LIMITS["max_memory"]  # the sampler saw a hog at its limit
-    assert peak_rss <= code_sandbox.MAX_CONCURRENT_RUNS * (
-        MONTY_LIMITS["max_memory"] + 32 * MIB
+    return results, peak_workers, peak_rss
+
+
+@pytest.mark.parametrize(
+    ("budget", "cap", "workers"),
+    [
+        # Each deployment's budget (k8s/), and the default.
+        (128, 112, 1),  # the bot: one run, its cap cut to fit
+        (288, 256, 1),  # the default: one chat-size run
+        (300, 256, 1),  # chat-child-worker
+        (400, 256, 1),  # agent-worker: one chat-size run (and room for fires)
+        (560, 256, 2),
+    ],
+)
+async def test_parallel_runs_never_hold_more_than_the_budget(
+    monkeypatch, budget, cap, workers
+):
+    # Six members each fill the memory limit at once. Without the budget, six
+    # workers near 256 MiB would coexist (about 1.6 GiB in one pod).
+    monkeypatch.setenv(code_sandbox.BUDGET_ENV, str(budget))
+    results, peak_workers, peak_rss = await _hogs(6)
+    assert all(
+        "MemoryError: memory limit exceeded: " in text
+        and f"> {cap * MIB} bytes" in text
+        for text in results
+    ), results[0]
+    assert peak_workers == workers
+    assert peak_rss > (cap - 16) * MIB  # the sampler saw a hog near its cap
+    assert peak_rss <= budget * MIB
+
+
+@pytest.mark.parametrize("cap", [16, 112, 256])
+async def test_a_worker_at_its_cap_stays_within_the_overhead(monkeypatch, cap):
+    # What the budget reserves per run beyond its cap.
+    monkeypatch.setenv(
+        code_sandbox.BUDGET_ENV, str(cap + code_sandbox.WORKER_OVERHEAD_MIB)
     )
+    _, _, peak_rss = await _hogs(1)
+    assert peak_rss <= (cap + code_sandbox.WORKER_OVERHEAD_MIB) * MIB
+
+
+async def test_the_budget_grants_in_arrival_order():
+    budget = code_sandbox._Budget(100)
+    order: list[str] = []
+
+    async def hold(name: str, size: int, release: asyncio.Event):
+        async with budget.reserve(size):
+            order.append(name)
+            await release.wait()
+
+    first, big, small = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    a = asyncio.create_task(hold("first", 60, first))
+    await asyncio.sleep(0)
+    b = asyncio.create_task(hold("big", 80, big))
+    await asyncio.sleep(0)
+    c = asyncio.create_task(hold("small", 20, small))
+    await asyncio.sleep(0.01)
+    # 20 MiB would fit beside the first, but the big run arrived before it.
+    assert order == ["first"]
+    first.set()
+    await asyncio.sleep(0.01)
+    # Once the first is done, the big one goes first; the small one fits
+    # beside it.
+    assert order == ["first", "big", "small"]
+    assert budget.used == 100
+    big.set()
+    small.set()
+    await asyncio.gather(a, b, c)
+    assert budget.used == 0
+
+
+async def test_a_cancelled_wait_gives_its_place_back():
+    budget = code_sandbox._Budget(100)
+    holding = asyncio.Event()
+
+    async def hold():
+        async with budget.reserve(100):
+            await holding.wait()
+
+    holder = asyncio.create_task(hold())
+    await asyncio.sleep(0)
+    waiter = asyncio.create_task(budget.reserve(50).__aenter__())
+    await asyncio.sleep(0.01)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    holding.set()
+    await holder
+    assert budget.used == 0
+    async with budget.reserve(100):
+        assert budget.used == 100
 
 
 async def test_a_worker_exits_when_its_run_ends():

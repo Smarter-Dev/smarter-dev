@@ -8,13 +8,15 @@ Each run gets its own one-worker pool, so the worker exits when the run ends
 and its memory goes back to the OS: a worker that peaked at the memory limit
 never lingers. Spawning one costs about 5 ms.
 
-Member-written code is bounded per process by ``MAX_CONCURRENT_RUNS``. Every
-worker can grow to ``max_memory`` plus Monty's own ~10 MiB, so this bound is
-what keeps a burst of calls from adding several of those to the host pod's
-memory at once. A caller past the bound waits for a free place. Handler
-scripts pass ``bounded=False``: they are written by server admins, already
-run at most one per worker job slot, and hold their worker while they await
-Discord, so sharing two places with chat would stall every handler fire.
+**Memory.** A worker is a real process in the pod's cgroup, so every running
+sandbox counts against the pod's memory limit. Each process has a sandbox
+memory budget, ``CODE_SANDBOX_BUDGET_MIB`` (set per deployment in ``k8s/``,
+sized from the pod's limit and its own measured use). A run reserves its
+memory cap plus ``WORKER_OVERHEAD_MIB`` before its worker starts, and waits,
+first come first served, until that fits. A run's cap is what the caller asks
+for (``max_memory``), cut to what the budget can ever hold, and Monty enforces
+it inside the worker: past it the snippet gets ``MemoryError``. So the
+sandboxes running in a process never add more than the budget to its pod.
 
 The sandbox has no network, no filesystem (``open``/``os``/``pathlib`` raise
 ``PermissionError``), no environment and no packages; only Monty's bundled
@@ -27,17 +29,31 @@ is its execution time and ``max_feed_duration_secs`` bounds it; the pool's
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
+import math
+import os as _os
+import signal
 import weakref
+from collections.abc import AsyncIterator
+from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Mapping
 from typing import Any
 
 import pydantic_monty as monty
 
-# Workers that may run at once in one process. Each can reach max_memory plus
-# ~10 MiB, so this is the most code execution adds to a pod's memory.
-MAX_CONCURRENT_RUNS = 2
+MIB = 1024 * 1024
+
+# What a worker holds beyond its memory cap: Monty's own runtime. Measured on
+# 1.3.0 at caps of 16 to 256 MiB, a worker that hit its cap peaked at most
+# 10.5 MiB over it (tests/shared/code_sandbox_test.py checks this bound).
+WORKER_OVERHEAD_MIB = 16
+
+# A process that doesn't say: one run at the 256 MiB chat cap. Every
+# deployment that runs sandboxes sets its own (k8s/).
+DEFAULT_BUDGET_MIB = 288
+BUDGET_ENV = "CODE_SANDBOX_BUDGET_MIB"
 
 # Past a feed's time limit, how long the pool waits for the sandbox to raise
 # TimeoutError itself before killing the worker.
@@ -47,17 +63,113 @@ KILL_GRACE_SECONDS = 2.0
 # without counting against its time limit.
 OS_POLICY: monty.OSPolicy = {"sleep": "zero"}
 
-_semaphores: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = (
+
+class RunNotWanted(Exception):
+    """The run's caller gave up while it waited for a place; nothing ran."""
+
+
+def budget_mib() -> int:
+    """This process's sandbox memory budget, in MiB."""
+    raw = _os.environ.get(BUDGET_ENV, "")
+    try:
+        budget = int(raw) if raw else DEFAULT_BUDGET_MIB
+    except ValueError:
+        budget = DEFAULT_BUDGET_MIB
+    # Room for at least one small run.
+    return max(budget, WORKER_OVERHEAD_MIB + 16)
+
+
+def memory_cap_mib(requested_bytes: int | None, budget: int) -> int:
+    """A run's memory cap: what was asked, cut to what the budget can hold."""
+    most = budget - WORKER_OVERHEAD_MIB
+    if requested_bytes is None:
+        return most
+    return max(1, min(math.ceil(requested_bytes / MIB), most))
+
+
+class _Budget:
+    """MiB of sandbox memory one event loop may have running at once.
+
+    Reservations are granted in arrival order: a large run waiting at the
+    head isn't passed by smaller ones, so it can't wait forever.
+    """
+
+    def __init__(self, total: int) -> None:
+        self.total = total
+        self.used = 0
+        self._waiting: collections.deque[tuple[int, asyncio.Future[None]]] = (
+            collections.deque()
+        )
+
+    def _grant(self) -> None:
+        while self._waiting:
+            size, waiter = self._waiting[0]
+            if waiter.done():
+                self._waiting.popleft()
+                continue
+            if self.used + size > self.total:
+                return
+            self._waiting.popleft()
+            self.used += size
+            waiter.set_result(None)
+
+    @contextlib.asynccontextmanager
+    async def reserve(self, size: int) -> AsyncIterator[None]:
+        waiter = asyncio.get_running_loop().create_future()
+        self._waiting.append((size, waiter))
+        self._grant()
+        try:
+            await waiter
+        except BaseException:
+            if waiter.done() and not waiter.cancelled():
+                self.used -= size  # granted just as it was cancelled
+            waiter.cancel()
+            self._grant()
+            raise
+        try:
+            yield
+        finally:
+            self.used -= size
+            self._grant()
+
+
+_budgets: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, _Budget] = (
     weakref.WeakKeyDictionary()
 )
 
 
-def _semaphore() -> asyncio.Semaphore:
+def _budget() -> _Budget:
     loop = asyncio.get_running_loop()
-    semaphore = _semaphores.get(loop)
-    if semaphore is None:
-        semaphore = _semaphores[loop] = asyncio.Semaphore(MAX_CONCURRENT_RUNS)
-    return semaphore
+    budget = _budgets.get(loop)
+    if budget is None:
+        budget = _budgets[loop] = _Budget(budget_mib())
+    return budget
+
+
+def _alive(pid: int) -> bool:
+    """Whether ``pid`` still holds memory: running, not exited or a zombie."""
+    try:
+        stat = open(f"/proc/{pid}/stat").read()
+    except OSError:
+        return False
+    return stat[stat.rindex(")") + 2] != "Z"
+
+
+async def _until_gone(pid: int | None) -> None:
+    """Hold the run's place until its worker has really exited.
+
+    Leaving the pool returns before a cancelled run's worker is gone (it can
+    take a few hundred ms), and the place must not be reused while that
+    worker still holds its memory. Past two seconds it is killed.
+    """
+    if pid is None:
+        return
+    for _ in range(40):
+        if not _alive(pid):
+            return
+        await asyncio.sleep(0.05)
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        _os.kill(pid, signal.SIGKILL)
 
 
 async def run_sandboxed(
@@ -68,30 +180,42 @@ async def run_sandboxed(
     inputs: dict[str, Any] | None = None,
     external_lookup: dict[str, Any] | None = None,
     os: monty.OsHandler | None = None,
-    bounded: bool = True,
+    still_wanted: Callable[[], Awaitable[bool]] | None = None,
 ) -> Any:
     """Run ``code`` in a fresh Monty worker and return its trailing value.
+
+    ``still_wanted``, when given, is asked once a place in the budget is
+    held and before any worker starts; if it says no, nothing runs and
+    ``RunNotWanted`` is raised.
 
     Raises ``monty.MontySyntaxError`` for code that does not parse,
     ``monty.MontyRuntimeError`` for an exception in the snippet (including a
     breached memory, time or recursion limit) and ``monty.MontyCrashedError``
     when the worker died or overran its time limit by the kill grace.
     """
+    budget = _budget()
+    cap = memory_cap_mib(limits.get("max_memory"), budget.total)
+    limits = {**limits, "max_memory": cap * MIB}
     duration = limits.get("max_feed_duration_secs")
     request_timeout = None if duration is None else duration + KILL_GRACE_SECONDS
-    async with _semaphore() if bounded else contextlib.nullcontext():
-        async with monty.AsyncMonty(
-            min_processes=1,
-            max_processes=1,
-            request_timeout=request_timeout,
-        ) as pool:
-            async with pool.checkout(
-                limits=dict(limits), os_policy=OS_POLICY
-            ) as session:
-                return await session.feed_run(
-                    code,
-                    inputs=inputs,
-                    external_lookup=external_lookup,
-                    print_callback=print_callback,
-                    os=os,
-                )
+    async with budget.reserve(cap + WORKER_OVERHEAD_MIB):
+        if still_wanted is not None and not await still_wanted():
+            raise RunNotWanted
+        pid: int | None = None
+        try:
+            async with monty.AsyncMonty(
+                min_processes=1,
+                max_processes=1,
+                request_timeout=request_timeout,
+            ) as pool:
+                async with pool.checkout(limits=limits, os_policy=OS_POLICY) as session:
+                    pid = session.worker_pid
+                    return await session.feed_run(
+                        code,
+                        inputs=inputs,
+                        external_lookup=external_lookup,
+                        print_callback=print_callback,
+                        os=os,
+                    )
+        finally:
+            await asyncio.shield(_until_gone(pid))

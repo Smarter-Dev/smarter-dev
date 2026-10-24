@@ -208,7 +208,11 @@ def _surely_not_sent(error: BaseException) -> bool:
 # few seconds past the budget's own deadline so the budget fails first with a
 # clear cap name. Monty's clock runs only while the script computes, not while
 # it awaits a host function; host functions check the budget's deadline.
-SANDBOX_MAX_MEMORY = 256 * 1024 * 1024
+# A fire is a few lines of logic over its context and host functions. Its
+# worker shares the agent worker's sandbox budget with chat's run_code and
+# holds its place while it awaits Discord, so the cap is kept small: 64 MiB
+# lets four fires run beside one full-size chat run (code_sandbox).
+SANDBOX_MAX_MEMORY = 64 * 1024 * 1024
 SANDBOX_MAX_RECURSION_DEPTH = 500
 _DURATION_SLACK_SECONDS = 5.0
 # Monty counts every host-function call; its default ceiling is 1000. A fire's
@@ -1539,7 +1543,6 @@ async def run_handler_script(
             limits=limits,
             inputs={"context": context},
             external_lookup=execution.external_functions(),
-            bounded=False,
         )
     except monty.MontySyntaxError as exc:
         # Raised before the script runs, so the message can only quote the

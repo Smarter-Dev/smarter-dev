@@ -8,12 +8,16 @@ call. The run happens on the agent worker (``smarter_dev.web.site_code``).
 
 Errors: 404 for an unknown member, 429 while the member or the service has
 too many runs going (with ``Retry-After``), 504 when no result came back in
-time, 503 when the run couldn't be queued. Each is a plain sentence.
+time, 503 when the run couldn't be admitted or queued, or its worker stopped
+without a result. Each is a plain sentence.
 """
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import time
 from uuid import UUID
 from uuid import uuid4
 
@@ -74,9 +78,14 @@ class SiteCodeController(Controller):
         await db_session.close()
         redis = get_redis_client()
         run_id = uuid4().hex
-        refused = await site_code.admit(redis, member, run_id)
+        try:
+            refused = await site_code.admit(redis, member, run_id)
+        except Exception as error:  # noqa: BLE001 - a plain 503 for the site
+            logger.error("Site code admission failed (%s)", type(error).__name__)
+            raise plain_error(503, START_FAILED) from None
         if refused:
             raise BotApiException(429, {"detail": refused, "wait": 5})
+        finished = False
         try:
             await site_code.store_request(
                 redis, run_id, reason=data.reason, code=data.code
@@ -98,14 +107,32 @@ class SiteCodeController(Controller):
                 logger.error(
                     "Site code run couldn't be queued (%s)", type(error).__name__
                 )
-                await site_code.abandon(redis, run_id)
                 raise plain_error(503, START_FAILED) from None
-            text = await site_code.wait_for_result(
-                redis, run_id, site_code.WAIT_SECONDS
-            )
-            if text is None:
-                await site_code.abandon(redis, run_id)
-                raise plain_error(504, site_code.TIMED_OUT)
+            text = await _result(redis, run_id)
+            finished = True
             return {"result": text}
         finally:
-            await site_code.release(redis, member, run_id)
+            # Given up for any reason (504, a dead worker, an error, the
+            # request cancelled): the job must not run it, or stops it.
+            if not finished:
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(site_code.abandon(redis, run_id))
+            with contextlib.suppress(Exception):
+                await asyncio.shield(site_code.release(redis, member, run_id))
+
+
+async def _result(redis, run_id: str) -> str:
+    """The run's text, watching that a job that took the call stays alive."""
+    deadline = time.monotonic() + site_code.WAIT_SECONDS
+    while True:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            raise plain_error(504, site_code.TIMED_OUT)
+        text = await site_code.wait_for_result(
+            redis, run_id, min(site_code.HEARTBEAT_SECONDS, left)
+        )
+        if text is not None:
+            return text
+        if await site_code.worker_gone(redis, run_id):
+            logger.error("Site code run's worker stopped without a result")
+            raise plain_error(503, site_code.STOPPED)

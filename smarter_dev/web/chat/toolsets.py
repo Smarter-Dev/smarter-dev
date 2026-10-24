@@ -10,6 +10,7 @@ from dataclasses import field
 import httpx
 import pydantic_monty as monty
 
+from smarter_dev.shared.code_sandbox import RunNotWanted
 from smarter_dev.shared.code_sandbox import run_sandboxed
 from smarter_dev.web.chat.policy import IntelligencePolicy
 from smarter_dev.web.chat.safety import validate_public_url
@@ -85,17 +86,32 @@ class ExecutionCounters:
         return True
 
 
-async def run_code(reason: str, code: str) -> str:
-    """Execute Python without network/filesystem access in the Monty sandbox."""
+async def run_code(
+    reason: str,
+    code: str,
+    *,
+    still_wanted: Callable[[], Awaitable[bool]] | None = None,
+) -> str:
+    """Execute Python without network/filesystem access in the Monty sandbox.
+
+    ``still_wanted`` is passed to the sandbox (``code_sandbox.run_sandboxed``);
+    a run given up on while it waited raises ``RunNotWanted``."""
     if not (reason or "").strip() or not (code or "").strip():
         return "error: reason and code are required"
     collector = monty.CollectStreams()
     try:
         value = await run_sandboxed(
-            code, limits=MONTY_LIMITS, print_callback=collector
+            code,
+            limits=MONTY_LIMITS,
+            print_callback=collector,
+            still_wanted=still_wanted,
         )
+    except RunNotWanted:
+        raise
     except monty.MontyError as exc:
-        stdout = "".join(text for stream, text in collector.output if stream == "stdout")
+        stdout = "".join(
+            text for stream, text in collector.output if stream == "stdout"
+        )
         suffix = f"\nstdout before error:\n{stdout}" if stdout else ""
         return f"error: {type(exc).__name__}: {exc}{suffix}"[:MAX_CODE_OUTPUT_CHARS]
     except Exception as exc:
