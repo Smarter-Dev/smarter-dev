@@ -62,6 +62,11 @@ SITE_ROUTES = {
         "DELETE",
         "/api/site/search/users/{user_id:str}/runs/{run_id:str}",
     ): "site-search",
+    # A lost start's run, found or forgotten by its key (PR 221): the
+    # session hub looks one up every 10 s at most, the forget sweep every
+    # ten minutes, well inside the family's shared 3000 a minute.
+    ("GET", "/api/site/search/users/{user_id:str}/keys/{key:str}"): "site-search",
+    ("DELETE", "/api/site/search/users/{user_id:str}/keys/{key:str}"): "site-search",
 }
 
 # Each family's (limit, window seconds) pairs, as app.yaml sets them.
