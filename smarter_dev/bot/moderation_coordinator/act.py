@@ -116,15 +116,13 @@ def hacked_account_dm(
     guild_name: str | None, removed: int, until: float | None, *, timed_out: bool
 ) -> str:
     """What a likely hacked account is told (#333): what happened, and how to
-    take the account back. ``removed``: how many of its messages went;
-    ``until``: when its timeout ends (a warn has none)."""
+    take the account back. ``removed``: how many of its messages this decision
+    removed; ``until``: when its timeout ends (a warn has none).
+
+    The text names no count (#342): in a burst, the copies' own decisions may
+    remove more after this DM is sent, so any count could undercount."""
     server = f"**{guild_name}**" if guild_name else "the server"
-    if removed > 1:
-        what = f"we removed those messages ({removed})"
-    elif removed == 1:
-        what = "we removed that message"
-    else:
-        what = ""
+    what = "we removed what it posted" if removed > 0 else ""
     if timed_out:
         when = f"until <t:{int(until)}:f>" if until else "for now"
         what = (
@@ -533,7 +531,7 @@ class Executor:
                 logger.info(
                     "Coordinator review lines for message %s: %s",
                     facts.message_id,
-                    " | ".join(text for _, text in lines),
+                    review_text(lines),
                 )
             return None, False
         if not await self.still_owner(policy):
@@ -705,9 +703,10 @@ class Executor:
                 )
             ):
                 if hacked:
-                    until = (
-                        applied.expires_at.timestamp() if applied.expires_at else None
-                    )
+                    # A timeout already in place ends when it ends, not when
+                    # this decision asked for (#342).
+                    ends = applied.in_place_until or applied.expires_at
+                    until = ends.timestamp() if ends else None
                     text = hacked_account_dm(
                         self._guild_name(facts),
                         removed,
@@ -951,7 +950,9 @@ class Executor:
             )
         lead = _summary_lead(evaluation)
         if lead is not None:
-            lines.append((gw.ENTRY_SUMMARY, lead))
+            lines.append(
+                (gw.ENTRY_SUMMARY, lead, {"priority": LEAD_PRIORITY.get(lead, 0)})
+            )
         return lines
 
     def _trigger(
@@ -996,6 +997,13 @@ class Executor:
 # ---------------------------------------------------------------------------
 
 
+def review_text(lines) -> str:
+    """Report lines as one log line. A line is ``(kind, text)`` or, with its
+    details, ``(kind, text, details)`` (#342: a history line once raised
+    ValueError here)."""
+    return " | ".join(line[1] for line in lines)
+
+
 def _warning_dm(reason: str) -> str:
     """The standard warning DM, as the /warn command words it."""
     return (
@@ -1019,6 +1027,21 @@ def _removed(target: TargetDecision, result: gw.ActResult, deleted: set[str]) ->
     return len(wanted & deleted) if failed else len(wanted)
 
 
+#: Which summary lead wins in an incident with several decisions (#342): a
+#: confirmed violation over a clean release over an unanswered check, so a
+#: later copy's unknown verdict never overwrites "Confirmed scam".
+LEAD_CONFIRMED_HACKED = "Confirmed scam from a likely hacked account"
+LEAD_CONFIRMED = "Confirmed scam"
+LEAD_CLEAN = "Scam check found nothing"
+LEAD_INCOMPLETE = "Scam check incomplete"
+LEAD_PRIORITY = {
+    LEAD_CONFIRMED_HACKED: 3,
+    LEAD_CONFIRMED: 3,
+    LEAD_CLEAN: 2,
+    LEAD_INCOMPLETE: 1,
+}
+
+
 def _summary_lead(evaluation: Evaluation) -> str | None:
     """How the report's summary begins, for a scam check whose decision
     holds the outcome: a sanction, a clean release, or no verdict."""
@@ -1027,15 +1050,11 @@ def _summary_lead(evaluation: Evaluation) -> str | None:
     sanctioned = [t for t in decision.targets.values() if t.sanction is not None]
     if evaluation.scam_outcome == "violation" and sanctioned:
         hacked = any(NOTICE_SECURE_ACCOUNT in t.notices for t in sanctioned)
-        return (
-            "Confirmed scam from a likely hacked account"
-            if hacked
-            else "Confirmed scam"
-        )
+        return LEAD_CONFIRMED_HACKED if hacked else LEAD_CONFIRMED
     if provisional is not None and provisional.resolution == RELEASED:
-        return "Scam check found nothing"
+        return LEAD_CLEAN
     if provisional is not None and provisional.resolution == EXPIRED:
-        return "Scam check incomplete"
+        return LEAD_INCOMPLETE
     return None
 
 

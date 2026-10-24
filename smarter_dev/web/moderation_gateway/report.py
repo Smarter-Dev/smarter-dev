@@ -16,6 +16,7 @@ detectors asked to ping, so quoting a scam cannot re-broadcast it.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
@@ -152,20 +153,44 @@ _STATE_WORDS = {
     t.CLAIMED: "in progress",
 }
 
-#: Effects that did nothing: no line at all (#333). A refusal to act on a
-#: protected member is skipped too, and is still shown.
+#: Effects that did nothing: no line at all (#333).
 _IDLE_STATES = (t.COVERED, t.ABSENT, t.SKIPPED)
+
+#: Skips a moderator still needs to see (#342), by how the gateway's detail
+#: begins, with the summary's words. Anything else skipped (a duplicate, a
+#: weaker sanction, nothing to lift) did nothing worth a line.
+_PROTECTED = "protected"
+_SHOWN_SKIPS = (
+    (_PROTECTED, "refused on a protected member"),
+    ("a moderator reversed it", "stood down after a moderator reversed it"),
+    ("a timeout someone else set", "left a timeout someone else set"),
+    ("the timeout in place is someone else's", "left a timeout someone else set"),
+    ("not a member", "not done: not a member"),
+    ("already banned", "already banned"),
+)
+
+
+def _shown_skip(op: ReportOperation) -> tuple[str, str] | None:
+    """``(prefix, summary words)`` for a skip the report shows, else None."""
+    if op.state != t.SKIPPED:
+        return None
+    detail = op.detail or ""
+    return next((item for item in _SHOWN_SKIPS if detail.startswith(item[0])), None)
 
 
 def _idle(op: ReportOperation) -> bool:
-    return op.state in _IDLE_STATES and not (
-        op.state == t.SKIPPED and (op.detail or "").startswith("protected")
-    )
+    return op.state in _IDLE_STATES and _shown_skip(op) is None
 
 
 #: How an effect ranks when the report must be trimmed.
-_DONE = 1  # confirmed
-_PINNED = 2  # failed, unknown or in progress: a moderator may have to act
+_DONE = 1  # confirmed, or skipped for a reason worth showing
+_PINNED = 2  # failed, unknown, in progress, or refused on a protected member
+
+#: What a dropped line is counted as.
+_TAG_DONE = "confirmed"
+_TAG_SKIPPED = "not done"
+_TAG_PINNED = "failed or unresolved"
+_TAG_REFUSED = "refused (protected)"
 _SANCTIONS = (t.BAN, t.KICK, t.TIMEOUT, t.WARN)
 
 
@@ -260,7 +285,23 @@ class _Line:
     at: float | None
     order: int
     text: str
+    source: str
     rank: int = _DONE
+    tag: str = _TAG_DONE
+
+
+def _lead(facts: ReportFacts, reasons: list[str]) -> str:
+    """The summary's opening: the strongest ``summary`` entry (newest among
+    equals), so a later unknown verdict never overwrites a confirmed one;
+    without one, the first reason."""
+    leads = [
+        (int((entry.details or {}).get("priority") or 0), index, entry.rule)
+        for index, entry in enumerate(facts.entries)
+        if entry.kind == t.ENTRY_SUMMARY and entry.rule
+    ]
+    if leads:
+        return max(leads)[2]
+    return reasons[0] if reasons else "Recorded"
 
 
 def _summary(
@@ -268,14 +309,7 @@ def _summary(
 ) -> str:
     """One line: what it was, what was done, whether the member was told,
     and their history."""
-    lead = next(
-        (
-            entry.rule
-            for entry in reversed(facts.entries)
-            if entry.kind == t.ENTRY_SUMMARY and entry.rule
-        ),
-        None,
-    ) or (reasons[0] if reasons else "Recorded")
+    lead = _lead(facts, reasons)
     confirmed = [op for op in facts.operations if op.state == t.CONFIRMED]
     parts: list[str] = []
     removed = {
@@ -313,12 +347,38 @@ def _summary(
             parts.append(f"held for {_span(holds[0].duration_seconds)}")
         else:
             parts.append("hold lifted")
-    told: dict[str, bool] = {}
-    for entry in facts.entries:
-        if entry.kind == t.ENTRY_DELIVERY and entry.target_user_id:
-            told[entry.target_user_id] = bool((entry.details or {}).get("delivered"))
-    if told:
-        parts.append("told by DM" if all(told.values()) else "**DM not delivered**")
+    skipped: dict[str, set[str]] = {}
+    for op in facts.operations:
+        shown = _shown_skip(op)
+        if shown is not None:
+            skipped.setdefault(shown[1], set()).add(op.target_user_id)
+    for prefix, words in dict.fromkeys((item[0], item[1]) for item in _SHOWN_SKIPS):
+        targets = skipped.pop(words, None)
+        if not targets:
+            continue
+        if prefix == _PROTECTED:
+            words = (
+                f"refused on {len(targets)} protected members"
+                if len(targets) > 1
+                else words
+            )
+            parts.append(f"**{words}**")
+        else:
+            parts.append(words)
+    # Every DM, not the last per member (#342): "told" only if all arrived.
+    delivered = [
+        bool((entry.details or {}).get("delivered"))
+        for entry in facts.entries
+        if entry.kind == t.ENTRY_DELIVERY
+    ]
+    if delivered:
+        missed = delivered.count(False)
+        if not missed:
+            parts.append("told by DM")
+        elif missed == len(delivered) == 1:
+            parts.append("**DM not delivered**")
+        else:
+            parts.append(f"**{missed} of {len(delivered)} DMs not delivered**")
     if pinned:
         parts.append(f"**{pinned} failed or unresolved**")
     history = next(
@@ -358,8 +418,10 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     # Who did it, only when more than one system (or a moderator) took part.
     by = len(sources) > 1
 
-    def stamp(at: float | None, text: str, source: str) -> str:
-        when = f"<t:{int(at)}:T> " if at is not None else ""
+    def stamp(at: float | None, text: str, source: str, *, dated: bool) -> str:
+        # The date is given on the first line and wherever it changes, so a
+        # time is never ambiguous across midnight (#342).
+        when = f"<t:{int(at)}:{'f' if dated else 'T'}> " if at is not None else ""
         suffix = f" · {actor_label(source)}" if by else ""
         return f"- {when}{text}{suffix}"
 
@@ -374,20 +436,23 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         if op.state == t.SKIPPED:
             text = f"{_who(op)}: {_effect_words(facts.guild_id, op)}: not done"
             text += f" ({sanitize(op.detail, 160)})"
-            rank = _DONE
+            # A staff refusal ranks with failures: trimming keeps it (#342).
+            refused = (op.detail or "").startswith(_PROTECTED)
+            rank = _PINNED if refused else _DONE
+            tag = _TAG_REFUSED if refused else _TAG_SKIPPED
         elif op.state == t.CONFIRMED:
             text = _done_words(facts.guild_id, op, held)
             if op.kind in _SANCTIONS and op.reason:
                 text += f": {sanitize(op.reason, 200)}"
                 given.append(_norm(op.reason))
-            rank = _DONE
+            rank, tag = _DONE, _TAG_DONE
         else:
             text = f"{_who(op)}: {_effect_words(facts.guild_id, op)}: "
             text += _STATE_WORDS.get(op.state, op.state)
             if op.detail:
                 text += f" ({sanitize(op.detail, 160)})"
-            rank = _PINNED
-        effects.append(_Line(op.at, order, stamp(op.at, text, op.actor), rank))
+            rank, tag = _PINNED, _TAG_PINNED
+        effects.append(_Line(op.at, order, text, op.actor, rank, tag))
 
     reasons: list[_Line] = []
     reason_texts: list[str] = []
@@ -405,11 +470,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         given.append(_norm(entry.rule))
         order += 1
         reasons.append(
-            _Line(
-                entry.at,
-                order,
-                stamp(entry.at, _capital(sanitize(entry.rule, 200)), entry.source),
-            )
+            _Line(entry.at, order, _capital(sanitize(entry.rule, 200)), entry.source)
         )
 
     quotes = [
@@ -441,7 +502,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             continue
         noted.add(text)
         order += 1
-        bucket.append(_Line(entry.at, order, stamp(entry.at, text, entry.source)))
+        bucket.append(_Line(entry.at, order, text, entry.source))
 
     history_entry = next(
         (
@@ -460,7 +521,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     summary = _summary(
         facts,
         reason_texts,
-        sum(1 for line in effects if line.rank == _PINNED),
+        sum(1 for line in effects if line.tag == _TAG_PINNED),
         held,
     )
 
@@ -486,17 +547,15 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
 
     def counters() -> list[str]:
         lines = []
-        dropped = [
-            effects[i].rank for i in range(len(effects)) if i not in kept_effects
-        ]
+        dropped = [effects[i].tag for i in range(len(effects)) if i not in kept_effects]
         if dropped:
             counts = []
-            pinned = dropped.count(_PINNED)
-            done = dropped.count(_DONE)
-            if pinned:
-                counts.append(f"**{pinned} failed or unresolved**")
-            if done:
-                counts.append(f"{done} confirmed")
+            for tag in (_TAG_REFUSED, _TAG_PINNED, _TAG_DONE, _TAG_SKIPPED):
+                count = dropped.count(tag)
+                if not count:
+                    continue
+                pinned = tag in (_TAG_REFUSED, _TAG_PINNED)
+                counts.append(f"**{count} {tag}**" if pinned else f"{count} {tag}")
             lines.append(f"- …and {len(dropped)} more ({', '.join(counts)})")
         if len(reasons) > kept_reasons:
             lines.append(f"- …and {len(reasons) - kept_reasons} more reason(s)")
@@ -518,11 +577,23 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
                 line.order,
             )
         )
+        rendered: list[str] = []
+        day: str | None = None
+        for line in timeline:
+            today = (
+                time.strftime("%Y-%m-%d", time.gmtime(line.at))
+                if line.at is not None
+                else None
+            )
+            dated = today is not None and today != day
+            if today is not None:
+                day = today
+            rendered.append(stamp(line.at, line.text, line.source, dated=dated))
         parts = [
             *head,
             *kept_quotes,
             *counters(),
-            *(line.text for line in timeline),
+            *rendered,
             *kept_history,
             summary,
             *tail,
@@ -543,7 +614,8 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     # Too long: the least important goes first. Quotes, then the history
     # line, notes and assessments (oldest first), DM lines, then confirmed
     # effects (oldest first), then reasons. Failed, unknown and in-progress
-    # effects and alerts go only when they alone overflow, oldest first and
+    # effects, refusals on protected members (#342) and alerts go only when
+    # they alone overflow, oldest first and
     # counted: failures down to the newest, alerts down to the newest, then
     # that last failure. The newest effect, the summary and the marker line
     # always stay.

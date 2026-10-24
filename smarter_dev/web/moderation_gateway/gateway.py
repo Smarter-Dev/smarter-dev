@@ -134,6 +134,7 @@ class _Decision:
     released_claims: tuple[UUID, ...] = ()
     key: str | None = None  # the idempotency key, when the decision fixed it
     superseded: bool = False  # skipped for a sanction already in the incident
+    in_place_until: float | None = None  # covered: the timeout already in place
 
 
 class Reservation:
@@ -961,6 +962,7 @@ class ModerationGateway:
                     state=t.COVERED,
                     detail=f"already timed out until <t:{int(current)}:f>",
                     until=desired,
+                    in_place_until=current,
                 )
         return _Decision(until=desired, key=key)
 
@@ -1082,6 +1084,11 @@ class ModerationGateway:
             requested["provisional"] = True
         if proposal.dm_only:
             requested["dm_only"] = True
+        result = (
+            {"in_place_until": decision.in_place_until}
+            if decision.in_place_until is not None
+            else None
+        )
         return ModerationOperation(
             id=uuid.uuid4(),
             incident_id=incident_id,
@@ -1096,6 +1103,7 @@ class ModerationGateway:
             channel_id=proposal.channel_id or trigger.channel_id,
             message_ids=list(decision.message_ids or proposal.message_ids) or None,
             requested=requested or None,
+            result=result,
             detail=decision.detail or None,
             claim_key=proposal.claim,
             expires_at=decision.until if proposal.kind == t.TIMEOUT else None,
@@ -1287,6 +1295,7 @@ class ModerationGateway:
             expires_at=t.from_epoch(op.expires_at),
             deleted=tuple(result.get("deleted") or ()),
             missing=tuple(result.get("missing") or ()),
+            in_place_until=t.from_epoch(result.get("in_place_until")),
         )
 
     async def _settle_simple(
