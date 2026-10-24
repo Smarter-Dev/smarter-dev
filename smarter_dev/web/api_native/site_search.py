@@ -27,6 +27,7 @@ from litestar import post
 from litestar.exceptions import HTTPException
 from litestar.exceptions.responses import create_exception_response
 from litestar.status_codes import HTTP_201_CREATED
+from litestar.status_codes import HTTP_204_NO_CONTENT
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -217,6 +218,20 @@ class SiteSearchController(Controller):
                 409, "Wait for this search to finish, then delete it."
             ) from None
         return {"status": "deleted"}
+
+    @get(
+        "/users/{owner_id:str}/link-owner",
+        guards=SITE_SEARCH_GUARDS,
+        status_code=HTTP_204_NO_CONTENT,
+    )
+    async def link_owner(self, db_session: AsyncSession, owner_id: str) -> None:
+        """Whether a search link's owner is still here. The site asks before
+        every answer under /s/<token> (a prefetch, an empty question, the
+        OpenSearch description included), as the /s/ page finds the link's
+        row before anything else: yes (204) for an active or closing owner,
+        404 once the deletion job has deleted them. It reads only, and says
+        nothing that tells a closing owner from an active one."""
+        await _owner_of(db_session, owner_id)
 
     @post(
         "/users/{owner_id:str}/anonymous-runs",
