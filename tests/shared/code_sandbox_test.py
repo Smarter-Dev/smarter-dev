@@ -260,11 +260,7 @@ async def test_a_cancelled_wait_gives_its_place_back():
         assert budget.used == 100
 
 
-async def test_a_worker_exits_when_its_run_ends(monkeypatch):
-    # A worker that peaked at the memory limit must not linger holding it:
-    # its run's own pool closes with it, so nothing has to be killed.
-    killed = []
-    monkeypatch.setattr(code_sandbox._os, "kill", lambda *args: killed.append(args))
+async def test_a_worker_exits_when_its_run_ends():
+    # A worker that peaked at the memory limit must not linger holding it.
     await _run("x = [0] * 10_000_000\nlen(x)")
     assert _monty_children() == {}
-    assert killed == []

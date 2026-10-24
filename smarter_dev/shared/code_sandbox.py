@@ -33,7 +33,6 @@ import collections
 import contextlib
 import math
 import os as _os
-import signal
 import weakref
 from collections.abc import AsyncIterator
 from collections.abc import Awaitable
@@ -146,32 +145,6 @@ def _budget() -> _Budget:
     return budget
 
 
-def _alive(pid: int) -> bool:
-    """Whether ``pid`` still holds memory: running, not exited or a zombie."""
-    try:
-        stat = open(f"/proc/{pid}/stat").read()
-    except OSError:
-        return False
-    return stat[stat.rindex(")") + 2] != "Z"
-
-
-async def _until_gone(pid: int | None) -> None:
-    """Hold the run's place until its worker has really exited.
-
-    Leaving the pool returns before a cancelled run's worker is gone (it can
-    take a few hundred ms), and the place must not be reused while that
-    worker still holds its memory. Past two seconds it is killed.
-    """
-    if pid is None:
-        return
-    for _ in range(40):
-        if not _alive(pid):
-            return
-        await asyncio.sleep(0.05)
-    with contextlib.suppress(ProcessLookupError, PermissionError):
-        _os.kill(pid, signal.SIGKILL)
-
-
 async def run_sandboxed(
     code: str,
     *,
@@ -201,21 +174,19 @@ async def run_sandboxed(
     async with budget.reserve(cap + WORKER_OVERHEAD_MIB):
         if still_wanted is not None and not await still_wanted():
             raise RunNotWanted
-        pid: int | None = None
-        try:
-            async with monty.AsyncMonty(
-                min_processes=1,
-                max_processes=1,
-                request_timeout=request_timeout,
-            ) as pool:
-                async with pool.checkout(limits=limits, os_policy=OS_POLICY) as session:
-                    pid = session.worker_pid
-                    return await session.feed_run(
-                        code,
-                        inputs=inputs,
-                        external_lookup=external_lookup,
-                        print_callback=print_callback,
-                        os=os,
-                    )
-        finally:
-            await asyncio.shield(_until_gone(pid))
+        # Leaving the pool ends its worker, a cancelled run's included
+        # (tests/web/site_code_lifecycle_test.py checks none is left alive
+        # when the place is given back).
+        async with monty.AsyncMonty(
+            min_processes=1,
+            max_processes=1,
+            request_timeout=request_timeout,
+        ) as pool:
+            async with pool.checkout(limits=limits, os_policy=OS_POLICY) as session:
+                return await session.feed_run(
+                    code,
+                    inputs=inputs,
+                    external_lookup=external_lookup,
+                    print_callback=print_callback,
+                    os=os,
+                )
