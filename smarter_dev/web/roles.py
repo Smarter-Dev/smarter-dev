@@ -104,6 +104,7 @@ register_role(
     "site-identity",
     "site-search",
     "site-resources",
+    "site-code",
     display_name="Site Service",
-    description="Site backend service account — memory, privacy, billing, search and resources API access",
+    description="Site backend service account — memory, privacy, billing, search, resources and code API access",
 )

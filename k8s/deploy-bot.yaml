@@ -174,6 +174,13 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: media-api-key
+                  # Memory run_code's sandboxes may hold at once
+                  # (smarter_dev/shared/code_sandbox.py): one 64 MiB run plus
+                  # Monty's 16. Limit 612Mi; the bot read 305Mi on 2026-10-24
+                  # (425Mi under load on 2026-09-25), so the worst case,
+                  # with the handler linter, is ~411Mi (~531Mi under load).
+                  - name: CODE_SANDBOX_BUDGET_MIB
+                    value: "80"
                 resources:
                     requests:
                         cpu: 50m

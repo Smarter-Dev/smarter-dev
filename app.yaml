@@ -100,6 +100,7 @@ controllers:
   - smarter_dev.web.api_native.site_billing:SiteBillingController
   - smarter_dev.web.api_native.site_search:SiteSearchController
   - smarter_dev.web.api_native.site_resources:SiteResourcesController
+  - smarter_dev.web.api_native.site_code:SiteCodeController
   - smarter_dev.web.api_native.site_identity:SiteIdentityController
   - smarter_dev.web.api_native.search_previews:SearchPreviewPersistenceController
   # Signed-link per-channel bot config (no auth_guard: the link is the
@@ -331,6 +332,23 @@ rate_limit:
       limits:
         - limit: 300
           per: minute
+    # The site chat's run_code (docs/site-code.md). Its path names the member
+    # (/api/site/code/users/{id}/runs), so the rule matches the route's fixed
+    # prefix, POST only; no other route lives under it today, and any POST
+    # route added under /api/site/code/users/ later inherits this rule.
+    # 600/min: one call per run_code in a chat answer, from Worker egress that
+    # many members may share; the route itself admits only 2 runs per member
+    # and 3 in all, so this only stops a flood before it reaches the database
+    # or Redis.
+    - name: site-code
+      match:
+        path: /api/site/code/users/
+        prefix: true
+        method: POST
+      key: ip
+      limits:
+        - limit: 600
+          per: minute
     # Any other /api/site/ route until it gets a family of its own.
     - name: site
       match:
@@ -419,6 +437,7 @@ workers:
     - smarter_dev.web.handlers_jobs
     - smarter_dev.web.admin_handlers_jobs
     - smarter_dev.web.web_search_jobs
+    - smarter_dev.web.site_code_jobs
     - smarter_dev.web.chat_bot_purge_jobs
 
 agents:

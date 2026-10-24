@@ -519,10 +519,29 @@ async def test_random_globals_available_without_import():
     assert emitter.messages[0][1] == "5only12"
 
 
-async def test_import_random_still_errors():
-    # random is injected as globals; `import random` must still fail loud so the
-    # judge's "reject disallowed imports" guidance matches runtime reality.
-    result, emitter, _ = await _run("import random\nawait send_message('x')\n")
+async def test_a_fire_is_capped_at_its_own_small_memory_limit():
+    # 32 MiB: a fire shares the agent worker's sandbox budget (code_sandbox).
+    from smarter_dev.web.handler_runtime import SANDBOX_MAX_MEMORY
+
+    assert SANDBOX_MAX_MEMORY == 32 * 1024 * 1024
+    result, emitter, _ = await _run(
+        "x = 'a' * (40 * 1024 * 1024)\nawait send_message('x')\n"
+    )
+    assert result.outcome == "error"
+    assert (result.error or "").startswith("runtime: MemoryError:")
+    assert emitter.messages == []
+    small, emitter, _ = await _run(
+        "x = 'a' * (16 * 1024 * 1024)\nawait send_message(str(len(x)))\n"
+    )
+    assert small.outcome == "ok", small.error
+    assert emitter.messages[0][1] == str(16 * 1024 * 1024)
+
+
+async def test_import_of_a_host_module_still_errors():
+    # Monty 1.x bundles more of the stdlib (random, time, hashlib...), all pure
+    # compute; the judge still rejects any import beyond re/datetime/json/math.
+    # What must hold at runtime is that nothing reaching the host imports.
+    result, emitter, _ = await _run("import socket\nawait send_message('x')\n")
     assert result.outcome == "error"
     assert (result.error or "").startswith("runtime: ModuleNotFoundError: [message content]")
     assert emitter.messages == []
@@ -544,8 +563,8 @@ async def test_a_runtime_error_keeps_its_type_and_frames_but_not_its_message():
 
 
 async def test_datetime_now_returns_host_clock():
-    # datetime.now(tz) is an OS call Monty refuses unless the host wires a clock;
-    # _clock_os grants it. A script must be able to compute a recency window
+    # Monty's default clock policy answers datetime.now(tz) from the worker's
+    # clock. A script must be able to compute a recency window
     # against an ISO timestamp from context — the canonical "new account" guard.
     script = (
         "import datetime\n"

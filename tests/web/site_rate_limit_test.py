@@ -31,6 +31,7 @@ SAMPLE_ID = "123456789012345678"
 # A new site route fails test_site_routes_match_this_table until it is placed.
 SITE_ROUTES = {
     ("GET", "/api/site/billing/catalog"): "site-billing",
+    ("POST", "/api/site/code/users/{user_id:str}/runs"): "site-code",
     ("GET", "/api/site/billing/users/{user_id:str}/membership"): "site-billing",
     ("POST", "/api/site/billing/users/{user_id:str}/checkout"): "site-billing",
     ("POST", "/api/site/billing/users/{user_id:str}/portal"): "site-billing",
@@ -81,6 +82,7 @@ FAMILY_LIMITS = {
     "site-memory": [(600, 60.0)],
     "site-identity": [(300, 60.0)],
     "site-privacy": [(300, 60.0)],
+    "site-code": [(600, 60.0)],
     "site": [(600, 60.0)],
 }
 
@@ -98,6 +100,7 @@ FAMILY_REQUESTS = {
     ],
     "site-identity": [("PUT", f"/api/site/identities/{SAMPLE_ID}")],
     "site-privacy": [("GET", f"/api/site/privacy/opt-out/{SAMPLE_ID}")],
+    "site-code": [("POST", f"/api/site/code/users/{SAMPLE_ID}/runs")],
     "site": [("POST", "/api/site/not-yet-a-family/x")],
 }
 DEFAULT_REQUEST = ("GET", "/chat")

@@ -10,6 +10,8 @@ from dataclasses import field
 import httpx
 import pydantic_monty as monty
 
+from smarter_dev.shared.code_sandbox import RunNotWanted
+from smarter_dev.shared.code_sandbox import run_sandboxed
 from smarter_dev.web.chat.policy import IntelligencePolicy
 from smarter_dev.web.chat.safety import validate_public_url
 from smarter_dev.web.research_tools import brave_search
@@ -17,10 +19,13 @@ from smarter_dev.web.research_tools import jina_read
 
 RAW_READ_CHAR_LIMIT = 100_000
 MAX_CODE_OUTPUT_CHARS = 10_000
+# 64 MiB: every snippet in the run_code parity corpus and the sandbox tests
+# runs within it (a 2-million-item list is the first that doesn't), and it
+# keeps each pod's sandboxes small (smarter_dev/shared/code_sandbox.py).
 MONTY_LIMITS = {
-    "max_memory": 256 * 1024 * 1024,
+    "max_memory": 64 * 1024 * 1024,
     "max_recursion_depth": 500,
-    "max_duration_secs": 10.0,
+    "max_feed_duration_secs": 10.0,
 }
 
 
@@ -84,16 +89,28 @@ class ExecutionCounters:
         return True
 
 
-async def run_code(reason: str, code: str) -> str:
-    """Execute Python without network/filesystem access in the Monty sandbox."""
+async def run_code(
+    reason: str,
+    code: str,
+    *,
+    still_wanted: Callable[[], Awaitable[bool]] | None = None,
+) -> str:
+    """Execute Python without network/filesystem access in the Monty sandbox.
+
+    ``still_wanted`` is passed to the sandbox (``code_sandbox.run_sandboxed``);
+    a run given up on while it waited raises ``RunNotWanted``."""
     if not (reason or "").strip() or not (code or "").strip():
         return "error: reason and code are required"
     collector = monty.CollectStreams()
     try:
-        compiled = monty.Monty(code)
-        value = await compiled.run_async(
-            limits=MONTY_LIMITS, print_callback=collector
+        value = await run_sandboxed(
+            code,
+            limits=MONTY_LIMITS,
+            print_callback=collector,
+            still_wanted=still_wanted,
         )
+    except RunNotWanted:
+        raise
     except monty.MontyError as exc:
         stdout = "".join(text for stream, text in collector.output if stream == "stdout")
         suffix = f"\nstdout before error:\n{stdout}" if stdout else ""

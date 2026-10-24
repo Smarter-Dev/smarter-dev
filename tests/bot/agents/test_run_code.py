@@ -75,3 +75,12 @@ async def test_run_code_stdlib_computation():
         "len([v for v in vals if re.fullmatch(r'#[0-9a-fA-F]{6}', v)])",
     )
     assert "return value: 2" in out
+
+
+@pytest.mark.asyncio
+async def test_run_code_is_capped_like_web_chat():
+    # 64 MiB, as web chat's run_code (smarter_dev/web/chat/toolsets.py).
+    ctx = _ctx()
+    out = await run_code(ctx, "allocating", "x = 'a' * (72 * 1024 * 1024)\nlen(x)")
+    assert "RUNTIME ERROR — MontyRuntimeError: MemoryError" in out
+    assert out.endswith(f"> {64 * 1024 * 1024} bytes")

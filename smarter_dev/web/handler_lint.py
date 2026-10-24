@@ -138,15 +138,33 @@ def check_static(script: str) -> str | None:
     return None
 
 
+# Monty 1.x has no parse-only call: it parses a whole feed, then runs it. A
+# first line that raises stops the run before any of the script executes, so
+# reaching it means the script parsed. The script has no context and no host
+# functions here, so even a parse Monty defers to run time could do nothing.
+_COMPILED_SENTINEL = "handler-lint: parsed"
+_PARSE_ONLY_PREFIX = f"raise RuntimeError({_COMPILED_SENTINEL!r})\n"
+# Parsing stops at the first line, so the worker stays near its ~9 MiB start
+# (the web pod, which lints, has little room).
+_PARSE_LIMITS = {"max_memory": 16 * 1024 * 1024, "max_feed_duration_secs": 5.0}
+
+
 def compiles(script: str) -> str | None:
     """Parse the script with Monty. Return a compile error message, or None."""
     import pydantic_monty as monty
 
     try:
-        monty.Monty(script, inputs=["context"], type_check=False)
+        with monty.Monty(min_processes=1, max_processes=1) as pool:
+            with pool.checkout(limits=_PARSE_LIMITS) as session:
+                session.feed_run(
+                    _PARSE_ONLY_PREFIX + script, print_callback=lambda *_: None
+                )
     except monty.MontyError as exc:
+        if str(exc) == f"RuntimeError: {_COMPILED_SENTINEL}":
+            return None
         return f"{type(exc).__name__}: {exc}"
-    return None
+    # Unreachable: the first line always raises.
+    return "script ran past its parse-only guard"
 
 
 def lint_script(script: str) -> str | None:

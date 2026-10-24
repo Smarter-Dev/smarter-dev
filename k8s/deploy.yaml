@@ -233,6 +233,12 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: media-api-key
+                  # The web pod runs no sandbox budget's worth of code: only
+                  # the handler linter's parse (16 MiB cap, outside it). Kept
+                  # small so nothing run here by mistake can fill the pod
+                  # (384Mi, ~352Mi in use on 2026-10-24).
+                  - name: CODE_SANDBOX_BUDGET_MIB
+                    value: "32"
                 resources:
                     requests:
                         cpu: 75m
