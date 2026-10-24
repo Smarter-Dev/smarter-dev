@@ -360,3 +360,124 @@ async def test_a_start_that_waited_out_a_forget_and_the_purge_makes_no_run(
                 select(WorkDispatch).where(WorkDispatch.job_type == "web_search.run")
             )
         ).all() == []
+
+
+# The dashboard's and the search link's own routes, through ASGI with a
+# session: a delete that rolls back (a run kept running, or gone) must not
+# leave the handler reading an expired user (a 500), and a search link that
+# waited out the account's purge answers 410, never a 500.
+
+
+@pytest.fixture
+async def routes(db):
+    from litestar import Request
+    from litestar import post
+    from litestar.middleware.session.client_side import CookieBackendConfig
+    from skrift.auth.session_keys import SESSION_USER_ID
+
+    from smarter_dev.web.chat.csrf import CSRF_SESSION_KEY
+    from smarter_dev.web.dashboard_controller import DashboardController
+    from smarter_dev.web.search_link_controller import SearchLinkController
+
+    maker, _client = db
+    sessions = CookieBackendConfig(secret=os.urandom(16))
+
+    async def session():
+        async with maker() as s:
+            yield s
+
+    # This test's own way in: the session the dashboard reads, as sign-in
+    # leaves it (no real login, no credential).
+    @post("/test-session/{user_id:str}", status_code=204)
+    async def sign_in_route(request: Request, user_id: str) -> None:
+        request.session[SESSION_USER_ID] = user_id
+        request.session[CSRF_SESSION_KEY] = "csrf"
+
+    app = Litestar(
+        route_handlers=[DashboardController, SearchLinkController, sign_in_route],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(session)},
+        middleware=[sessions.middleware],
+        debug=True,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+
+        async def sign_in(user_id):
+            assert (await client.post(f"/test-session/{user_id}")).status_code == 204
+
+        yield maker, client, sign_in
+
+
+CSRF = {"X-CSRF-Token": "csrf"}
+
+
+async def test_dashboard_delete_all_with_a_search_running_answers_what_it_kept(routes):
+    maker, client, sign_in = routes
+    owner = await _member(maker)
+    finished, _ = await _finished_site_run(maker, owner)
+    async with maker() as s:
+        running = await dashboard_controller.create_search(
+            s, owner, "a request", uuid4().hex
+        )
+    await sign_in(owner)
+    response = await client.delete("/dashboard/api/searches", headers=CSRF)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["deleted"], body["running"]) == (1, 1)
+    assert [row["id"] for row in body["searches"]] == [str(running.id)]
+
+
+async def test_dashboard_single_delete_of_a_run_gone_meanwhile_answers(
+    routes, monkeypatch
+):
+    """Another request deletes the run between this delete's first read and
+    its locked re-read: it answers with the searches left, never a 500."""
+    maker, client, sign_in = routes
+    owner = await _member(maker)
+    run_id, _ = await _finished_site_run(maker, owner)
+    real = dashboard_controller._owned
+
+    async def owned_then_gone(s, user_id, search_id):
+        run = await real(s, user_id, search_id)
+        async with maker() as other:
+            await user_content.delete_search(
+                other, await other.get(WebSearchRun, run_id)
+            )
+        return run
+
+    monkeypatch.setattr(dashboard_controller, "_owned", owned_then_gone)
+    await sign_in(owner)
+    response = await client.delete(f"/dashboard/api/searches/{run_id}", headers=CSRF)
+    assert response.status_code == 200, response.text
+    assert response.json()["searches"] == []
+
+
+async def test_a_search_link_that_waited_out_the_purge_answers_410(routes, monkeypatch):
+    """Signed in, past the limits, then the account is purged before the
+    run is made: 410, and no run."""
+    from smarter_dev.web.models import WebSearchLink
+
+    maker, client, sign_in = routes
+    owner = await _member(maker)
+    token = uuid4().hex[:24]
+    async with maker() as s:
+        s.add(WebSearchLink(owner_user_id=owner, token=token, open_addresses=False))
+        await s.commit()
+    real = dashboard_controller._enforce_limits
+
+    async def then_purged(s, user_id):
+        await real(s, user_id)
+        async with maker() as other:
+            await user_content.delete_account_leftovers(other, owner)
+            await other.execute(delete(User).where(User.id == owner))
+            await other.commit()
+
+    monkeypatch.setattr(dashboard_controller, "_enforce_limits", then_purged)
+    await sign_in(owner)
+    response = await client.get(
+        f"/s/{token}", params={"q": "a request"}, follow_redirects=False
+    )
+    assert response.status_code == 410, response.text
+    assert await _count(maker, WebSearchRun, owner) == 0

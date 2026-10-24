@@ -441,24 +441,27 @@ class DashboardController(Controller):
         self, request: Request, db_session: AsyncSession, search_id: UUID
     ) -> dict:
         require_api_csrf(request)
-        user = await _active_user(request, db_session)
+        # Kept as a value: the delete may roll back, which expires ``user``.
+        user_id = (await _active_user(request, db_session)).id
         try:
-            await delete_search(db_session, await _owned(db_session, user.id, search_id))
+            await delete_search(db_session, await _owned(db_session, user_id, search_id))
         except StillRunning:
             raise HTTPException(
                 status_code=409, detail="Wait for this search to finish, then delete it."
             ) from None
-        return {"searches": await _recent(db_session, user.id), "build": CLIENT_BUILD}
+        return {"searches": await _recent(db_session, user_id), "build": CLIENT_BUILD}
 
     @delete("/api/searches", status_code=200)
     async def delete_every_search(self, request: Request, db_session: AsyncSession) -> dict:
         require_api_csrf(request)
-        user = await _active_user(request, db_session)
-        result = await delete_all_searches(db_session, user.id)
+        # Kept as a value: each run's delete commits or rolls back, which
+        # expires ``user``.
+        user_id = (await _active_user(request, db_session)).id
+        result = await delete_all_searches(db_session, user_id)
         return {
             "deleted": result.deleted,
             "running": result.running,
-            "searches": await _recent(db_session, user.id),
+            "searches": await _recent(db_session, user_id),
             "build": CLIENT_BUILD,
         }
 
