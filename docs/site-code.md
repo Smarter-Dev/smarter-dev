@@ -25,6 +25,7 @@ user named in the path; an unknown or inactive one is a 404.
 | 422 | The code is over 100,000 characters or the reason over 500. |
 | 413 | The body is over 512 KiB. |
 | 429 | Two runs are already going for this member, or four in all (`Retry-After: 5`). |
+| 429 | Over 600 calls a minute from one address: Skrift's global limiter, rule `site-code` in `app.yaml` (POST under `/api/site/code/users/`, keyed by IP, never by API key). |
 | 503 | The run couldn't be queued. |
 | 504 | No result within 45 seconds. |
 
