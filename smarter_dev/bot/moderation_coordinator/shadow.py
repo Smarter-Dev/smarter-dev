@@ -49,7 +49,9 @@ from datetime import timedelta
 from typing import Any
 
 import hikari
+from sqlalchemy import and_
 from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -71,6 +73,7 @@ from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
 from smarter_dev.bot.moderation_coordinator.rules import MASS_MENTION_REASON
+from smarter_dev.bot.moderation_coordinator.rules import MASS_MENTION_WARNING
 from smarter_dev.bot.moderation_coordinator.rules import PINGED_EVERYONE_SECONDS
 from smarter_dev.bot.moderation_coordinator.rules import SANCTION_ACTIONS
 from smarter_dev.bot.purge_core import snowflake_to_datetime
@@ -278,21 +281,36 @@ class BotReads:
                         ModerationAction.guild_id == guild_id,
                         ModerationAction.target_user_id == user_id,
                         ModerationAction.action_type.in_(SANCTION_ACTIONS),
+                        # A mass-mention warning is a day of risk (below),
+                        # not a sanction "in the last 30 days".
+                        or_(
+                            ModerationAction.action_type != gw.WARN,
+                            ModerationAction.reason.is_(None),
+                            ModerationAction.reason != MASS_MENTION_WARNING,
+                        ),
                     )
                     .order_by(ModerationAction.created_at.desc())
                     .limit(10)
                 )
             ).all()
-            # A removed @everyone/@here in the day before this message: the
-            # coordinator's own record, so it holds across a restart. Read
-            # apart from the sanctions above (a delete is not "moderated").
+            # A removed @everyone/@here in the day before this message (its
+            # removal, or its warning): the coordinator's own record, so it
+            # holds across a restart. Read apart from the sanctions above.
             pinged_everyone_at = (
                 await session.execute(
                     select(func.max(ModerationAction.created_at)).where(
                         ModerationAction.guild_id == guild_id,
                         ModerationAction.target_user_id == user_id,
-                        ModerationAction.action_type.in_((gw.DELETE, gw.PURGE)),
-                        ModerationAction.reason.contains(MASS_MENTION_REASON),
+                        or_(
+                            and_(
+                                ModerationAction.action_type.in_((gw.DELETE, gw.PURGE)),
+                                ModerationAction.reason.contains(MASS_MENTION_REASON),
+                            ),
+                            and_(
+                                ModerationAction.action_type == gw.WARN,
+                                ModerationAction.reason == MASS_MENTION_WARNING,
+                            ),
+                        ),
                         ModerationAction.created_at
                         >= before - timedelta(seconds=PINGED_EVERYONE_SECONDS),
                         ModerationAction.created_at < before,

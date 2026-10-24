@@ -48,6 +48,7 @@ from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_EDIT_PING
+from smarter_dev.bot.moderation_coordinator.model import NOTICE_MASS_MENTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SECURE_ACCOUNT
 from smarter_dev.bot.moderation_coordinator.model import SCAM
@@ -601,16 +602,16 @@ class Executor:
                 notice = (
                     f"⚠️ <@{target.user_id}> has been warned.\n**Reason:** {scam_text}"
                 )
-                dm = (
-                    "You have received a warning.\n\n"
-                    f"**Reason:** {scam_text}\n\n"
-                    "Please review the server rules. Continued violations may "
-                    "result in further action (timeout, kick, or ban)."
+                await self._warn(
+                    gateway, trigger, target, facts, notice, _warning_dm(scam_text)
+                )
+            elif NOTICE_MASS_MENTION in notices:
+                await self._warn_by_dm(
+                    gateway, trigger, target, facts, policy, rules.MASS_MENTION_WARNING
                 )
             else:
                 notice = format_warning_message(target.user_id, _spam_reasons(target))
-                dm = None
-            await self._warn(gateway, trigger, target, facts, notice, dm)
+                await self._warn(gateway, trigger, target, facts, notice, None)
         elif scam_text is not None and target.sanction is not None:
             # A timeout (high-signal or repeat): the member is told by DM,
             # once it took effect (never after a staff refusal or a reversal).
@@ -732,6 +733,55 @@ class Executor:
         ):
             await self.messenger.dm(target.user_id, dm)
 
+    async def _warn_by_dm(
+        self,
+        gateway,
+        trigger: Trigger,
+        target: TargetDecision,
+        facts: MessageFacts,
+        policy: GuildPolicy,
+        reason: str,
+    ) -> None:
+        """A warning on mod history, told by DM only (Zech, Oct 24: the
+        mass-mention warning). One per incident: the gateway's ``warn`` key
+        fences a post's copies and a second pod. Closed DMs still leave the
+        warning recorded, and the report says the member was not told."""
+        async with gateway.reserve(
+            trigger,
+            Proposal(
+                kind=gw.WARN,
+                target_user_id=target.user_id,
+                target_username=target.name,
+                reason=reason,
+                channel_id=facts.channel_id,
+                target_is_bot=False,
+            ),
+        ) as slot:
+            if not slot.go:
+                # Already warned in this incident, or a stronger sanction.
+                return
+            slot.confirm()
+            incident_id = slot.incident_id
+        if incident_id is None or not await gateway.claim_member_message(
+            incident_id, kind=gw.MESSAGE_DM, target_user_id=target.user_id
+        ):
+            return
+        if await self.messenger.dm(target.user_id, _warning_dm(reason)):
+            return
+        await gateway.add_notes(
+            incident_id,
+            source=ACTOR,
+            notes=[
+                (
+                    gw.ENTRY_NOTE,
+                    f"Could not DM <@{target.user_id}> the warning (their DMs "
+                    "are closed); it is recorded on their history.",
+                )
+            ],
+            report_channel_id=policy.report_channel_id,
+            target_user_id=target.user_id,
+        )
+
     # ------------------------------------------------------------------
     # Report lines
     # ------------------------------------------------------------------
@@ -787,6 +837,16 @@ class Executor:
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
+
+
+def _warning_dm(reason: str) -> str:
+    """The standard warning DM, as the /warn command words it."""
+    return (
+        "You have received a warning.\n\n"
+        f"**Reason:** {reason}\n\n"
+        "Please review the server rules. Continued violations may "
+        "result in further action (timeout, kick, or ban)."
+    )
 
 
 def _reason(targets) -> str:

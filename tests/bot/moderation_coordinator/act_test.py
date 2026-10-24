@@ -19,6 +19,7 @@ import pytest
 from sqlalchemy import select
 
 from smarter_dev.bot.moderation_coordinator import act as act_module
+from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_CLEAN
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_REMOVED
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_UNKNOWN
@@ -56,6 +57,8 @@ from tests.bot.moderation_coordinator.replay_cases import ESTABLISHED
 from tests.bot.moderation_coordinator.replay_cases import GENERAL
 from tests.bot.moderation_coordinator.replay_cases import GUILD
 from tests.bot.moderation_coordinator.replay_cases import NOW
+from tests.bot.moderation_coordinator.replay_cases import OTHER
+from tests.bot.moderation_coordinator.replay_cases import THIRD
 from tests.bot.moderation_coordinator.replay_cases import Member
 from tests.bot.moderation_coordinator.replay_cases import policy
 from tests.bot.moderation_coordinator.replay_cases import say
@@ -821,13 +824,23 @@ async def _actions() -> list[tuple[str, str]]:
 PINGER = Member("pinger", 90, NOW - timedelta(days=400), NOW - timedelta(days=300))
 
 
-async def test_a_members_everyone_is_deleted_and_logged_without_a_sanction():
+async def test_a_members_everyone_is_deleted_logged_and_warned_by_dm():
+    """Zech, Oct 24: the removal stays, and the member gets a formal warning
+    on mod history, told by DM; no timeout, and no notice in the channel."""
     post = say(PINGER, "@everyone check this", NOW)
     h = await _ping_case(post)
 
-    assert [call[0] for call in h.port.calls] == ["delete"]
+    assert [call[0] for call in h.port.calls] == ["delete"]  # no timeout
     assert post.message_id in h.deleted()
-    assert [kind for kind, _ in await _actions()] == ["delete"]
+    actions = await _actions()
+    assert sorted(kind for kind, _ in actions) == ["delete", "warn"]
+    assert (gw.WARN, rules.MASS_MENTION_WARNING) in actions
+    assert h.messenger.dms == [
+        (PINGER.id, act_module._warning_dm(rules.MASS_MENTION_WARNING))
+    ]
+    assert not [
+        text for channel, text in h.messenger.posts if channel == post.channel_id
+    ]
     reports = [p for p in h.port.posts if p["channel_id"] == REPORTS]
     assert len(reports) == 1  # the mod-log line
     assert h.calls.total == 0
@@ -837,7 +850,7 @@ async def test_an_edit_that_adds_here_is_deleted():
     edit = say(PINGER, "updated: @here look", NOW, is_edit=True)
     h = await _ping_case(edit, edit_ping=False)  # the new rule on its own
     assert edit.message_id in h.deleted()
-    assert all(kind == "delete" for kind, _ in await _actions())
+    assert sorted(kind for kind, _ in await _actions()) == ["delete", "warn"]
 
 
 async def test_staff_may_ping_everyone():
@@ -846,6 +859,17 @@ async def test_staff_may_ping_everyone():
     h = await _ping_case(post, staff={mod.id: "holds a staff role"})
     assert h.port.calls == []
     assert h.port.posts == []
+    assert h.messenger.dms == [] and await _actions() == []  # no warning
+
+
+async def test_a_bot_or_a_webhook_pinging_everyone_is_not_warned():
+    bot_post = replace(say(PINGER, "@everyone deploy done", NOW), author_is_bot=True)
+    hook = replace(
+        say(PINGER, "@here new release", NOW + timedelta(seconds=30)), is_webhook=True
+    )
+    h = await _ping_case(bot_post, hook)
+    assert h.deleted() == set()
+    assert h.messenger.dms == [] and await _actions() == []
 
 
 async def test_everyone_in_code_is_left_alone():
@@ -860,6 +884,7 @@ async def test_everyone_in_code_is_left_alone():
     h = await _ping_case(*posts)
     assert h.deleted() == set()
     assert await _actions() == []
+    assert h.messenger.dms == []  # no warning
 
 
 async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_report():
@@ -898,7 +923,11 @@ async def test_a_ping_removal_is_read_back_as_24_hours_of_risk_not_30_days():
     await _ping_case(post)
     async with default_session_factory()() as session:
         removed_at = (
-            await session.execute(select(ModerationAction.created_at))
+            await session.execute(
+                select(ModerationAction.created_at).where(
+                    ModerationAction.action_type == gw.DELETE
+                )
+            )
         ).scalar_one()
     removed_at = removed_at if removed_at.tzinfo else removed_at.replace(tzinfo=UTC)
 
@@ -911,13 +940,128 @@ async def test_a_ping_removal_is_read_back_as_24_hours_of_risk_not_30_days():
         GUILD, PINGER.id, removed_at - timedelta(minutes=1)
     )
 
-    assert hour.pinged_everyone_at is not None and hour.actions == ()
+    assert hour.pinged_everyone_at is not None and hour.actions == ()  # no warn
     assert later.pinged_everyone_at is None
     assert before.pinged_everyone_at is None
     facts = say(PINGER, "hi", datetime.fromtimestamp(0, UTC))
     reasons = rules.scam_risky_author(facts, hour, removed_at + timedelta(hours=1))
     assert rules.PINGED_EVERYONE in reasons
     assert "moderated in the last 30 days" not in reasons
+
+
+async def test_a_ping_warning_is_a_day_of_risk_not_30_days():
+    """Zech, Oct 24: the mass-mention warning is on mod history, but it puts
+    the author in high risk for 24 h only. Read from the database: two hours
+    after it, risky (the ping); two days after it, not risky at all, and
+    never "moderated in the last 30 days"."""
+    from datetime import UTC
+    from datetime import datetime
+
+    from smarter_dev.bot.moderation_coordinator.shadow import BotReads
+
+    post = say(PINGER, "@everyone check this", NOW)
+    await _ping_case(post)
+    async with default_session_factory()() as session:
+        warned_at = (
+            await session.execute(
+                select(ModerationAction.created_at).where(
+                    ModerationAction.action_type == gw.WARN,
+                    ModerationAction.reason == rules.MASS_MENTION_WARNING,
+                )
+            )
+        ).scalar_one()
+    warned_at = warned_at if warned_at.tzinfo else warned_at.replace(tzinfo=UTC)
+
+    reads = BotReads(bot=None)
+    facts = say(PINGER, "hi", datetime.fromtimestamp(0, UTC))
+    two_hours = warned_at + timedelta(hours=2)
+    two_days = warned_at + timedelta(days=2)
+    soon = await reads.author_history(GUILD, PINGER.id, two_hours)
+    later = await reads.author_history(GUILD, PINGER.id, two_days)
+    assert soon.actions == later.actions == ()  # the warning is not a sanction
+    # (No member_activity row here, so "first message" stands apart.)
+    soon_reasons = set(rules.scam_risky_author(facts, soon, two_hours))
+    later_reasons = set(rules.scam_risky_author(facts, later, two_days))
+    assert soon_reasons - {"first message"} == {rules.PINGED_EVERYONE}
+    assert later_reasons - {"first message"} == set()
+
+    # The warning alone carries the day (a removal that found the message
+    # already gone leaves no delete row).
+    from sqlalchemy import delete
+
+    async with default_session_factory()() as session:
+        await session.execute(
+            delete(ModerationAction).where(ModerationAction.action_type == gw.DELETE)
+        )
+        await session.commit()
+    alone = await reads.author_history(GUILD, PINGER.id, two_hours)
+    assert alone.pinged_everyone_at is not None
+    assert rules.PINGED_EVERYONE in rules.scam_risky_author(facts, alone, two_hours)
+
+    # The same at the rule, for any history reader: a mass-mention warning
+    # two days ago is no "moderated in the last 30 days"; a scam warning is.
+    def warned(reason):
+        return AuthorHistory(
+            is_first_message=False,
+            days_since_last_message=0,
+            actions=(PastAction(gw.WARN, two_days - timedelta(days=2), reason),),
+        )
+
+    assert (
+        rules.scam_risky_author(facts, warned(rules.MASS_MENTION_WARNING), two_days)
+        == ()
+    )
+    assert rules.scam_risky_author(facts, warned("confirmed scam"), two_days) == (
+        "moderated in the last 30 days",
+    )
+
+
+async def test_a_ping_warning_with_closed_dms_is_still_recorded_and_reported():
+    """The DM fails (closed DMs): the warning stands on mod history and the
+    report says the member was not told; no message in the channel."""
+    post = say(PINGER, "@here look", NOW)
+    case = ReplayCase(
+        name="closed DMs",
+        policy=acting(policy(ring=None)),
+        messages=[post],
+        answers={SCAM: (False, 0.9), ABUSE: (False, 0.9)},
+    )
+    h = harness(case)
+
+    async def closed(user_id, content):
+        h.messenger.dms.append((str(user_id), content))
+        return False
+
+    h.messenger.dm = closed
+    await h.judge(post)
+
+    assert (gw.WARN, rules.MASS_MENTION_WARNING) in await _actions()
+    assert len(h.messenger.dms) == 1  # tried once
+    assert not [
+        text for channel, text in h.messenger.posts if channel == post.channel_id
+    ]
+    assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
+    assert "Could not DM" in h.port.latest_report_text(REPORTS)
+
+
+async def test_a_burst_of_one_ping_is_warned_once():
+    """Copies of one @everyone post in three channels (and a re-send) share
+    one incident: one warning, one DM, every copy removed."""
+    channels = [GENERAL, OTHER, THIRD]
+    posts = [
+        replace(
+            say(PINGER, "@everyone free stuff", NOW + timedelta(seconds=i)),
+            channel_id=channel,
+        )
+        for i, channel in enumerate(channels)
+    ]
+    posts.append(say(PINGER, "@everyone   FREE stuff", NOW + timedelta(seconds=40)))
+    h = await _ping_case(*posts)
+
+    assert {post.message_id for post in posts} <= h.deleted()
+    warns = [reason for kind, reason in await _actions() if kind == gw.WARN]
+    assert warns == [rules.MASS_MENTION_WARNING]
+    assert len(h.messenger.dms) == 1
 
 
 async def test_an_exhausted_budget_is_reported_once_a_day():

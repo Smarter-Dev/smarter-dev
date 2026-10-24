@@ -40,6 +40,7 @@ from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_EDIT_PING
+from smarter_dev.bot.moderation_coordinator.model import NOTICE_MASS_MENTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SECURE_ACCOUNT
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SPAM_WARNING
@@ -205,6 +206,13 @@ def edit_ping_hits(facts: MessageFacts) -> list[RuleHit]:
 #: The reason a mass-mention removal carries. The author's history finds the
 #: removal again by it (``moderation_actions.reason``), so keep it stable.
 MASS_MENTION_REASON = "server-wide mention from a member"
+#: The warning's reason (Zech, Oct 24): what the member is told by DM and
+#: what mod history shows. The author's history leaves this warning out of
+#: "moderated in the last 30 days" by it, so keep it stable.
+MASS_MENTION_WARNING = (
+    "@everyone and @here pings aren't allowed in this server, "
+    "so your message was removed."
+)
 #: Inline code and code blocks: a mention written there is not a ping.
 _CODE = re.compile(r"```.*?(?:```|$)|`[^`\n]*`", re.DOTALL)
 #: ``@everyone``/``@here`` as a word: not in an email address
@@ -223,8 +231,13 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
     A message or an edit whose text carries either, outside inline code and
     code blocks, is removed, whether or not Discord pinged anyone (members
     without the permission can still type it, the usual scam pattern). Staff
-    are exempt by the shared staff rule. It removes only: a hold or a
-    sanction comes from the other rules (a link, nitro bait) when they fire.
+    are exempt by the shared staff rule.
+
+    Zech, Oct 24: and the member is warned (:data:`MASS_MENTION_WARNING`),
+    on mod history and by DM, once per incident (copies of one post share
+    it). Nothing stronger: a hold or a timeout comes from the other rules (a
+    link, nitro bait) when they fire. The warning counts as a day of risk,
+    not as "moderated in the last 30 days" (:func:`actions_within`).
     """
     if facts.is_webhook or facts.author_is_bot:
         return []
@@ -236,7 +249,9 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
             reason=MASS_MENTION_REASON,
             target_user_id=facts.author_id,
             target_name=facts.author_name,
+            sanction=Sanction(gw.WARN),
             cleanup=(Cleanup(facts.channel_id, facts.message_id),),
+            notice=NOTICE_MASS_MENTION,
         )
     ]
 
@@ -380,12 +395,19 @@ def burst_copies(
 
 
 def actions_within(history: AuthorHistory, seconds: float, now: datetime) -> list:
+    """The author's sanctions in the last ``seconds``; a mass-mention warning
+    is not one of them (it is a day of risk: ``pinged_everyone_at``)."""
     return [
         action
         for action in history.actions
         if action.action_type in SANCTION_ACTIONS
+        and not is_mass_mention_warning(action.action_type, action.reason)
         and (now - action.created_at).total_seconds() < seconds
     ]
+
+
+def is_mass_mention_warning(action_type: str, reason: str | None) -> bool:
+    return action_type == gw.WARN and reason == MASS_MENTION_WARNING
 
 
 def scam_suspect_reasons(facts: MessageFacts, burst: bool) -> tuple[str, ...]:
