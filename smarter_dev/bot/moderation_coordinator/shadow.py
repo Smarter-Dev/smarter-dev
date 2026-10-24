@@ -42,14 +42,16 @@ import logging
 import os
 import time
 from collections.abc import Iterable
-from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from typing import Any
 
 import hikari
+from sqlalchemy import and_
 from sqlalchemy import func
+from sqlalchemy import not_
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -70,8 +72,6 @@ from smarter_dev.bot.moderation_coordinator.model import PastAction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
-from smarter_dev.bot.moderation_coordinator.rules import MASS_MENTION_REASON
-from smarter_dev.bot.moderation_coordinator.rules import PINGED_EVERYONE_SECONDS
 from smarter_dev.bot.moderation_coordinator.rules import SANCTION_ACTIONS
 from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.shared.exception_logging import log_exception
@@ -267,6 +267,11 @@ class BotReads:
                     )
                 )
             ).first()
+            # A review hold (the gateway's provisional timeout) and its
+            # release are no action on the member: told apart by their
+            # operation, never by reason text, and left out in the query so
+            # any number of them never hides a real action from the ten.
+            # Only actions before this message: its own are not "earlier".
             actions = (
                 await session.execute(
                     select(
@@ -274,35 +279,22 @@ class BotReads:
                         ModerationAction.created_at,
                         ModerationAction.reason,
                     )
+                    .outerjoin(
+                        ModerationOperation,
+                        ModerationOperation.id == ModerationAction.operation_id,
+                    )
                     .where(
                         ModerationAction.guild_id == guild_id,
                         ModerationAction.target_user_id == user_id,
                         ModerationAction.action_type.in_(SANCTION_ACTIONS),
+                        ModerationAction.created_at < before,
+                        not_review_hold(),
                     )
                     .order_by(ModerationAction.created_at.desc())
-                    .limit(10)
+                    .limit(HISTORY_ACTIONS)
                 )
             ).all()
-            # A removed @everyone/@here in the day before this message: the
-            # coordinator's own record, so it holds across a restart. Read
-            # apart from the sanctions above (a delete is not "moderated").
-            pinged_everyone_at = (
-                await session.execute(
-                    select(func.max(ModerationAction.created_at)).where(
-                        ModerationAction.guild_id == guild_id,
-                        ModerationAction.target_user_id == user_id,
-                        ModerationAction.action_type.in_((gw.DELETE, gw.PURGE)),
-                        ModerationAction.reason.contains(MASS_MENTION_REASON),
-                        ModerationAction.created_at
-                        >= before - timedelta(seconds=PINGED_EVERYONE_SECONDS),
-                        ModerationAction.created_at < before,
-                    )
-                )
-            ).scalar_one_or_none()
-        history = author_history_from(row, actions, before)
-        if pinged_everyone_at is None:
-            return history
-        return replace(history, pinged_everyone_at=_utc(pinged_everyone_at))
+        return author_history_from(row, actions, before)
 
     async def channel_window(
         self,
@@ -341,6 +333,28 @@ class BotReads:
                 level=logging.WARNING,
             )
             return None
+
+
+#: The actions an author's history keeps.
+HISTORY_ACTIONS = 10
+
+
+def not_review_hold():
+    """The action rows that are no review hold or release, for a query that
+    outer-joins each row's operation. A hold is the gateway's provisional
+    timeout (the coordinator's and the handlers' ``hold:`` claims); a release
+    is an untimeout (one shortened to another claim is recorded as a
+    timeout). A row with no operation was recorded outside the gateway: a
+    moderator's own, always counted."""
+    op = ModerationOperation
+    provisional = func.coalesce(op.requested["provisional"].as_boolean(), False)
+    return or_(
+        op.id.is_(None),
+        and_(
+            op.kind != gw.UNTIMEOUT,
+            not_(and_(op.kind == gw.TIMEOUT, provisional)),
+        ),
+    )
 
 
 def _utc(moment: datetime) -> datetime:

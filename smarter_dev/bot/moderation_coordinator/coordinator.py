@@ -263,10 +263,17 @@ class Coordinator:
             return STAFF_CHECK_FAILED
 
     async def _author_history(
-        self, facts: MessageFacts, before: datetime, review: list[str]
+        self,
+        facts: MessageFacts,
+        before: datetime,
+        review: list[str],
+        *,
+        actions_before: float,
     ) -> AuthorHistory:
+        """The author's history; only actions taken before ``actions_before``
+        (the first of the post and its copies) count as earlier ones."""
         try:
-            return await asyncio.wait_for(
+            history = await asyncio.wait_for(
                 self.reads.author_history(facts.guild_id, facts.author_id, before),
                 HISTORY_READ_SECONDS,
             )
@@ -281,6 +288,11 @@ class Coordinator:
                 "they had none (not new, not silent, no earlier actions)."
             )
             return AuthorHistory(is_first_message=None, days_since_last_message=None)
+        cutoff = datetime.fromtimestamp(actions_before, UTC)
+        return replace(
+            history,
+            actions=tuple(a for a in history.actions if a.created_at < cutoff),
+        )
 
     async def _evaluate(
         self,
@@ -409,11 +421,16 @@ class Coordinator:
         known_copy = False
         escalated = False
         if scam_candidate and not await author_is_staff():
-            history = await self._author_history(facts, now_dt, review)
+            copies, burst = rules.burst_copies(facts, key, earlier_posts)
+            # The post's own actions (its early mass-mention warning, and a
+            # copy's post's) are this incident, not an earlier one.
+            first_posted = min([now, *(post.posted_at for post in copies)])
+            history = await self._author_history(
+                facts, now_dt, review, actions_before=first_posted
+            )
             known_copy = self.verdict_cache.known(
                 facts.guild_id, facts.author_id, key, now
             )
-            _, burst = rules.burst_copies(facts, key, earlier_posts)
             suspect = rules.scam_suspect_reasons(facts, burst)
             high_signal = rules.high_signal_reasons(
                 facts,
@@ -454,7 +471,7 @@ class Coordinator:
             )
             if claimed[0]:
                 # Copies waiting on this check get no answer if it never runs.
-                stack.callback(VerdictCache.settle, claimed[1], {})
+                stack.callback(self._settle, facts, key, claimed[1], {})
 
         ring_pending = None
         ring = policy.ring
@@ -612,11 +629,16 @@ class Coordinator:
         except BaseException:
             if first_asker is not None:
                 # Copies waiting on this check get no answer: unknown.
-                VerdictCache.settle(first_asker, {})
+                self._settle(facts, key, first_asker, {})
             raise
         verdicts = Verdicts(result.verdicts).merged(reused)
         if first_asker is not None and scam_review is not None:
-            _share(first_asker, verdicts, scam_review.labels)
+            self._settle(
+                facts,
+                key,
+                first_asker,
+                {label: verdicts[label] for label in scam_review.labels},
+            )
 
         # 6. Resolve and decide.
         scam_outcome = None
@@ -638,7 +660,7 @@ class Coordinator:
             )
             scam_hits, scam_outcome, lines = scam_review.resolve(verdicts)
             scam_hits = await self._one_sanction(
-                facts, key, scam_hits, first_asker, now
+                facts, key, scam_hits, first_asker, now, held
             )
             hits += scam_hits
             review += lines
@@ -740,6 +762,24 @@ class Coordinator:
             remaining=remaining,
         )
 
+    def _settle(
+        self,
+        facts: MessageFacts,
+        key: str,
+        future: asyncio.Future,
+        verdicts: dict[str, LabelVerdict],
+    ) -> None:
+        """Hand copies waiting on this post's check the verdicts they need.
+
+        A check that found nothing (a crash, a spent budget, a timeout) is
+        forgotten: a later copy asks for itself rather than being judged
+        on no answer (#310 round 3, item 3)."""
+        VerdictCache.settle(future, verdicts)
+        if future.cancelled() or not any(
+            verdict.answer is not None for verdict in future.result().values()
+        ):
+            self.verdict_cache.drop(facts.guild_id, facts.author_id, key, future)
+
     async def _one_sanction(
         self,
         facts: MessageFacts,
@@ -747,14 +787,17 @@ class Coordinator:
         scam_hits: list[RuleHit],
         asked: asyncio.Future | None,
         now: float,
+        held: _Slot,
     ) -> list[RuleHit]:
         """The ``scam:{key}`` claim: a post and its copies are sanctioned once,
         with the strongest sanction (#310 re-review item 2).
 
         A post whose escalated copy is still being checked waits for that
-        check: the copy, held and judged on every image, decides the
-        sanction when it too is a violation, so the post's weaker one is
-        not given first."""
+        check, so the post's weaker sanction is not given first: a copy found
+        a violation claims its own sanction as soon as its verdict is shared,
+        and the post's then applies only when stronger. The post claims
+        whatever the copy did: a copy that fails before claiming leaves the
+        sanction to the post (#310 round 3, item 1)."""
         sanctions = [hit.sanction for hit in scam_hits if hit.sanction is not None]
         if not sanctions:
             return scam_hits
@@ -764,16 +807,10 @@ class Coordinator:
             else None
         )
         if newer is not None:
-            try:
-                theirs = await asyncio.wait_for(
-                    asyncio.shield(newer), self.classifier.deadline
-                )
-            except TimeoutError:
-                theirs = {}
-            if any(verdict.yes for verdict in theirs.values()):
-                return rules.without_sanction(
-                    scam_hits, ", sanctioned once with its held copy"
-                )
+            # The post's own check is done: the wait holds no slot.
+            held.give()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(asyncio.shield(newer), self.classifier.deadline)
         if self.sanctions.claim(
             facts.guild_id, facts.author_id, key, sanctions[0], now
         ):
@@ -836,13 +873,6 @@ def _deletes(decision, message_id: str) -> bool:
 def _ring_alias(guild_id: str, channel_id: str, ad_message_id: str) -> str:
     """One gateway incident for a ring's ad and its follow-ups."""
     return f"coordinator_ring:{guild_id}:{channel_id}:{ad_message_id}"
-
-
-def _share(future, verdicts: Verdicts, labels: frozenset[str]) -> None:
-    """Hand a copy waiting on this post's check the verdicts it needs."""
-    if future.done():
-        return
-    future.set_result({label: verdicts[label] for label in labels})
 
 
 def _ring_context(pending) -> tuple[str, ...]:

@@ -323,24 +323,27 @@ async def test_the_same_screenshots_from_a_new_joiner_are_held():
     assert evaluation.decision.provisional is not None
 
 
-async def test_the_same_screenshots_from_a_member_warned_10_days_ago_are_held():
+@pytest.mark.parametrize(("action", "held"), [("timeout", True), ("warn", False)])
+async def test_the_same_screenshots_from_a_member_moderated_10_days_ago(action, held):
+    """Zech, Oct 24: a timeout 10 days ago still makes the author high risk
+    (held on every image); a warning 10 days ago no longer does (24 h)."""
     from datetime import UTC
     from datetime import datetime
 
     from smarter_dev.bot.moderation_coordinator.model import PastAction
 
-    warned = AuthorHistory(
+    moderated = AuthorHistory(
         is_first_message=False,
         days_since_last_message=0,
         actions=(
             PastAction(
-                "warn",
+                action,
                 datetime.fromtimestamp(NOW.timestamp(), UTC) - timedelta(days=10),
             ),
         ),
     )
-    evaluation, _ = await _image_post(warned)
-    assert evaluation.decision.provisional is not None
+    evaluation, _ = await _image_post(moderated)
+    assert (evaluation.decision.provisional is not None) is held
 
 
 async def test_a_burst_still_holds_an_established_member():
@@ -534,7 +537,7 @@ async def test_a_copy_of_a_confirmed_scam_is_removed_but_not_punished_again():
         days_since_last_message=0,
         actions=(
             PastAction(
-                "warn",
+                "timeout",
                 datetime.fromtimestamp(NOW.timestamp(), UTC) - timedelta(days=10),
             ),
         ),
@@ -561,15 +564,23 @@ async def test_a_copy_of_a_confirmed_scam_is_removed_but_not_punished_again():
     assert posts[1].message_id in {item.message_id for item in copy.cleanup}
 
 
-# -- a removed @everyone makes the author high risk for a day (#310 item 10b) --
+# -- a warning makes the author high risk for a day (Zech, Oct 24) ------------
 
 
 def _pinged(hours_ago: float) -> AuthorHistory:
+    """Warned (as for a removed @everyone) ``hours_ago``."""
     return AuthorHistory(
         is_first_message=False,
         days_since_last_message=0,
-        pinged_everyone_at=datetime.fromtimestamp(NOW.timestamp(), UTC)
-        - timedelta(hours=hours_ago),
+        actions=(
+            PastAction(
+                "warn",
+                datetime.fromtimestamp(NOW.timestamp(), UTC)
+                - timedelta(hours=hours_ago),
+                "@everyone and @here pings aren't allowed in this server, "
+                "so your message was removed.",
+            ),
+        ),
     )
 
 
@@ -640,3 +651,48 @@ async def test_a_copy_decided_after_its_posts_timeout_is_not_warned_too():
     assert target.sanction is None
     assert target.notices == []
     assert [item.message_id for item in target.cleanup] == [post.message_id]
+
+
+# -- the round-3 verification of a62a82be (#310) ------------------------------
+
+
+@pytest.mark.parametrize("failure", ["crash", "budget"])
+async def test_a_check_that_found_nothing_does_not_answer_later_copies(failure):
+    """Round 3, item 3: a first asker that crashed or ran out of budget
+    settled its copies' answer empty, and every copy within the verdict
+    window read that empty answer instead of asking. The empty check is
+    forgotten: the next copy asks for itself."""
+    from smarter_dev.bot.moderation_coordinator.classifier import unknown_result
+    from smarter_dev.bot.moderation_coordinator.model import BUDGET
+
+    member = Member("desk", 74, NOW - timedelta(days=900), NOW - timedelta(days=800))
+    post = _five_images(member)
+    later = replace(
+        post, message_id=str(int(post.message_id) + 1), posted_at=post.posted_at + 30
+    )
+    coordinator = _coordinator(
+        ReplayReads(histories={member.id: ESTABLISHED}),
+        {SCAM: (True, 0.95), ABUSE: (False, 0.9)},
+    )
+    real = coordinator.classifier.classify
+    asked = []
+
+    async def classify(request):
+        asked.append(request)
+        if len(asked) == 1:
+            if failure == "crash":
+                raise RuntimeError("the classifier crashed")
+            return unknown_result(sorted(request.labels), BUDGET)
+        return await real(request)
+
+    coordinator.classifier.classify = classify
+    if failure == "crash":
+        with pytest.raises(RuntimeError):
+            await coordinator.evaluate(post, policy(ring=None, spam=None))
+    else:
+        first = await coordinator.evaluate(post, policy(ring=None, spam=None))
+        assert first.scam_outcome != "violation"
+    evaluation = await coordinator.evaluate(later, policy(ring=None, spam=None))
+    assert len(asked) == 2
+    assert SCAM in asked[1].labels
+    assert evaluation.scam_outcome == "violation"

@@ -108,6 +108,15 @@ def test_edit_ping_only_on_edits_and_case_sensitive_like_the_handler():
     assert rules.edit_ping_hits(say(REGULAR, "hi @Everyone", NOW, is_edit=True)) == []
 
 
+@pytest.mark.parametrize(
+    "text", ["mail me@here.com", "@hereby resign", "`@everyone` is a ping"]
+)
+def test_an_edit_with_an_email_a_longer_word_or_code_is_not_an_edit_ping(text):
+    """Round 3, item 4: the edit-ping read a substring, so an edit to
+    ``me@here.com`` was removed as a server-wide mention."""
+    assert rules.edit_ping_hits(say(REGULAR, text, NOW, is_edit=True)) == []
+
+
 def test_bump_channel_chatter_is_cleanup_only():
     chatter = say(REGULAR, "bump pls", NOW, channel="B")
     hit = rules.bump_channel_hits(chatter, frozenset({"B"}))
@@ -192,10 +201,17 @@ def test_scam_gate_needs_content_and_a_reason_to_look():
     moderated = AuthorHistory(
         is_first_message=False,
         days_since_last_message=0,
-        actions=(PastAction("warn", NOW - timedelta(days=10)),),
+        actions=(PastAction("timeout", NOW - timedelta(days=10)),),
     )
     review, _ = _review(REGULAR, "airdrop", history=moderated)
     assert review is not None and review.repeat
+    # A warning is a day of risk only (Zech, Oct 24).
+    warned = AuthorHistory(
+        is_first_message=False,
+        days_since_last_message=0,
+        actions=(PastAction("warn", NOW - timedelta(days=10)),),
+    )
+    assert _review(REGULAR, "airdrop", history=warned)[0] is None
     images = tuple(Attachment(f"{i}.png", "image/png") for i in range(4))
     review, _ = _review(REGULAR, "", attachments=images)
     assert review.suspect == ("four or more images",)
@@ -426,3 +442,15 @@ def test_a_mass_mention_in_code_with_a_docs_link_is_not_high_signal():
     assert "mass mention with a link" in rules.high_signal_reasons(
         plain, metrics=_metrics()
     )
+
+
+def test_an_action_after_the_message_is_no_earlier_action():
+    """Review item 2: a warning recorded after the message (its own early
+    mass-mention warning) is not an earlier one: neither a repeat nor a risk."""
+    history = AuthorHistory(
+        is_first_message=False,
+        days_since_last_message=0,
+        actions=(PastAction(gw.WARN, NOW + timedelta(seconds=1)),),
+    )
+    assert rules.actions_within(history, rules.RECENT_ACTION_SECONDS, NOW) == []
+    assert rules.recent_moderation(history, NOW) == []

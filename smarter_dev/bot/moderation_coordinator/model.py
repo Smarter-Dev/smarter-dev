@@ -221,11 +221,9 @@ class AuthorHistory:
 
     is_first_message: bool | None
     days_since_last_message: int | None
+    #: Moderation actions on record, newest first; never a review hold or its
+    #: release (they are no action on the member).
     actions: tuple[PastAction, ...] = ()
-    #: When the coordinator last removed this author's ``@everyone``/``@here``
-    #: (a ``delete`` in ``moderation_actions``, read back within a day). Not
-    #: a sanction: it never counts as "moderated in the last 30 days".
-    pinged_everyone_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,6 +272,7 @@ NOTICE_ATTACHMENT_WARNED = "attachment_warned"
 NOTICE_EDIT_PING = "edit_ping"
 NOTICE_SCAM_REMOVED = "scam_removed"
 NOTICE_SECURE_ACCOUNT = "secure_account"
+NOTICE_MASS_MENTION = "mass_mention"
 
 
 @dataclass(frozen=True, slots=True)

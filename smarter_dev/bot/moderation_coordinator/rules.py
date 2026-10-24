@@ -40,6 +40,7 @@ from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_EDIT_PING
+from smarter_dev.bot.moderation_coordinator.model import NOTICE_MASS_MENTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SECURE_ACCOUNT
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SPAM_WARNING
@@ -184,12 +185,11 @@ def attachment_hits(facts: MessageFacts, policy: AttachmentPolicy) -> list[RuleH
 def edit_ping_hits(facts: MessageFacts) -> list[RuleHit]:
     """An edit whose current text carries ``@everyone``/``@here``: removed.
 
-    The same case-sensitive check the handler makes on the edit's text. Only
+    The mention as :func:`pings_everyone` reads it: a word outside code, not
+    an email address (``me@here.com``) or a longer word (``@hereby``). Only
     edits: a new message with a mass mention is the spam engine's.
     """
-    if not facts.is_edit:
-        return []
-    if "@everyone" not in facts.content and "@here" not in facts.content:
+    if not facts.is_edit or not pings_everyone(facts.content):
         return []
     return [
         RuleHit(
@@ -206,6 +206,12 @@ def edit_ping_hits(facts: MessageFacts) -> list[RuleHit]:
 #: The reason a mass-mention removal carries. The author's history finds the
 #: removal again by it (``moderation_actions.reason``), so keep it stable.
 MASS_MENTION_REASON = "server-wide mention from a member"
+#: The warning's reason (Zech, Oct 24): what the member is told by DM and
+#: what mod history shows.
+MASS_MENTION_WARNING = (
+    "@everyone and @here pings aren't allowed in this server, "
+    "so your message was removed."
+)
 #: Inline code and code blocks: a mention written there is not a ping.
 _CODE = re.compile(r"```.*?(?:```|$)|`[^`\n]*`", re.DOTALL)
 #: ``@everyone``/``@here`` as a word: not in an email address
@@ -224,8 +230,13 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
     A message or an edit whose text carries either, outside inline code and
     code blocks, is removed, whether or not Discord pinged anyone (members
     without the permission can still type it, the usual scam pattern). Staff
-    are exempt by the shared staff rule. It removes only: a hold or a
-    sanction comes from the other rules (a link, nitro bait) when they fire.
+    are exempt by the shared staff rule.
+
+    Zech, Oct 24: and the member is warned (:data:`MASS_MENTION_WARNING`),
+    on mod history and by DM, once per incident (copies of one post share
+    it). Nothing stronger: a hold or a timeout comes from the other rules (a
+    link, nitro bait) when they fire. Like any warning, it leaves the author
+    high risk for a day (:data:`RISK_SECONDS`).
     """
     if facts.is_webhook or facts.author_is_bot:
         return []
@@ -237,7 +248,9 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
             reason=MASS_MENTION_REASON,
             target_user_id=facts.author_id,
             target_name=facts.author_name,
+            sanction=Sanction(gw.WARN),
             cleanup=(Cleanup(facts.channel_id, facts.message_id),),
+            notice=NOTICE_MASS_MENTION,
         )
     ]
 
@@ -342,12 +355,23 @@ REPEAT_TIMEOUT_SECONDS = DAY
 BURST_SECONDS = 10.0
 #: Under this account age a confirmed scam is a ban.
 BAN_ACCOUNT_AGE = timedelta(days=7)
-#: How long a removed ``@everyone``/``@here`` leaves its author high risk.
-PINGED_EVERYONE_SECONDS = DAY
-PINGED_EVERYONE = "pinged everyone in the last day"
 #: How far back the history scam-banner reads reaches (its 3650 days).
 HISTORY_SECONDS = 3650 * DAY
 SANCTION_ACTIONS = ("warn", "timeout", "kick", "ban")
+#: Zech, Oct 24: how long an earlier action leaves its author high risk, by
+#: its type. A warning (a moderator's, or the mass-mention one) for a day;
+#: anything bigger for 30 days (a ban counts after an unban too). A review
+#: hold is no action at all: the history reader leaves holds and their
+#: releases out (:func:`~.shadow.BotReads.author_history`).
+RISK_SECONDS = {
+    "warn": DAY,
+    "timeout": 30 * DAY,
+    "kick": 30 * DAY,
+    "ban": 30 * DAY,
+}
+RECENTLY_MODERATED = (
+    "moderated recently (a warning: 24 h; a timeout, kick or ban: 30 days)"
+)
 
 
 def scam_gate_content(facts: MessageFacts) -> bool:
@@ -385,7 +409,20 @@ def actions_within(history: AuthorHistory, seconds: float, now: datetime) -> lis
         action
         for action in history.actions
         if action.action_type in SANCTION_ACTIONS
-        and (now - action.created_at).total_seconds() < seconds
+        and 0 <= (now - action.created_at).total_seconds() < seconds
+    ]
+
+
+def recent_moderation(history: AuthorHistory, now: datetime) -> list:
+    """The earlier actions that still make the author high risk: each within
+    its type's window (:data:`RISK_SECONDS`)."""
+    return [
+        action
+        for action in history.actions
+        if action.action_type in RISK_SECONDS
+        and 0
+        <= (now - action.created_at).total_seconds()
+        < RISK_SECONDS[action.action_type]
     ]
 
 
@@ -413,7 +450,7 @@ def scam_risky_author(
     facts: MessageFacts, history: AuthorHistory, now: datetime
 ) -> tuple[str, ...]:
     """scam-banner's author gate: new, first-time, long-silent, recently
-    moderated; and (new) a removed ``@everyone``/``@here`` in the last day."""
+    moderated (by the action's type: :func:`recent_moderation`)."""
     reasons = []
     if facts.joined_at is not None and (now - facts.joined_at).total_seconds() < DAY:
         reasons.append("joined in the last day")
@@ -421,15 +458,8 @@ def scam_risky_author(
         reasons.append("first message")
     if (history.days_since_last_message or 0) >= 30:
         reasons.append("silent for 30 days or more")
-    if actions_within(history, RECENT_ACTION_SECONDS, now):
-        reasons.append("moderated in the last 30 days")
-    pinged = history.pinged_everyone_at
-    if (
-        pinged is not None
-        and 0 <= (now - pinged).total_seconds() < PINGED_EVERYONE_SECONDS
-    ):
-        # Zech, Oct 23 22:38: most of these pings are scammers and bots.
-        reasons.append(PINGED_EVERYONE)
+    if recent_moderation(history, now):
+        reasons.append(RECENTLY_MODERATED)
     return tuple(reasons)
 
 

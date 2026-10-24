@@ -34,6 +34,7 @@ from collections import defaultdict
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
 from uuid import UUID
 
@@ -47,6 +48,7 @@ from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_EDIT_PING
+from smarter_dev.bot.moderation_coordinator.model import NOTICE_MASS_MENTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SECURE_ACCOUNT
 from smarter_dev.bot.moderation_coordinator.model import SCAM
@@ -160,8 +162,9 @@ class _Hold:
     noticed: bool
     #: Messages held under this post's claim whose decision is still out (a
     #: post and its escalated copy). Only the last one releases the claim and
-    #: closes the notice: an earlier "clean" must not lift a copy's hold.
-    pending: int = 0
+    #: closes the notice: an earlier "clean" must not lift a copy's hold. A
+    #: decision for a message the hold never counted cannot close it.
+    pending: set[str] = field(default_factory=set)
 
 
 class Executor:
@@ -234,9 +237,30 @@ class Executor:
         *,
         policy: GuildPolicy,
     ) -> None:
-        """Place the hold and its notice; never raises (the decision goes on)."""
+        """Place the hold and its notice; never raises (the decision goes on).
+
+        The message counts on the hold before anything is awaited: a post
+        decided while its copy's hold is still being placed (or ownership
+        read) finds the copy pending, and does not release it. It counts even when placing fails:
+        its decision still comes, and is then one of the hold's (#310 round
+        3, item 2)."""
+        hold_key = (facts.guild_id, facts.author_id, key)
+        # Before any await: a post decided while this copy reads ownership
+        # must not release the claim the copy is about to hold under.
+        hold = self._holds.get(hold_key)
+        if hold is None:
+            hold = _Hold(facts.channel_id, None, False)
+            self._holds[hold_key] = hold
+        hold.pending.add(facts.message_id)
         try:
             if not await self.still_owner(policy):
+                hold.pending.discard(facts.message_id)
+                if (
+                    not hold.pending
+                    and hold.incident_id is None
+                    and self._holds.get(hold_key) is hold
+                ):
+                    del self._holds[hold_key]
                 return
             gateway = self._gateway_for(policy)
             result = await gateway.act(
@@ -258,12 +282,8 @@ class Executor:
                 ],
             )
             outcome = result.first(gw.TIMEOUT)
-            hold_key = (facts.guild_id, facts.author_id, key)
-            hold = self._holds.get(hold_key)
-            if hold is None:
-                hold = _Hold(facts.channel_id, result.incident_id, False)
-                self._holds[hold_key] = hold
-            hold.pending += 1
+            if hold.incident_id is None:
+                hold.incident_id = result.incident_id
             # One notice per post, where the hold was first placed (a copy
             # finds the hold already in place: covered, not confirmed).
             if (
@@ -309,7 +329,7 @@ class Executor:
         process already posted."""
         hold_key = (facts.guild_id, facts.author_id, key)
         hold = self._holds.get(hold_key)
-        if hold is None or (not counted and self._others_pending(hold)):
+        if hold is None or (not counted and self._others_pending(hold, facts)):
             return
         try:
             gateway = self._gateway_for(policy)
@@ -371,7 +391,7 @@ class Executor:
         facts = evaluation.facts
         hold_key = (facts.guild_id, facts.author_id, evaluation.key)
         hold = self._holds.get(hold_key)
-        if hold is None or self._others_pending(hold):
+        if hold is None or self._others_pending(hold, facts):
             return
         del self._holds[hold_key]
         if not hold.noticed:
@@ -408,7 +428,7 @@ class Executor:
         # waiting on the post's verdict, must not close it as "incomplete").
         hold_key = (facts.guild_id, facts.author_id, evaluation.key)
         hold = self._holds.get(hold_key) if provisional is not None else None
-        if hold is not None and self._others_pending(hold):
+        if hold is not None and self._others_pending(hold, facts):
             # Another message held under the same claim is still being
             # decided: it releases the hold and closes the notice.
             result, _ = await self._execute(evaluation, None, last=False)
@@ -432,10 +452,10 @@ class Executor:
                     )
 
     @staticmethod
-    def _others_pending(hold: _Hold) -> bool:
+    def _others_pending(hold: _Hold, facts: MessageFacts) -> bool:
         """Count one held message's decision as done; whether others remain."""
-        hold.pending -= 1
-        return hold.pending > 0
+        hold.pending.discard(facts.message_id)
+        return bool(hold.pending)
 
     async def _execute(
         self, evaluation: Evaluation, hold: _Hold | None, *, last: bool = True
@@ -591,16 +611,16 @@ class Executor:
                 notice = (
                     f"⚠️ <@{target.user_id}> has been warned.\n**Reason:** {scam_text}"
                 )
-                dm = (
-                    "You have received a warning.\n\n"
-                    f"**Reason:** {scam_text}\n\n"
-                    "Please review the server rules. Continued violations may "
-                    "result in further action (timeout, kick, or ban)."
+                await self._warn(
+                    gateway, trigger, target, facts, notice, _warning_dm(scam_text)
+                )
+            elif NOTICE_MASS_MENTION in notices:
+                await self._warn_by_dm(
+                    gateway, trigger, target, facts, policy, rules.MASS_MENTION_WARNING
                 )
             else:
                 notice = format_warning_message(target.user_id, _spam_reasons(target))
-                dm = None
-            await self._warn(gateway, trigger, target, facts, notice, dm)
+                await self._warn(gateway, trigger, target, facts, notice, None)
         elif scam_text is not None and target.sanction is not None:
             # A timeout (high-signal or repeat): the member is told by DM,
             # once it took effect (never after a staff refusal or a reversal).
@@ -619,7 +639,7 @@ class Executor:
                     target_user_id=target.user_id,
                 )
             ):
-                await self.messenger.dm(target.user_id, scam_text)
+                await self._dm(target.user_id, scam_text)
 
         user = f"<@{target.user_id}>"
         if NOTICE_ATTACHMENT_BLOCKED in notices and facts.message_id in deleted:
@@ -720,7 +740,74 @@ class Executor:
                 incident_id, kind=gw.MESSAGE_DM, target_user_id=target.user_id
             )
         ):
-            await self.messenger.dm(target.user_id, dm)
+            await self._dm(target.user_id, dm)
+
+    async def _dm(self, user_id: str, content: str) -> bool:
+        """A DM to the member; never raises. False when it was not delivered
+        (closed DMs, a rate limit, Discord down, or anything else)."""
+        try:
+            return await self.messenger.dm(user_id, content)
+        except Exception:  # noqa: BLE001 — the decision's other messages go on
+            log_exception(
+                logger,
+                "Coordinator could not DM %s",
+                user_id,
+                level=logging.WARNING,
+            )
+            return False
+
+    async def _warn_by_dm(
+        self,
+        gateway,
+        trigger: Trigger,
+        target: TargetDecision,
+        facts: MessageFacts,
+        policy: GuildPolicy,
+        reason: str,
+    ) -> None:
+        """A warning on mod history, told by DM only (Zech, Oct 24: the
+        mass-mention warning). One per incident: the gateway's ``warn`` key
+        fences a post's copies and a second pod. It is ``dm_only`` with its
+        own DM claim, so a scam decision on the same message still posts its
+        notice and sends its DM. An undelivered DM still leaves the warning
+        recorded, and the report says the member was not told."""
+        async with gateway.reserve(
+            trigger,
+            Proposal(
+                kind=gw.WARN,
+                target_user_id=target.user_id,
+                target_username=target.name,
+                reason=reason,
+                channel_id=facts.channel_id,
+                dm_only=True,
+                target_is_bot=False,
+            ),
+        ) as slot:
+            if not slot.go:
+                # Already warned in this incident, or a stronger sanction.
+                return
+            slot.confirm()
+            incident_id = slot.incident_id
+        if incident_id is None or not await gateway.claim_member_message(
+            incident_id, kind=gw.MESSAGE_WARNING_DM, target_user_id=target.user_id
+        ):
+            return
+        if await self._dm(target.user_id, _warning_dm(reason)):
+            return
+        await gateway.add_notes(
+            incident_id,
+            source=ACTOR,
+            notes=[
+                (
+                    gw.ENTRY_NOTE,
+                    f"The warning DM to <@{target.user_id}> was not delivered "
+                    "(their DMs may be closed, or Discord refused it); it is "
+                    "recorded on their history.",
+                )
+            ],
+            report_channel_id=policy.report_channel_id,
+            target_user_id=target.user_id,
+        )
 
     # ------------------------------------------------------------------
     # Report lines
@@ -777,6 +864,16 @@ class Executor:
 # ---------------------------------------------------------------------------
 # Pure helpers
 # ---------------------------------------------------------------------------
+
+
+def _warning_dm(reason: str) -> str:
+    """The standard warning DM, as the /warn command words it."""
+    return (
+        "You have received a warning.\n\n"
+        f"**Reason:** {reason}\n\n"
+        "Please review the server rules. Continued violations may "
+        "result in further action (timeout, kick, or ban)."
+    )
 
 
 def _reason(targets) -> str:
