@@ -49,9 +49,9 @@ MIB = 1024 * 1024
 # 10.5 MiB over it (tests/shared/code_sandbox_test.py checks this bound).
 WORKER_OVERHEAD_MIB = 16
 
-# A process that doesn't say: one run at the 256 MiB chat cap. Every
+# A process that doesn't say: two runs at chat's 64 MiB cap. Every
 # deployment that runs sandboxes sets its own (k8s/).
-DEFAULT_BUDGET_MIB = 288
+DEFAULT_BUDGET_MIB = 160
 BUDGET_ENV = "CODE_SANDBOX_BUDGET_MIB"
 
 # Past a feed's time limit, how long the pool waits for the sandbox to raise

@@ -19,8 +19,11 @@ from smarter_dev.web.research_tools import jina_read
 
 RAW_READ_CHAR_LIMIT = 100_000
 MAX_CODE_OUTPUT_CHARS = 10_000
+# 64 MiB: every snippet in the run_code parity corpus and the sandbox tests
+# runs within it (a 2-million-item list is the first that doesn't), and it
+# keeps each pod's sandboxes small (smarter_dev/shared/code_sandbox.py).
 MONTY_LIMITS = {
-    "max_memory": 256 * 1024 * 1024,
+    "max_memory": 64 * 1024 * 1024,
     "max_recursion_depth": 500,
     "max_feed_duration_secs": 10.0,
 }
@@ -109,9 +112,7 @@ async def run_code(
     except RunNotWanted:
         raise
     except monty.MontyError as exc:
-        stdout = "".join(
-            text for stream, text in collector.output if stream == "stdout"
-        )
+        stdout = "".join(text for stream, text in collector.output if stream == "stdout")
         suffix = f"\nstdout before error:\n{stdout}" if stdout else ""
         return f"error: {type(exc).__name__}: {exc}{suffix}"[:MAX_CODE_OUTPUT_CHARS]
     except Exception as exc:

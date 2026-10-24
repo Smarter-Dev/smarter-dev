@@ -57,7 +57,7 @@ MAX_READ_CHARS = 100_000
 # Resource limits for the sandboxed run_code tool. No network/filesystem access
 # is exposed, and max_feed_duration_secs bounds runaway loops so a turn can't hang.
 MONTY_LIMITS: dict[str, Any] = {
-    "max_memory": 256 * 1024 * 1024,
+    "max_memory": 64 * 1024 * 1024,  # as web chat's (chat/toolsets.py)
     "max_recursion_depth": 500,
     "max_feed_duration_secs": 10.0,
 }

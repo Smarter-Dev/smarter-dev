@@ -235,11 +235,12 @@ spec:
                   - name: SKRIFT_ENV
                     value: "production"
                   # Memory sandboxes may hold at once (chat and site run_code
-                  # at 256 MiB, handler fires at 64; code_sandbox.py). Limit
-                  # 1Gi, 365Mi in use (2026-10-24): one chat run beside a few
-                  # fires, leaving ~260Mi for this pod's own agent runs.
+                  # at 64 MiB, handler fires at 32, each plus Monty's 16;
+                  # code_sandbox.py): four chat runs, or six fires, or a mix.
+                  # Limit 1Gi, 365Mi in use (2026-10-24): worst case ~711Mi,
+                  # leaving ~313Mi for this pod's own agent runs.
                   - name: CODE_SANDBOX_BUDGET_MIB
-                    value: "400"
+                    value: "320"
                 resources:
                     requests:
                         cpu: 250m

@@ -210,9 +210,10 @@ def _surely_not_sent(error: BaseException) -> bool:
 # it awaits a host function; host functions check the budget's deadline.
 # A fire is a few lines of logic over its context and host functions. Its
 # worker shares the agent worker's sandbox budget with chat's run_code and
-# holds its place while it awaits Discord, so the cap is kept small: 64 MiB
-# lets four fires run beside one full-size chat run (code_sandbox).
-SANDBOX_MAX_MEMORY = 64 * 1024 * 1024
+# holds its place while it awaits Discord, so the cap is kept small. Every
+# handler and extension test, all 14 bundled scripts included, passes at
+# 8 MiB; 32 leaves four times that.
+SANDBOX_MAX_MEMORY = 32 * 1024 * 1024
 SANDBOX_MAX_RECURSION_DEPTH = 500
 _DURATION_SLACK_SECONDS = 5.0
 # Monty counts every host-function call; its default ceiling is 1000. A fire's

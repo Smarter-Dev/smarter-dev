@@ -51,27 +51,31 @@ watches the heartbeat: a job that took the call and stopped answering is a
 
 ## Memory
 
-Each sandbox is a `monty` process in its pod's cgroup. Every process that
-runs them has a budget, `CODE_SANDBOX_BUDGET_MIB`, set per deployment in
-`k8s/`. A run reserves its memory cap plus 16 MiB (Monty's own runtime) and
-waits, first come first served, until that fits. Its cap is what the caller
-asks for, cut to fit the budget, and Monty enforces it inside the worker.
-Every entry point counts: chat and site `run_code`, the bot's `run_code` and
-handler fires (64 MiB each). The handler linter parses only, at a 16 MiB cap,
-and is counted in each pod's margin.
+Each sandbox is a `monty` process in its pod's cgroup, so its memory counts
+against the pod's limit. Two things bound it.
 
-| Pod | Limit | In use (2026-10-24) | Budget | What it holds |
+**A small cap per run.** `run_code` (web chat, site chat and the bot) is
+capped at 64 MiB, handler fires at 32 MiB and the handler linter's parse at
+16 MiB; Monty enforces the cap inside the worker. On 0.0.18 all three were
+256 MiB (`chat/toolsets.py:21`, `bot/agents/chat_tools.py:59`,
+`web/handler_runtime.py:208`). Of the 78 snippets in the parity corpus and
+sandbox probes, none hits 64 MiB that didn't hit 256 (a 2-million-item list
+is the first that would); every handler and extension test, all 14 bundled
+scripts included, passes at 8 MiB.
+
+**A budget per process.** `CODE_SANDBOX_BUDGET_MIB`, set per deployment in
+`k8s/`. A run reserves its cap plus 16 MiB (Monty's own runtime) and waits,
+first come first served, until that fits, so the sandboxes running at once in
+a process never hold more than the budget. Every entry point counts: chat and
+site `run_code`, the bot's `run_code` and handler fires. The linter (sync,
+16 MiB) is counted in each pod's margin.
+
+| Pod | Limit | In use (2026-10-24) | Budget | Worst case |
 | --- | --- | --- | --- | --- |
-| agent-worker | 1Gi | 365Mi | 400 MiB | one 256 MiB chat or site run beside up to a few fires |
-| chat-child-worker | 1Gi | 364Mi | 300 MiB | one 256 MiB sub-agent run |
-| bot | 612Mi | 305Mi (425Mi under load, 2026-09-25) | 128 MiB | one `run_code`, capped at 112 MiB |
-| website | 384Mi | ~352Mi | 32 MiB | nothing but the linter's parse |
-
-Saturating every entry point of each pod at its limit, from that baseline,
-peaked at 699.7 MiB (agent-worker), 634.2 MiB (chat-child-worker),
-431.6 MiB and, from 425 MiB, 551.2 MiB (bot), and 362.7 MiB (website), with
-no OOM. With the budget's wait removed, the agent-worker, chat-child-worker
-and bot runs were OOM-killed.
+| agent-worker | 1Gi | 365Mi | 320 MiB: four chat/site runs, or six fires, or a mix | ~711Mi |
+| chat-child-worker | 1Gi | 364Mi | 240 MiB: three sub-agent runs | ~604Mi |
+| bot | 612Mi | 305Mi (425Mi under load, 2026-09-25) | 80 MiB: one `run_code` | ~411Mi (~531Mi under load) |
+| website | 384Mi | ~352Mi | 32 MiB (it runs only the linter) | ~378Mi |
 
 The route's own limits (2 per member, 3 in all) keep queued runs from filling
 the worker's job slots; three runs one after another fit the route's

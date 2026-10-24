@@ -59,7 +59,7 @@ DEFAULT_MODEL = "gemini-3.1-flash-lite"
 # per-case asyncio timeout govern wall-clock, so a slow but legitimate web
 # call isn't killed mid-flight as if it were a CPU-bound runaway.
 MONTY_LIMITS: dict[str, Any] = {
-    "max_memory": 256 * 1024 * 1024,
+    "max_memory": 64 * 1024 * 1024,
     "max_recursion_depth": 500,
 }
 

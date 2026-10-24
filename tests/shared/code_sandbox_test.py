@@ -47,13 +47,13 @@ async def test_sleeping_does_not_hold_a_worker():
 
 
 async def test_a_large_allocation_stops_at_the_memory_limit():
-    # 264 MiB: over chat's 256 MiB cap, under what the default budget could
+    # 72 MiB: over chat's 64 MiB cap, under what the default budget could
     # hold, so it is chat's own cap that stops it.
-    text, _ = await _run("x = 'a' * (264 * 1024 * 1024)\nlen(x)")
+    text, _ = await _run("x = 'a' * (72 * 1024 * 1024)\nlen(x)")
     assert text.startswith(
         "error: MontyRuntimeError: MemoryError: memory limit exceeded"
     ), text
-    assert text.endswith(f"> {256 * MIB} bytes"), text
+    assert text.endswith(f"> {64 * MIB} bytes"), text
 
 
 async def test_a_growing_list_stops_at_the_memory_limit():
@@ -173,21 +173,22 @@ async def _hogs(count: int) -> tuple[list[str], int, int]:
 @pytest.mark.parametrize(
     ("budget", "cap", "workers"),
     [
-        # Each deployment's budget (k8s/), and the default.
-        (128, 112, 1),  # the bot: one run, its cap cut to fit
-        (288, 256, 1),  # the default: one chat-size run
-        (300, 256, 1),  # chat-child-worker
-        (400, 256, 1),  # agent-worker: one chat-size run (and room for fires)
-        (560, 256, 2),
+        # Each deployment's budget (k8s/), the default, and one too small for
+        # chat's cap, which cuts the cap to fit.
+        (80, 64, 1),  # the bot
+        (160, 64, 2),  # the default
+        (240, 64, 3),  # chat-child-worker
+        (320, 64, 4),  # agent-worker
+        (56, 40, 1),
     ],
 )
 async def test_parallel_runs_never_hold_more_than_the_budget(
     monkeypatch, budget, cap, workers
 ):
-    # Six members each fill the memory limit at once. Without the budget, six
-    # workers near 256 MiB would coexist (about 1.6 GiB in one pod).
+    # Eight members each fill the memory limit at once. Without the budget,
+    # eight workers near 64 MiB would coexist whatever the pod's room.
     monkeypatch.setenv(code_sandbox.BUDGET_ENV, str(budget))
-    results, peak_workers, peak_rss = await _hogs(6)
+    results, peak_workers, peak_rss = await _hogs(8)
     assert all(
         "MemoryError: memory limit exceeded: " in text
         and f"> {cap * MIB} bytes" in text
@@ -198,7 +199,7 @@ async def test_parallel_runs_never_hold_more_than_the_budget(
     assert peak_rss <= budget * MIB
 
 
-@pytest.mark.parametrize("cap", [16, 112, 256])
+@pytest.mark.parametrize("cap", [16, 32, 64, 256])
 async def test_a_worker_at_its_cap_stays_within_the_overhead(monkeypatch, cap):
     # What the budget reserves per run beyond its cap.
     monkeypatch.setenv(
