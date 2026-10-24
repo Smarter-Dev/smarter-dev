@@ -124,8 +124,9 @@ Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
 
 The wall clock is available: scripts may call ``datetime.datetime.now(tz)`` and
-``datetime.date.today()`` (wired through ``_clock_os``). Every other OS surface —
-filesystem, env — stays blocked.
+``datetime.date.today()`` (Monty's default clock policy reads the worker's
+clock, in UTC). Every other OS surface — filesystem, env — stays blocked: no
+``os=`` handler is wired, so Monty refuses them.
 
 Gathering is agent-only: the script itself has no web access. A spawned agent
 returns plaintext and cannot emit. The budget bounds both the agent's *input*
@@ -146,6 +147,7 @@ from typing import Any
 
 import pydantic_monty as monty
 
+from smarter_dev.shared.code_sandbox import run_sandboxed
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import exception_type_name
@@ -202,12 +204,16 @@ def _surely_not_sent(error: BaseException) -> bool:
 
 
 # Hard sandbox limits, independent of the per-fire budget's wall-clock. Memory
-# and recursion bound a runaway script; max_duration_secs is a backstop a few
-# seconds past the budget's own deadline so the budget fails first with a clear
-# cap name.
+# and recursion bound a runaway script; max_feed_duration_secs is a backstop a
+# few seconds past the budget's own deadline so the budget fails first with a
+# clear cap name. Monty's clock runs only while the script computes, not while
+# it awaits a host function; host functions check the budget's deadline.
 SANDBOX_MAX_MEMORY = 256 * 1024 * 1024
 SANDBOX_MAX_RECURSION_DEPTH = 500
 _DURATION_SLACK_SECONDS = 5.0
+# Monty counts every host-function call; its default ceiling is 1000. A fire's
+# own caps bound its calls, so this only has to sit above any legitimate fire.
+SANDBOX_MAX_SUSPENSIONS = 100_000
 
 # A script-armed timer's payload rides the durable job store as JSON, so it is
 # bounded like HandlerMemory.set: an over-cap payload is a metered breach.
@@ -305,26 +311,6 @@ async def _no_claimer(key: str, ttl_seconds: int) -> bool:
 
 async def _no_claim_reader(key: str) -> bool:
     raise RuntimeError("no claim reader configured for this handler execution")
-
-
-def _clock_os(
-    function_name: str, args: tuple[Any, ...], kwargs: dict[str, Any] | None = None
-) -> Any:
-    """Monty ``os=`` callback that grants ONLY the wall-clock functions.
-
-    Monty treats ``datetime.now(tz)`` and ``date.today()`` as OS calls (they are
-    non-deterministic, so the sandbox refuses them — ``datetime.now`` is "not
-    implemented" — unless a host opts in). We answer just those two from the real
-    host clock and return ``NOT_HANDLED`` for everything else, so filesystem, env,
-    and every other OS surface stay blocked exactly as before. Scripts get the
-    natural ``datetime.datetime.now(datetime.timezone.utc)`` with no special API.
-    """
-    if function_name == "datetime.now":
-        tz = args[0] if args else None
-        return datetime.datetime.now(tz=tz)
-    if function_name == "date.today":
-        return datetime.date.today()
-    return monty.NOT_HANDLED
 
 
 def _random_functions() -> dict[str, Callable[..., Any]]:
@@ -1535,25 +1521,24 @@ async def run_handler_script(
             guild_memory_changed=shared_guild_memory.dirty,
         )
 
-    try:
-        compiled = monty.Monty(script, inputs=["context"], type_check=False)
-    except monty.MontyError as exc:
-        # Compiled before the script sees any context, so the message can only
-        # quote the script itself.
-        return _result("error", error=f"compile: {type(exc).__name__}: {exc}")
-
     limits: dict[str, Any] = {
         "max_memory": SANDBOX_MAX_MEMORY,
         "max_recursion_depth": SANDBOX_MAX_RECURSION_DEPTH,
-        "max_duration_secs": budget.wall_clock_seconds + _DURATION_SLACK_SECONDS,
+        "max_feed_duration_secs": budget.wall_clock_seconds + _DURATION_SLACK_SECONDS,
+        "max_suspensions": SANDBOX_MAX_SUSPENSIONS,
     }
     try:
-        await compiled.run_async(
-            inputs={"context": context},
+        await run_sandboxed(
+            script,
             limits=limits,
-            external_functions=execution.external_functions(),
-            os=_clock_os,
+            inputs={"context": context},
+            external_lookup=execution.external_functions(),
+            bounded=False,
         )
+    except monty.MontySyntaxError as exc:
+        # Raised before the script runs, so the message can only quote the
+        # script itself.
+        return _result("error", error=f"compile: {type(exc).__name__}: {exc}")
     except CapExceeded as exc:  # defensive: a direct (non-sandbox) breach
         logger.info("handler hit cap %s (channel=%s)", exc.cap, channel_id)
         return _result("cap_exceeded", error=_cap_error(exc), cap=exc.cap)

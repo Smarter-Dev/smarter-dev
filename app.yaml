@@ -100,6 +100,7 @@ controllers:
   - smarter_dev.web.api_native.site_billing:SiteBillingController
   - smarter_dev.web.api_native.site_search:SiteSearchController
   - smarter_dev.web.api_native.site_resources:SiteResourcesController
+  - smarter_dev.web.api_native.site_code:SiteCodeController
   - smarter_dev.web.api_native.site_identity:SiteIdentityController
   - smarter_dev.web.api_native.search_previews:SearchPreviewPersistenceController
   # Signed-link per-channel bot config (no auth_guard: the link is the
@@ -406,6 +407,7 @@ workers:
     - smarter_dev.web.handlers_jobs
     - smarter_dev.web.admin_handlers_jobs
     - smarter_dev.web.web_search_jobs
+    - smarter_dev.web.site_code_jobs
     - smarter_dev.web.chat_bot_purge_jobs
 
 agents:

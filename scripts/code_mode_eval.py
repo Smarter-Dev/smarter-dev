@@ -50,6 +50,7 @@ from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # noqa: 
 from pydantic_ai.providers.google import GoogleProvider  # noqa: E402
 
 from smarter_dev.bot.utils import web_fetch  # noqa: E402
+from smarter_dev.shared.code_sandbox import run_sandboxed  # noqa: E402
 from smarter_dev.web.scan.tools import brave_search  # noqa: E402
 
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
@@ -162,19 +163,17 @@ async def run_code(ctx: RunContext[CodeModeDeps], reason: str, code: str) -> str
 
     collector = monty.CollectStreams()
     try:
-        compiled = monty.Monty(code)
-    except monty.MontyError as e:  # syntax / typing failure at compile time
+        value = await run_sandboxed(
+            code,
+            limits=MONTY_LIMITS,
+            external_lookup=HOST_FUNCTIONS,
+            print_callback=collector,
+        )
+    except (monty.MontySyntaxError, monty.MontyTypingError) as e:
         ctx.deps.recorder.runs.append(
             _CodeRun(code=code, ok=False, reason=reason, error=f"{type(e).__name__}: {e}")
         )
         return f"COMPILE ERROR — {type(e).__name__}: {e}"
-
-    try:
-        value = await compiled.run_async(
-            external_functions=HOST_FUNCTIONS,
-            limits=MONTY_LIMITS,
-            print_callback=collector,
-        )
     except monty.MontyError as e:
         stdout = "".join(text for stream, text in collector.output if stream == "stdout")
         ctx.deps.recorder.runs.append(

@@ -34,6 +34,7 @@ from smarter_dev.bot.privacy.gate import redact
 from smarter_dev.bot.privacy.gate import refuses
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.shared import pdf_text
+from smarter_dev.shared.code_sandbox import run_sandboxed
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import chat_memory_enabled
@@ -54,11 +55,11 @@ from smarter_dev.web.search_previews import reserve_search_preview
 MAX_READ_CHARS = 100_000
 
 # Resource limits for the sandboxed run_code tool. No network/filesystem access
-# is exposed, and max_duration_secs bounds runaway loops so a turn can't hang.
+# is exposed, and max_feed_duration_secs bounds runaway loops so a turn can't hang.
 MONTY_LIMITS: dict[str, Any] = {
     "max_memory": 256 * 1024 * 1024,
     "max_recursion_depth": 500,
-    "max_duration_secs": 10.0,
+    "max_feed_duration_secs": 10.0,
 }
 # Cap run_code output fed back to the agent so a big print can't flood context.
 MAX_CODE_OUTPUT_CHARS = 10_000
@@ -732,14 +733,12 @@ async def run_code(ctx: RunContext[ChatDeps], reason: str, code: str) -> str:
 
     collector = monty.CollectStreams()
     try:
-        compiled = monty.Monty(code)
-    except monty.MontyError as e:  # syntax / typing failure at compile time
-        return f"COMPILE ERROR — {type(e).__name__}: {e}"
-
-    try:
-        value = await compiled.run_async(
-            limits=MONTY_LIMITS, print_callback=collector
+        value = await run_sandboxed(
+            code, limits=MONTY_LIMITS, print_callback=collector
         )
+    except (monty.MontySyntaxError, monty.MontyTypingError) as e:
+        # Monty 1.x parses inside the worker, so a syntax error arrives here.
+        return f"COMPILE ERROR — {type(e).__name__}: {e}"
     except monty.MontyError as e:
         stdout = "".join(t for s, t in collector.output if s == "stdout")
         tail = f"\n--- stdout before error ---\n{stdout}" if stdout else ""

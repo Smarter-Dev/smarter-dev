@@ -54,6 +54,10 @@ class _WebSearchSubmission(BaseModel):
     search_id: str
 
 
+class _SiteCodeSubmission(BaseModel):
+    run_id: str
+
+
 class _ResourcesSubmission(BaseModel):
     run_id: str | None = None
     conversation_id: str | None = None
@@ -72,6 +76,7 @@ _SUBMISSION_DESCRIPTORS = {
     "resources.agent.run": (_ResourcesSubmission, "agents", 600.0),
     "web_search.run": (_WebSearchSubmission, "agents", 300.0),
     "web_search.anonymous": (_WebSearchSubmission, "agents", 300.0),
+    "site_code.run": (_SiteCodeSubmission, "agents", 120.0),
 }
 
 

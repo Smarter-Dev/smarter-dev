@@ -10,6 +10,7 @@ from dataclasses import field
 import httpx
 import pydantic_monty as monty
 
+from smarter_dev.shared.code_sandbox import run_sandboxed
 from smarter_dev.web.chat.policy import IntelligencePolicy
 from smarter_dev.web.chat.safety import validate_public_url
 from smarter_dev.web.research_tools import brave_search
@@ -20,7 +21,7 @@ MAX_CODE_OUTPUT_CHARS = 10_000
 MONTY_LIMITS = {
     "max_memory": 256 * 1024 * 1024,
     "max_recursion_depth": 500,
-    "max_duration_secs": 10.0,
+    "max_feed_duration_secs": 10.0,
 }
 
 
@@ -90,9 +91,8 @@ async def run_code(reason: str, code: str) -> str:
         return "error: reason and code are required"
     collector = monty.CollectStreams()
     try:
-        compiled = monty.Monty(code)
-        value = await compiled.run_async(
-            limits=MONTY_LIMITS, print_callback=collector
+        value = await run_sandboxed(
+            code, limits=MONTY_LIMITS, print_callback=collector
         )
     except monty.MontyError as exc:
         stdout = "".join(text for stream, text in collector.output if stream == "stdout")
