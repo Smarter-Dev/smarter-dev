@@ -23,6 +23,7 @@ from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.web import dashboard_controller
 from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native.site_search import SiteSearchController
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
 from smarter_dev.web.user_content import STALLED_AFTER
@@ -584,6 +585,55 @@ async def test_delete_all_without_keep_is_the_account_pages_rule(
         "running": 1,
         "kept": [str(running)],
     }
+
+
+async def test_a_lost_start_deleted_by_delete_all_is_never_made_again(
+    client, member, db_session
+):
+    """#326's P1 probe: a start whose reply never reached the site finishes,
+    the site's Delete all (which can't name it: no id saved, and its reply no
+    longer writing) deletes it, and the start retried with the same key gets
+    410, not a new run."""
+    tc, _ = client
+    member_id = member.id
+    key = hashlib.sha256(b"a reply whose start answer was lost").hexdigest()
+    run_id = _start(tc, member_id, key=key).json()["search"]["id"]
+    run = await db_session.get(WebSearchRun, UUID(run_id))
+    run.status = "complete"
+    await db_session.commit()
+
+    deleted = tc.post(f"{ROOT}/users/{member_id}/runs/delete-all", json={"keep": []})
+
+    assert deleted.json() == {"deleted": 1, "running": 0, "kept": []}
+    retried = _start(tc, member_id, key=key)
+    assert retried.status_code == 410
+    assert retried.json()["detail"] == "This search was deleted."
+    db_session.expire_all()
+    assert (await db_session.execute(WebSearchRun.__table__.select())).all() == []
+
+
+async def test_a_run_kept_by_its_key_is_not_marked_and_can_be_rejoined(
+    client, member, db_session
+):
+    """The reply is still being written: its run is kept by key, its key is
+    not marked, and the reply's retried start rejoins the same run."""
+    tc, _ = client
+    member_id = member.id
+    key = hashlib.sha256(b"a reply still being written").hexdigest()
+    run_id = _start(tc, member_id, key=key).json()["search"]["id"]
+    run = await db_session.get(WebSearchRun, UUID(run_id))
+    run.status = "complete"
+    await db_session.commit()
+
+    kept = tc.post(
+        f"{ROOT}/users/{member_id}/runs/delete-all", json={"keep_keys": [key]}
+    )
+
+    assert kept.json() == {"deleted": 0, "running": 1, "kept": [run_id]}
+    assert await db_session.get(WebSearchForgottenKey, (member_id, key)) is None
+    rejoined = _start(tc, member_id, key=key)
+    assert rejoined.status_code == 201
+    assert rejoined.json()["search"]["id"] == run_id
 
 
 async def test_delete_all_keeps_the_runs_of_replies_by_their_search_keys(
