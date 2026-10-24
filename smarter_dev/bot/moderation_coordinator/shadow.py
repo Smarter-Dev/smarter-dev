@@ -48,7 +48,10 @@ from datetime import timedelta
 from typing import Any
 
 import hikari
+from sqlalchemy import and_
 from sqlalchemy import func
+from sqlalchemy import not_
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -266,15 +269,15 @@ class BotReads:
             ).first()
             # A review hold (the gateway's provisional timeout) and its
             # release are no action on the member: told apart by their
-            # operation, never by reason text. Read past them to the ten.
-            found = (
+            # operation, never by reason text, and left out in the query so
+            # any number of them never hides a real action from the ten.
+            # Only actions before this message: its own are not "earlier".
+            actions = (
                 await session.execute(
                     select(
                         ModerationAction.action_type,
                         ModerationAction.created_at,
                         ModerationAction.reason,
-                        ModerationOperation.kind,
-                        ModerationOperation.requested,
                     )
                     .outerjoin(
                         ModerationOperation,
@@ -284,16 +287,13 @@ class BotReads:
                         ModerationAction.guild_id == guild_id,
                         ModerationAction.target_user_id == user_id,
                         ModerationAction.action_type.in_(SANCTION_ACTIONS),
+                        ModerationAction.created_at < before,
+                        not_review_hold(),
                     )
                     .order_by(ModerationAction.created_at.desc())
-                    .limit(HISTORY_READ_LIMIT)
+                    .limit(HISTORY_ACTIONS)
                 )
             ).all()
-            actions = [
-                (action_type, created_at, reason)
-                for action_type, created_at, reason, kind, requested in found
-                if not is_review_hold(kind, requested)
-            ][:HISTORY_ACTIONS]
         return author_history_from(row, actions, before)
 
     async def channel_window(
@@ -335,22 +335,26 @@ class BotReads:
             return None
 
 
-#: The actions an author's history keeps, and how many rows are read to
-#: find them past review holds.
+#: The actions an author's history keeps.
 HISTORY_ACTIONS = 10
-HISTORY_READ_LIMIT = 50
 
 
-def is_review_hold(kind: str | None, requested: dict | None) -> bool:
-    """Whether an action row is a review hold or its release: the gateway's
-    provisional timeout (the coordinator's and the handlers' ``hold:``
-    claims), or an untimeout (a release shortened to another claim is
-    recorded as a timeout)."""
-    if kind is None:
-        return False  # recorded outside the gateway: a moderator's own
-    if kind == gw.UNTIMEOUT:
-        return True
-    return kind == gw.TIMEOUT and bool((requested or {}).get("provisional"))
+def not_review_hold():
+    """The action rows that are no review hold or release, for a query that
+    outer-joins each row's operation. A hold is the gateway's provisional
+    timeout (the coordinator's and the handlers' ``hold:`` claims); a release
+    is an untimeout (one shortened to another claim is recorded as a
+    timeout). A row with no operation was recorded outside the gateway: a
+    moderator's own, always counted."""
+    op = ModerationOperation
+    provisional = func.coalesce(op.requested["provisional"].as_boolean(), False)
+    return or_(
+        op.id.is_(None),
+        and_(
+            op.kind != gw.UNTIMEOUT,
+            not_(and_(op.kind == gw.TIMEOUT, provisional)),
+        ),
+    )
 
 
 def _utc(moment: datetime) -> datetime:

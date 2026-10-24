@@ -442,3 +442,15 @@ def test_a_mass_mention_in_code_with_a_docs_link_is_not_high_signal():
     assert "mass mention with a link" in rules.high_signal_reasons(
         plain, metrics=_metrics()
     )
+
+
+def test_an_action_after_the_message_is_no_earlier_action():
+    """Review item 2: a warning recorded after the message (its own early
+    mass-mention warning) is not an earlier one: neither a repeat nor a risk."""
+    history = AuthorHistory(
+        is_first_message=False,
+        days_since_last_message=0,
+        actions=(PastAction(gw.WARN, NOW + timedelta(seconds=1)),),
+    )
+    assert rules.actions_within(history, rules.RECENT_ACTION_SECONDS, NOW) == []
+    assert rules.recent_moderation(history, NOW) == []

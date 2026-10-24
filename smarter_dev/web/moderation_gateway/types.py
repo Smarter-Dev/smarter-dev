@@ -61,6 +61,9 @@ NOTE_KINDS = frozenset({ENTRY_NOTE, ENTRY_ALERT})
 # dedupes per member per incident (outbox rows of these kinds).
 MESSAGE_NOTICE = "notice"
 MESSAGE_DM = "dm"
+#: A warning told by DM alone (the mass-mention warning): its own DM, so a
+#: stronger outcome in the same incident still sends its DM too.
+MESSAGE_WARNING_DM = "warning_dm"
 ENTRY_EVIDENCE = "evidence"
 ENTRY_TRANSCRIPT = "transcript"
 ENTRY_ASSESSMENT = "assessment"
@@ -175,6 +178,9 @@ class Proposal:
     #: A timeout that contains while something is under review (a hold),
     #: not a sanction: it never makes a later warn or timeout "weaker".
     provisional: bool = False
+    #: A warn told by DM alone, with no public notice: it does not take the
+    #: incident's notice from a later warn (see ``claim_member_message``).
+    dm_only: bool = False
     target_is_bot: bool | None = None
     #: Skip the staff check: the target is a webhook, whose message has no
     #: member behind it, or a moderator chose this target by hand.

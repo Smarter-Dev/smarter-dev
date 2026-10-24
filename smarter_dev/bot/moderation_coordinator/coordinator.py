@@ -263,10 +263,17 @@ class Coordinator:
             return STAFF_CHECK_FAILED
 
     async def _author_history(
-        self, facts: MessageFacts, before: datetime, review: list[str]
+        self,
+        facts: MessageFacts,
+        before: datetime,
+        review: list[str],
+        *,
+        actions_before: float,
     ) -> AuthorHistory:
+        """The author's history; only actions taken before ``actions_before``
+        (the first of the post and its copies) count as earlier ones."""
         try:
-            return await asyncio.wait_for(
+            history = await asyncio.wait_for(
                 self.reads.author_history(facts.guild_id, facts.author_id, before),
                 HISTORY_READ_SECONDS,
             )
@@ -281,6 +288,11 @@ class Coordinator:
                 "they had none (not new, not silent, no earlier actions)."
             )
             return AuthorHistory(is_first_message=None, days_since_last_message=None)
+        cutoff = datetime.fromtimestamp(actions_before, UTC)
+        return replace(
+            history,
+            actions=tuple(a for a in history.actions if a.created_at < cutoff),
+        )
 
     async def _evaluate(
         self,
@@ -409,11 +421,16 @@ class Coordinator:
         known_copy = False
         escalated = False
         if scam_candidate and not await author_is_staff():
-            history = await self._author_history(facts, now_dt, review)
+            copies, burst = rules.burst_copies(facts, key, earlier_posts)
+            # The post's own actions (its early mass-mention warning, and a
+            # copy's post's) are this incident, not an earlier one.
+            first_posted = min([now, *(post.posted_at for post in copies)])
+            history = await self._author_history(
+                facts, now_dt, review, actions_before=first_posted
+            )
             known_copy = self.verdict_cache.known(
                 facts.guild_id, facts.author_id, key, now
             )
-            _, burst = rules.burst_copies(facts, key, earlier_posts)
             suspect = rules.scam_suspect_reasons(facts, burst)
             high_signal = rules.high_signal_reasons(
                 facts,

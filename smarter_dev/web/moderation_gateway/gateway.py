@@ -273,10 +273,11 @@ class ModerationGateway:
     ) -> bool:
         """Whether to send a warn's member-facing message; True claims it.
 
-        ``kind`` is ``notice`` (the public one) or ``dm``. One of each per
-        member per incident: a warn the incident skipped still tells the
-        member, unless the incident already did. A notice is also taken by a
-        warn the incident confirmed, since a warn's notice is public.
+        ``kind`` is ``notice`` (the public one), ``dm`` or ``warning_dm``. One
+        of each per member per incident: a warn the incident skipped still
+        tells the member, unless the incident already did. A notice is also
+        taken by a warn the incident confirmed, since a warn's notice is
+        public (not a ``dm_only`` warn's: it had none).
         """
         target = str(target_user_id)
         async with self._session() as session:
@@ -286,15 +287,15 @@ class ModerationGateway:
             if kind == t.MESSAGE_NOTICE:
                 warned = (
                     await session.execute(
-                        select(ModerationOperation.id).where(
+                        select(ModerationOperation.requested).where(
                             ModerationOperation.incident_id == incident_id,
                             ModerationOperation.target_user_id == target,
                             ModerationOperation.kind == t.WARN,
                             ModerationOperation.state == t.CONFIRMED,
                         )
                     )
-                ).first()
-                if warned is not None:
+                ).scalars()
+                if any(not (requested or {}).get("dm_only") for requested in warned):
                     return False
             session.add(
                 ModerationOutbox(
@@ -1024,6 +1025,8 @@ class ModerationGateway:
             requested["delete_message_seconds"] = int(proposal.delete_message_seconds)
         if proposal.provisional:
             requested["provisional"] = True
+        if proposal.dm_only:
+            requested["dm_only"] = True
         return ModerationOperation(
             id=uuid.uuid4(),
             incident_id=incident_id,

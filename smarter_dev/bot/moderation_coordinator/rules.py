@@ -409,7 +409,7 @@ def actions_within(history: AuthorHistory, seconds: float, now: datetime) -> lis
         action
         for action in history.actions
         if action.action_type in SANCTION_ACTIONS
-        and (now - action.created_at).total_seconds() < seconds
+        and 0 <= (now - action.created_at).total_seconds() < seconds
     ]
 
 
