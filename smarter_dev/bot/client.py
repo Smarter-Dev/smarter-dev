@@ -1520,6 +1520,37 @@ async def drain_accepted_work(gate: leadership.EventGate, budget: float) -> None
     logger.info(f"stopped acting: {gate.summary()}")
 
 
+DAILY_REWARD_EMOJI = "daily_bytes_received:1403748840477163642"
+DAILY_REWARD_FALLBACK_EMOJI = "🎉"
+UNKNOWN_EMOJI_CODE = 10014
+# Set once Discord says the custom emoji is gone, so later claims skip the
+# failing call. A re-uploaded emoji gets a new id, which needs a deploy anyway.
+_daily_reward_emoji_missing = False
+
+
+async def add_daily_reward_reaction(message: hikari.Message) -> None:
+    """React to the message that earned the daily reward.
+
+    Uses the custom emoji, falling back to a unicode one when Discord answers
+    400 Unknown Emoji (the custom emoji was deleted or the bot lost access to
+    it). Other HTTP errors propagate to the caller.
+    """
+    global _daily_reward_emoji_missing
+    if not _daily_reward_emoji_missing:
+        try:
+            await message.add_reaction(DAILY_REWARD_EMOJI)
+            return
+        except hikari.BadRequestError as error:
+            if error.code != UNKNOWN_EMOJI_CODE:
+                raise
+            _daily_reward_emoji_missing = True
+            logger.warning(
+                f"Daily reward emoji {DAILY_REWARD_EMOJI} is unknown to Discord; "
+                f"using {DAILY_REWARD_FALLBACK_EMOJI} instead"
+            )
+    await message.add_reaction(DAILY_REWARD_FALLBACK_EMOJI)
+
+
 async def run_bot() -> None:
     """Run the Discord bot with Lightbulb v2 syntax."""
     settings = get_settings()
@@ -1685,9 +1716,7 @@ async def run_bot() -> None:
 
                 # Add reaction to the message that earned bytes
                 try:
-                    await event.message.add_reaction(
-                        "daily_bytes_received:1403748840477163642"
-                    )
+                    await add_daily_reward_reaction(event.message)
                     logger.info(
                         f"✅ Added reaction and awarded daily bytes reward ({result.earned}) to {event.author}"
                     )
