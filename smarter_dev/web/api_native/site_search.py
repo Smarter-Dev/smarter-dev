@@ -264,15 +264,16 @@ class SiteSearchController(Controller):
             return {"status": "forgotten"}
         await mark_search_key_forgotten(db_session, uid, key)
         run = await _run_for_key(db_session, uid, key)
+        # The mark is kept whatever the run's delete says: from here a start
+        # with this key refuses.
+        await db_session.commit()
         if run is not None:
             try:
                 await delete_search(db_session, run)
             except StillRunning:
-                await db_session.commit()
                 raise plain_error(
                     409, "Wait for this search to finish, then delete it."
                 ) from None
-        await db_session.commit()
         return {"status": "forgotten"}
 
     @delete(

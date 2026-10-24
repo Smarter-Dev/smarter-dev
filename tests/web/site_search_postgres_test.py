@@ -100,6 +100,19 @@ async def _count(maker, model, owner):
         )
 
 
+async def _finished_site_run(maker, owner):
+    key = uuid4().hex + uuid4().hex  # 64 hex, as a site turn's key is
+    async with maker() as s:
+        run = await dashboard_controller.create_search(s, owner, "a request", key)
+        await s.execute(
+            update(WebSearchRun)
+            .where(WebSearchRun.id == run.id)
+            .values(status="complete")
+        )
+        await s.commit()
+    return run.id, key
+
+
 async def _waiting(task):
     await asyncio.sleep(HOLD / 4)
     assert not task.done(), "the second transaction must wait on the users row"
@@ -174,24 +187,20 @@ async def test_a_dashboard_start_and_a_forget_of_its_key(db, monkeypatch, forget
 
 
 @pytest.mark.parametrize("purge_first", [True, False])
-async def test_the_account_purge_and_a_forget_never_deadlock(
+async def test_the_account_purge_and_a_delete_never_deadlock(
     db, monkeypatch, purge_first
 ):
-    """A closing account with a finished run, purged and forgotten at once.
-    Both take the users row before its runs, dispatches and marks, so one
-    waits for the other and neither is aborted; nothing of it is left."""
+    """A closing account with a finished run, purged while the site deletes
+    that run. Both take the users row before the run and its dispatches,
+    so one waits for the other and neither is aborted; nothing is left.
+    (Purge first: the delete waits on the users row. Delete first, holding
+    the users row: the purge waits there too, before it touches a run.)"""
     maker, client = db
-    owner, key = await _member(maker), uuid4().hex
+    owner = await _member(maker)
+    run_id, _key = await _finished_site_run(maker, owner)
     async with maker() as s:
-        run = await dashboard_controller.create_search(s, owner, "a request", key)
-        await s.execute(
-            update(WebSearchRun)
-            .where(WebSearchRun.id == run.id)
-            .values(status="complete")
-        )
         await s.execute(update(User).where(User.id == owner).values(is_active=False))
         await s.commit()
-    forget = f"/api/site/search/users/{owner}/keys/{key}"
     held = asyncio.Event()
 
     async def purge():
@@ -204,30 +213,34 @@ async def test_the_account_purge_and_a_forget_never_deadlock(
             await s.execute(delete(User).where(User.id == owner))
             await s.commit()
 
+    async def remove():
+        async with maker() as s:
+            await user_content.delete_search(s, await s.get(WebSearchRun, run_id))
+
     if purge_first:
         purged = asyncio.create_task(purge())
         await held.wait()
-        forgot = asyncio.create_task(client.delete(forget))
-        await _waiting(forgot)
+        removed = asyncio.create_task(remove())
+        await _waiting(removed)
         await purged
+        await removed
     else:
-        real = site_search._run_for_key
+        real = user_content.lock_member
 
-        async def holding(s, o, k):
-            out = await real(s, o, k)
+        async def holding(s, user_id):
+            out = await real(s, user_id)
             held.set()
             await asyncio.sleep(HOLD)
             return out
 
-        monkeypatch.setattr(site_search, "_run_for_key", holding)
-        forgot = asyncio.create_task(client.delete(forget))
+        monkeypatch.setattr(user_content, "lock_member", holding)
+        removed = asyncio.create_task(remove())
         await held.wait()
+        monkeypatch.setattr(user_content, "lock_member", real)
         purged = asyncio.create_task(purge())
         await _waiting(purged)
+        await removed
         await purged
-    response = await forgot
-    assert response.status_code == 200, response.text
-    assert response.json() == {"status": "forgotten"}
     assert await _count(maker, WebSearchRun, owner) == 0
     assert await _count(maker, WebSearchForgottenKey, owner) == 0
     async with maker() as s:
@@ -279,3 +292,71 @@ async def test_a_delete_holding_the_lock_refuses_a_start_with_the_site_key(
     assert (await started).status_code == 410
     assert await _count(maker, WebSearchRun, owner) == 0
     assert await _count(maker, WebSearchForgottenKey, owner) == 1
+
+
+@pytest.mark.parametrize("entry", ["dashboard one", "dashboard all", "site remove"])
+async def test_every_delete_entry_point_forgets_a_site_key(db, entry):
+    """Deleted by the dashboard's single delete, its delete-all or the
+    site's delete by id: a site start retried with the run's key gets 410
+    and makes nothing."""
+    maker, client = db
+    owner = await _member(maker)
+    run_id, key = await _finished_site_run(maker, owner)
+    if entry == "dashboard one":
+        # As DashboardController.delete_one_search: the owner's run, then delete_search.
+        async with maker() as s:
+            await user_content.delete_search(
+                s, await dashboard_controller._owned(s, owner, run_id)
+            )
+    elif entry == "dashboard all":
+        async with maker() as s:
+            assert (await user_content.delete_all_searches(s, owner)).deleted == 1
+    else:
+        removed = await client.delete(f"/api/site/search/users/{owner}/runs/{run_id}")
+        assert removed.json() == {"status": "deleted"}
+    assert await _count(maker, WebSearchRun, owner) == 0
+    again = await client.post(
+        f"/api/site/search/users/{owner}/runs",
+        json={"request": "a request", "key": key},
+    )
+    assert again.status_code == 410
+    assert await _count(maker, WebSearchRun, owner) == 0
+
+
+async def test_a_start_that_waited_out_a_forget_and_the_purge_makes_no_run(
+    db, monkeypatch
+):
+    """A dashboard start paused after its own checks; meanwhile the site
+    forgets its key and the account is purged, user row and all. The start
+    then finds no owner: no orphan run or dispatch."""
+    maker, client = db
+    owner, key = await _member(maker), uuid4().hex
+    paused, resume = asyncio.Event(), asyncio.Event()
+
+    async def start():
+        async with maker() as s:
+            paused.set()
+            await resume.wait()  # its idempotency check and limits are done
+            await dashboard_controller.create_search(s, owner, "a request", key)
+
+    started = asyncio.create_task(start())
+    await paused.wait()
+    assert (
+        await client.delete(f"/api/site/search/users/{owner}/keys/{key}")
+    ).status_code == 200
+    async with maker() as s:
+        await user_content.delete_account_leftovers(s, owner)
+        await s.execute(delete(User).where(User.id == owner))
+        await s.commit()
+    resume.set()
+    with pytest.raises(dashboard_controller.SearchKeyForgotten):
+        await started
+    assert await _count(maker, WebSearchRun, owner) == 0
+    async with maker() as s:
+        from smarter_dev.web.models import WorkDispatch
+
+        assert (
+            await s.scalars(
+                select(WorkDispatch).where(WorkDispatch.job_type == "web_search.run")
+            )
+        ).all() == []

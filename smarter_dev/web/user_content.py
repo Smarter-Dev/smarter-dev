@@ -78,6 +78,8 @@ class DeleteAllResult:
     running: int
     # Chats whose uploads could not all be removed; they stay, retryable.
     stranded: int = 0
+    # The searches left (still running).
+    kept: tuple[UUID, ...] = ()
 
 
 def _recent(changed_at: datetime | None) -> bool:
@@ -325,49 +327,101 @@ async def mark_search_key_forgotten(
 SITE_SEARCH_KEY = re.compile(r"^[0-9a-f]{64}$")
 
 
-async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
-    """Delete one finished search, its dispatches and, for a site key, mark
-    the key forgotten, so a start retried with it (a lost reply) can't make
-    the run again. Every delete of one run comes here: the dashboard's, the
-    site's by id or by key, and each run of a delete-all, in a transaction
-    of its own. Lock order (``dashboard_controller.create_search``): the
-    owner's users row first, then the run, re-read under it, then its mark,
-    dispatches and row, committed together."""
-    owner_id, run_id = run.owner_user_id, run.id
-    await session.execute(select(User.id).where(User.id == owner_id).with_for_update())
-    run = await session.scalar(
-        select(WebSearchRun)
-        .where(WebSearchRun.id == run_id)
-        .execution_options(populate_existing=True)
+async def lock_member(session: AsyncSession, user_id: UUID) -> UUID | None:
+    """Lock the member's users row (lock order:
+    ``dashboard_controller.create_search``); their id, or None when gone."""
+    return await session.scalar(
+        select(User.id).where(User.id == user_id).with_for_update()
     )
+
+
+async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID) -> str:
+    """Delete one of the member's runs in its own transaction, deciding from
+    the run as it is now, not as a caller last saw it (port of lane 1's
+    smarter-dev 1cd6d610). Lock order (``dashboard_controller.create_search``):
+    the member's users row first, then the run's row, which a worker takes
+    to change its status, then the site key's mark, the dispatches and the
+    run, committed together. A site key (64 hex, one per chat turn) is marked
+    forgotten with the delete, so a start retried with it (a lost reply)
+    can't make the run again; a dashboard key, which can recur, is not.
+    "deleted" only when this call's DELETE removed the row; "kept" for one
+    still running (nothing marked); "gone" for one already deleted."""
+    await lock_member(session, user_id)
+    run = (
+        await session.execute(
+            select(
+                WebSearchRun.id,
+                WebSearchRun.status,
+                WebSearchRun.updated_at,
+                WebSearchRun.submission_key,
+            )
+            .where(WebSearchRun.id == run_id, WebSearchRun.owner_user_id == user_id)
+            .with_for_update()
+        )
+    ).first()
+    # Nothing to write: the locks go, and with them anything a caller left
+    # unsaved, which it commits itself if it wants it kept.
     if run is None:
-        return
+        await session.rollback()
+        return "gone"
     if run.status not in FINISHED_SEARCH_STATUSES and _recent(run.updated_at):
-        raise StillRunning
+        await session.rollback()
+        return "kept"
     if SITE_SEARCH_KEY.match(run.submission_key):
-        await mark_search_key_forgotten(session, owner_id, run.submission_key)
+        await mark_search_key_forgotten(session, user_id, run.submission_key)
     await forget_dispatches(session, "web_search.run", [run.id])
-    await session.delete(run)
+    removed = await session.execute(
+        delete(WebSearchRun).where(WebSearchRun.id == run.id)
+    )
     await session.commit()
+    return "deleted" if removed.rowcount else "gone"
 
 
-async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAllResult:
-    runs = list(
+async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
+    """Delete one finished search: the dashboard's delete, the site's by id
+    or by key. StillRunning, with nothing marked or deleted, while it runs."""
+    owner_id, run_id = run.owner_user_id, run.id
+    if await _delete_one_search(session, owner_id, run_id) == "kept":
+        raise StillRunning
+
+
+async def _search_ids(session: AsyncSession, user_id: UUID) -> list[UUID]:
+    """The member's run ids, in one read: ids only, so a member with
+    thousands of searches never has their results loaded, and one read, so
+    the list is the runs that existed at one moment (lane 1's dd2e9eed)."""
+    return list(
         (
             await session.execute(
-                select(WebSearchRun).where(WebSearchRun.owner_user_id == user_id)
+                select(WebSearchRun.id)
+                .where(WebSearchRun.owner_user_id == user_id)
+                .order_by(WebSearchRun.id)
             )
         ).scalars()
     )
+
+
+async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAllResult:
+    """Every search the member owns but those still running.
+
+    The runs are listed first, ids only and in one read: those are the runs
+    it deletes, so one started meanwhile is never reached. Each is then
+    decided and deleted in a transaction of its own under the member's lock
+    (:func:`_delete_one_search`), its site key marked forgotten: never one
+    long lock over all of them, and a run that started or finished since it
+    was listed is judged as it is. (Lane 1's smarter-dev 1cd6d610 and
+    dd2e9eed, ported without their ``keep`` options, which PR 222 adds.)"""
+    run_ids = await _search_ids(session, user_id)
+    await session.commit()
     deleted = running = 0
-    for run in runs:
-        try:
-            await delete_search(session, run)
-        except StillRunning:
+    kept: list[UUID] = []
+    for run_id in run_ids:
+        outcome = await _delete_one_search(session, user_id, run_id)
+        if outcome == "deleted":
+            deleted += 1
+        elif outcome == "kept":
             running += 1
-            continue
-        deleted += 1
-    return DeleteAllResult(deleted=deleted, running=running)
+            kept.append(run_id)
+    return DeleteAllResult(deleted=deleted, running=running, kept=tuple(kept))
 
 
 # ── Account deletion ─────────────────────────────────────────────────

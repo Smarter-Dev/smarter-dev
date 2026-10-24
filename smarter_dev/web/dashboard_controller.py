@@ -256,8 +256,9 @@ SEARCH_FORGOTTEN = "This search was deleted."
 
 class SearchKeyForgotten(Exception):
     """A start with a key the site forgot (``web_search_forgotten_keys``):
-    the start's reply was lost and the site has deleted the search. It makes
-    no run; every caller answers 410."""
+    the start's reply was lost and the site has deleted the search; or one
+    whose owner no longer exists. It makes no run; every caller answers
+    410."""
 
 
 async def create_search(
@@ -272,9 +273,13 @@ async def create_search(
     key forgotten. Lock order, for every path that makes, forgets or purges
     an owner's searches: the identity fence (account deletion only), then
     the users row, then the owner's runs, dispatches and forgotten keys."""
-    await db_session.execute(
+    owner = await db_session.scalar(
         select(User.id).where(User.id == user_id).with_for_update()
     )
+    # An owner gone (an account purged while this start waited) has no
+    # forget left to delete the run: no run either.
+    if owner is None:
+        raise SearchKeyForgotten
     if await db_session.get(WebSearchForgottenKey, (user_id, submission_key)):
         raise SearchKeyForgotten
     run = WebSearchRun(

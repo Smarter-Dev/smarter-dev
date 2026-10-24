@@ -979,3 +979,127 @@ async def test_every_delete_of_a_site_search_forgets_its_key(db_session, monkeyp
         db_session, user.id, "latest Python release notes", dashboard_key
     )
     assert again.status == "queued"
+
+
+# Ported from lane 1 (smarter-dev 1cd6d610, dd2e9eed): # Delete-all decides each run as it is when it reaches it, not as it was
+# listed (#326's interleaving probes): another session changes the runs
+# between the listing and the deletes.
+
+
+async def _after_listing(monkeypatch, change):
+    """Run ``change`` once, right after delete-all lists the runs."""
+    from smarter_dev.web import user_content
+
+    listed = user_content._search_ids
+    done = False
+
+    async def listing(session, user_id):
+        nonlocal done
+        page = await listed(session, user_id)
+        if not done:
+            done = True
+            await change()
+        return page
+
+    monkeypatch.setattr(user_content, "_search_ids", listing)
+
+
+def _other_session(db_session):
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    return async_sessionmaker(db_session.bind, expire_on_commit=False)()
+
+
+@pytest.mark.asyncio
+async def test_delete_all_keeps_a_run_a_worker_picked_up_after_the_listing(
+    db_session, monkeypatch
+):
+    user = await _user(db_session)
+    run = await _search(db_session, user, status="queued", stalled=True)
+    user_id, run_id = user.id, run.id
+    await db_session.commit()
+
+    async def worker_starts_it():
+        async with _other_session(db_session) as other:
+            row = await other.get(WebSearchRun, run_id)
+            row.status = "searching"
+            row.updated_at = datetime.now(UTC)
+            await other.commit()
+
+    await _after_listing(monkeypatch, worker_starts_it)
+    result = await delete_all_searches(db_session, user_id)
+
+    assert (result.deleted, result.running, result.kept) == (0, 1, (run_id,))
+    db_session.expire_all()
+    assert await db_session.get(WebSearchRun, run_id) is not None
+
+
+@pytest.mark.asyncio
+async def test_delete_all_deletes_a_run_that_finished_after_the_listing(
+    db_session, monkeypatch
+):
+    user = await _user(db_session)
+    run = await _search(db_session, user, status="searching")
+    user_id, run_id = user.id, run.id
+    await db_session.commit()
+
+    async def worker_finishes_it():
+        async with _other_session(db_session) as other:
+            row = await other.get(WebSearchRun, run_id)
+            row.status = "complete"
+            await other.commit()
+
+    await _after_listing(monkeypatch, worker_finishes_it)
+    result = await delete_all_searches(db_session, user_id)
+
+    assert (result.deleted, result.running, result.kept) == (1, 0, ())
+    db_session.expire_all()
+    assert await db_session.get(WebSearchRun, run_id) is None
+
+
+@pytest.mark.asyncio
+async def test_two_delete_alls_at_once_count_each_run_once(db_session, monkeypatch):
+    user = await _user(db_session)
+    runs = [await _search(db_session, user) for _ in range(2)]
+    user_id = user.id
+    ids = {run.id for run in runs}
+    await db_session.commit()
+    second = {}
+
+    async def another_delete_all():
+        async with _other_session(db_session) as other:
+            second["result"] = await delete_all_searches(other, user_id)
+
+    await _after_listing(monkeypatch, another_delete_all)
+    first = await delete_all_searches(db_session, user_id)
+
+    assert first.deleted + second["result"].deleted == len(ids)
+    assert (first.deleted, second["result"].deleted) == (0, 2)
+    db_session.expire_all()
+    assert not set(await db_session.scalars(select(WebSearchRun.id)))
+
+
+@pytest.mark.asyncio
+async def test_delete_all_never_reaches_a_run_started_after_its_listing(
+    db_session, monkeypatch
+):
+    """A reply that starts its search while delete-all works keeps it: only
+    the runs listed before the deletes begin are deleted."""
+    user = await _user(db_session)
+    await _search(db_session, user)
+    user_id = user.id
+    await db_session.commit()
+    started = {}
+
+    async def a_new_reply_searches():
+        async with _other_session(db_session) as other:
+            member = await other.get(User, user_id)
+            started["id"] = (await _search(other, member)).id
+            await other.commit()
+
+    await _after_listing(monkeypatch, a_new_reply_searches)
+    result = await delete_all_searches(db_session, user_id)
+
+    assert (result.deleted, result.running) == (1, 0)
+    db_session.expire_all()
+    assert await db_session.get(WebSearchRun, started["id"]) is not None
