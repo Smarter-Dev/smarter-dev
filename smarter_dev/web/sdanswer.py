@@ -22,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import select
@@ -173,7 +174,22 @@ async def _load_sources(
     result = await db_session.execute(
         select(ResourceSource).where(ResourceSource.url.in_(urls))
     )
-    return {src.url: src for src in result.scalars().all()}
+    return pick_sources(result.scalars().all())
+
+
+def pick_sources(rows: Iterable[ResourceSource]) -> dict[str, ResourceSource]:
+    """One catalog row per URL: the one with the lowest ``track_key``.
+
+    URLs are not unique in ``resource_sources``; ``track_key`` is, so this
+    pick is total and does not depend on the database's row order. The site's
+    resources lookup uses the same pick, so both render the same card.
+    """
+    picked: dict[str, ResourceSource] = {}
+    for src in rows:
+        kept = picked.get(src.url)
+        if kept is None or src.track_key < kept.track_key:
+            picked[src.url] = src
+    return picked
 
 
 def _resolve_block(
@@ -321,15 +337,28 @@ def _resolve_callout(card: dict, kind: str) -> dict | None:
     }
 
 
+# Article card field caps. Most equal the column lengths, so valid rows are
+# untouched; blurb is unbounded Text, capped far above any real one. The url
+# is never cut: it must stay a working link.
+ARTICLE_CARD_CAPS = {
+    "title": 512,
+    "byline": 256,
+    "blurb": 2000,
+    "learning_type": 32,
+    "track_key": 200,
+}
+
+
 def _source_to_article_card(src: ResourceSource) -> dict:
+    caps = ARTICLE_CARD_CAPS
     return {
         "type": "article",
         "url": src.url,
-        "title": src.title,
-        "byline": src.byline or "",
-        "blurb": src.blurb or "",
-        "learning_type": src.learning_type,
-        "track_key": src.track_key,
+        "title": src.title[: caps["title"]],
+        "byline": (src.byline or "")[: caps["byline"]],
+        "blurb": (src.blurb or "")[: caps["blurb"]],
+        "learning_type": src.learning_type[: caps["learning_type"]],
+        "track_key": src.track_key[: caps["track_key"]],
     }
 
 

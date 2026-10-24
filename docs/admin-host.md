@@ -18,11 +18,14 @@ until the **At cutover** section runs.
 
 After the site memory API and privacy routes land, create a dedicated Skrift
 service user (for example `site@smarter.dev`) and assign it a role granting
-`site-memory`, `site-privacy`, `site-billing` and `site-search`. The owner's role and key scopes must both
-include these permissions, because Skrift intersects them when authorizing a
-request. The API also requires `service_name="site"` exactly. Skrift's
+`site-memory`, `site-privacy`, `site-billing`, `site-search` and
+`site-resources`. The owner's role and key scopes must both include these
+permissions, because Skrift intersects them when authorizing a request. The API also requires `service_name="site"` exactly. Skrift's
 `/admin/api-keys` **New Key** form cannot set the principal type or service
 name, so mint this key through `create_api_key`, as the bot-key runbook does.
+This is for a first key only: to give the existing key a newly added scope,
+don't re-mint; see [Adding a scope to the existing site
+key](#adding-a-scope-to-the-existing-site-key).
 
 Run a one-off Job based on `k8s/migrate-job.yaml`, using the same deployed web
 image, `smarter-dev-config` and `smarter-dev-migrate-secrets/database-url`.
@@ -71,7 +74,7 @@ spec:
                           )
                           if owner is None:
                               raise RuntimeError("site key owner is missing")
-                          required = {"site-memory", "site-privacy", "site-billing", "site-search"}
+                          required = {"site-memory", "site-privacy", "site-billing", "site-search", "site-resources"}
                           permissions = await get_user_permissions(session, str(owner.id))
                           if not required <= permissions.permissions:
                               raise RuntimeError("site key owner lacks required permissions")
@@ -113,6 +116,66 @@ Secret or putting the raw key in a shell argument. The Cloudflare Worker
 deployment consumes the same key under its own secret configuration; that
 deployment is handled separately. Validate the new key against the memory API
 before discarding the one-time value.
+
+### Adding a scope to the existing site key
+
+When a new site route needs a scope the existing key lacks (for example
+`site-resources`), **do not re-mint**. Add the scope to the existing key in
+place: the secret is unchanged, so the Worker's `SKRIFT_SITE_KEY` and the
+`site-api-key` Secret field stay as they are and nothing is rotated. The
+`site-service` role must already grant the scope (deploy the change that adds
+it first), because Skrift intersects the role and the key scopes.
+
+Either open the key in Skrift's `/admin/api-keys/{id}/edit` form and add the
+scope, or run a one-off Job built like the mint Job above (same image,
+`smarter-dev-config` and `database-url`; name it `smarter-dev-site-key-scope`)
+with this script in place of the mint script. It finds the one active site
+service key, appends the scope and prints only the key's prefix and scopes,
+never a key:
+
+```python
+import asyncio
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from skrift.db.models.api_key import APIKey
+from skrift.db.services.api_key_service import update_api_key
+from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.database import convert_postgres_url_for_asyncpg, create_async_engine
+
+SCOPE = "site-resources"
+
+async def add_scope():
+    url = convert_postgres_url_for_asyncpg(get_settings().effective_database_url)
+    engine = create_async_engine(url).execution_options(
+        schema_translate_map={None: "skrift"}
+    )
+    try:
+        async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+            keys = (
+                await session.scalars(
+                    select(APIKey).where(
+                        APIKey.principal_type == "service",
+                        APIKey.service_name == "site",
+                        APIKey.is_active.is_(True),
+                    )
+                )
+            ).all()
+            if len(keys) != 1:
+                raise RuntimeError(f"expected one active site key, found {len(keys)}")
+            key = keys[0]
+            scopes = key.scoped_permission_list
+            if SCOPE not in scopes:
+                await update_api_key(session, key, scoped_permissions=[*scopes, SCOPE])
+            print(key.key_prefix, sorted(key.scoped_permission_list), flush=True)
+    finally:
+        await engine.dispose()
+
+asyncio.run(add_scope())
+```
+
+`update_api_key` commits. Running it twice is harmless. Check the Job log
+shows the new scope, delete the Job, then confirm the Worker's calls to the
+new route return 200 instead of 401.
 
 ## At cutover
 
