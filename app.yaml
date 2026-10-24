@@ -319,6 +319,21 @@ rate_limit:
       limits:
         - limit: 300
           per: minute
+    # The site chat's run_code (docs/site-code.md). Its path names the member
+    # (/api/site/code/users/{id}/runs), so the rule matches the route's fixed
+    # prefix, POST only; no other route lives under it. 600/min: one call per
+    # run_code in a chat answer, from Worker egress that many members may
+    # share; the route itself admits only 2 runs per member and 4 in all, so
+    # this only stops a flood before it reaches the database or Redis.
+    - name: site-code
+      match:
+        path: /api/site/code/users/
+        prefix: true
+        method: POST
+      key: ip
+      limits:
+        - limit: 600
+          per: minute
     # Any other /api/site/ route until it gets a family of its own.
     - name: site
       match:
