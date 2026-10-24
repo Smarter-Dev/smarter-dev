@@ -258,6 +258,9 @@ INVALID_BODIES = [
     [TOKEN, VISITOR],
     f'{{"token": "{TOKEN}", "visitor": ',
     f"not json {TOKEN}",
+    # Not UTF-8: a UnicodeDecodeError would hold these bytes.
+    f'{{"token": "{TOKEN}", "visitor": "{VISITOR}"}}'.encode() + b"\xff\xfe",
+    b"\xff" + f'{{"token": "{TOKEN}", "visitor": "{VISITOR}"}}'.encode(),
 ]
 
 
@@ -265,7 +268,7 @@ INVALID_BODIES = [
 async def test_an_invalid_request_is_refused_quoting_nothing(api, monkeypatch, body):
     lookup = AsyncMock()
     monkeypatch.setattr(site_search, "find_search_preview", lookup)
-    raw = body if isinstance(body, str) else json.dumps(body)
+    raw = body if isinstance(body, (str, bytes)) else json.dumps(body)
     response = api.tc.post(
         PATH, content=raw, headers={"Content-Type": "application/json"}
     )
@@ -276,20 +279,51 @@ async def test_an_invalid_request_is_refused_quoting_nothing(api, monkeypatch, b
     lookup.assert_not_awaited()
 
 
+def _chain(exc):
+    """An exception and every one it carries, by ``__cause__`` and
+    ``__context__`` both, each once."""
+    seen, todo = [], [exc]
+    while todo:
+        item = todo.pop()
+        if item is None or any(item is s for s in seen):
+            continue
+        seen.append(item)
+        todo += [item.__cause__, item.__context__]
+    return seen
+
+
 def _everything_logged(records) -> str:
-    """Each record's message, its formatted exception and traceback."""
+    """Each record's message, its formatted exception and traceback, and
+    every exception chained to it, whether shown or suppressed."""
     parts = []
     for record in records:
         parts.append(record.getMessage())
         parts.append(record.exc_text or "")
         if record.exc_info:
             parts.append("".join(traceback.format_exception(*record.exc_info)))
-            exc = record.exc_info[1]
-            while exc is not None:
+            for exc in _chain(record.exc_info[1]):
                 parts.append(repr(exc))
                 parts.append(repr(getattr(exc, "args", "")))
-                exc = exc.__cause__ or exc.__context__
+                parts.append(repr(getattr(exc, "object", "")))
     return "\n".join(parts)
+
+
+@pytest.mark.parametrize("body", INVALID_BODIES)
+async def test_the_refusal_chains_no_exception(body):
+    """The 422 is raised outside every handler: no ``__context__`` or
+    ``__cause__`` (which would hold a decode error's bytes) is attached."""
+    raw = (
+        body
+        if isinstance(body, bytes)
+        else (body if isinstance(body, str) else json.dumps(body)).encode()
+    )
+    request = SimpleNamespace(body=AsyncMock(return_value=raw))
+    with pytest.raises(site_search.BotApiException) as refused:
+        await site_search._preview_request(request)
+    assert refused.value.__context__ is None
+    assert refused.value.__cause__ is None
+    assert _chain(refused.value) == [refused.value]
+    assert TOKEN not in repr(refused.value.args)
 
 
 async def test_no_log_record_or_traceback_holds_the_token(api, caplog, monkeypatch):
@@ -299,7 +333,7 @@ async def test_no_log_record_or_traceback_holds_the_token(api, caplog, monkeypat
     await _preview(api.session, results=RESULTS)
     caplog.set_level(logging.DEBUG)
     bodies = [
-        *(b if isinstance(b, str) else json.dumps(b) for b in INVALID_BODIES),
+        *(b if isinstance(b, (str, bytes)) else json.dumps(b) for b in INVALID_BODIES),
         json.dumps({"token": TOKEN, "visitor": VISITOR}),
         json.dumps({"token": "Q" * 43, "visitor": VISITOR}),
         json.dumps({"token": TOKEN + "!", "visitor": VISITOR}),

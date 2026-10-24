@@ -193,25 +193,36 @@ def _preview_result(result: dict) -> dict[str, str | None]:
     return view
 
 
+def _parsed_preview_request(body: bytes) -> tuple[str, str] | None:
+    """The token and visitor key a resolve body names, or None. Nothing is
+    raised from here: a decode error holds the body (a UnicodeDecodeError
+    its bytes), and an exception raised while handling it would keep it as
+    ``__context__``, ``from None`` or not."""
+    if len(body) > MAX_PREVIEW_REQUEST_BYTES:
+        return None
+    try:
+        asked = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return None
+    if not isinstance(asked, dict) or set(asked) != {"token", "visitor"}:
+        return None
+    token, visitor = asked["token"], asked["visitor"]
+    if not isinstance(token, str) or not isinstance(visitor, str):
+        return None
+    if not PREVIEW_VISITOR.fullmatch(visitor):
+        return None
+    return token, visitor
+
+
 async def _preview_request(request: Request) -> tuple[str, str]:
     """The token and visitor key a resolve names. Read by hand, never by a
     model whose validation error would quote the input: a refusal says only
-    that the request is invalid, and carries nothing the caller sent."""
-    body = await request.body()
-    try:
-        if len(body) > MAX_PREVIEW_REQUEST_BYTES:
-            raise ValueError
-        asked = json.loads(body)
-        if not isinstance(asked, dict) or set(asked) != {"token", "visitor"}:
-            raise ValueError
-        token, visitor = asked["token"], asked["visitor"]
-        if not isinstance(token, str) or not isinstance(visitor, str):
-            raise ValueError
-        if not PREVIEW_VISITOR.fullmatch(visitor):
-            raise ValueError
-    except (ValueError, UnicodeDecodeError):
-        raise plain_error(422, PREVIEW_INVALID) from None
-    return token, visitor
+    that the request is invalid, and carries nothing the caller sent, nor
+    any exception that did (it is raised outside every handler)."""
+    parsed = _parsed_preview_request(await request.body())
+    if parsed is None:
+        raise plain_error(422, PREVIEW_INVALID)
+    return parsed
 
 
 async def _admit_preview_read(visitor: str) -> None:
