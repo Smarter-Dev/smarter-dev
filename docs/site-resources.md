@@ -14,10 +14,16 @@ owner's `site-service` role. A browser never calls these routes.
 (`MultiTierRateLimitMiddleware`), whose bucket the site memory routes share.
 It has its own rule in Skrift's global limiter (`rate_limit.rules` in
 `app.yaml`): namespace `site-resources`, `POST` on this exact path, keyed by
-the caller's API key rather than the IP, **600 requests a minute per key**.
-Every other route stays on the IP-keyed default (60 a minute), so card lookups
-never spend the site memory routes' budget, and one key's lookups are one
-budget whichever address they come from.
+client IP, **600 requests a minute per IP**. Every other route stays on the
+IP-keyed default (60 a minute) in its own namespace, so card lookups never
+spend the site memory routes' budget.
+
+The rule is not keyed by API key (`key: api_key`): Skrift 0.2.1a3 keys that on
+the raw, unverified bearer token, which puts the site key into Redis key names
+(`…:ratelimit:site-resources:apikey:sk_…`) and gives every invented token a
+fresh budget. The cost of IP keying is that a leaked key is not bounded across
+addresses; a leaked key means a re-mint anyway, and this route only serves
+public catalog data.
 
 600 a minute is 10 page loads a second, well above today's site traffic. The
 Worker makes one batched call (at most 5 batches of 100 URLs) per chat page

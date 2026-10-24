@@ -536,13 +536,13 @@ def _post(client, token, ip="203.0.113.1"):
     )
 
 
-def test_app_yaml_gives_the_lookup_its_own_per_key_rule():
+def test_app_yaml_gives_the_lookup_its_own_ip_rule():
     config = app_rate_limit_config()
     assert config.enabled
     rule = config.resolve(URL, "POST")
     assert (rule.name, rule.key, rule.limits) == (
         "site-resources",
-        "api_key",
+        "ip",
         [(600, 60.0)],
     )
     assert config.resolve(MEMORY_URL, "GET").name == "default"
@@ -561,17 +561,19 @@ async def test_lookups_never_spend_the_site_memory_budget(limited_app):
         assert response.status_code == 200, response.text
 
 
-async def test_lookup_rule_limits_per_key_across_ips(limited_app):
+async def test_lookup_rule_limits_per_ip_whatever_the_key(limited_app):
     config = app_rate_limit_config()
     (rule,) = [rule for rule in config.rules if rule.name == "site-resources"]
     rule.limits[0].limit = 5  # the app.yaml rule, with a lower limit for speed
+    ip_a, ip_b = "203.0.113.1", "198.51.100.7"
     async with limited_app(config) as client:
         for _ in range(5):
-            assert (await _post(client, "sk_site_a")).status_code == 200
-        limited = await _post(client, "sk_site_a")
+            assert (await _post(client, "sk_site_a", ip=ip_a)).status_code == 200
+        limited = await _post(client, "sk_site_a", ip=ip_a)
         assert limited.status_code == 429
         assert int(limited.headers["retry-after"]) > 0
-        # The same key from another address shares the one budget.
-        assert (await _post(client, "sk_site_a", ip="198.51.100.7")).status_code == 429
-        # Another key has its own.
-        assert (await _post(client, "sk_site_b")).status_code == 200
+        # The same address is limited whatever key it sends, invented or not.
+        for token in ("sk_site_b", "sk_invented_1", "sk_invented_2"):
+            assert (await _post(client, token, ip=ip_a)).status_code == 429
+        # Another address has its own budget.
+        assert (await _post(client, "sk_site_a", ip=ip_b)).status_code == 200

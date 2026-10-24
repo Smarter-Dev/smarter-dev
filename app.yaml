@@ -212,17 +212,19 @@ redis:
 
 rate_limit:
   # Skrift's global limiter. Unmatched requests share the IP-keyed default
-  # (60/min). The site Worker's card lookups get their own namespace, keyed
-  # by the caller's API key, so they never spend the site-memory routes'
-  # budget. 600/min per key: one batched call (at most 5 batches of 100 URLs)
-  # per chat page load, earlier-history page, version switch, shared-answer
-  # view and completed answer; on a 429 the Worker shows its stored cards.
+  # (60/min). The site Worker's card lookups get their own namespace (still
+  # keyed by IP), so they never spend the site-memory routes' budget.
+  # 600/min: one batched call (at most 5 batches of 100 URLs) per chat page
+  # load, earlier-history page, version switch, shared-answer view and
+  # completed answer; on a 429 the Worker shows its stored cards. Not
+  # `key: api_key`: Skrift 0.2.1a3 puts the raw bearer token in the Redis key
+  # name, and every invented token would get a fresh budget.
   rules:
     - name: site-resources
       match:
         path: /api/site/resources/sources
         method: POST
-      key: api_key
+      key: ip
       limits:
         - limit: 600
           per: minute
