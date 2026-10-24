@@ -545,14 +545,16 @@ def test_app_yaml_gives_the_lookup_its_own_ip_rule():
         "ip",
         [(600, 60.0)],
     )
-    assert config.resolve(MEMORY_URL, "GET").name == "default"
+    assert config.resolve(MEMORY_URL, "GET").name == "site-memory"
 
 
 async def test_lookups_never_spend_the_site_memory_budget(limited_app):
     config = app_rate_limit_config()
-    default_limit = config.resolve(MEMORY_URL, "GET").limits[0][0]
+    for rule in config.rules:
+        if rule.name == "site-memory":
+            rule.limits[0].limit = 5  # the app.yaml rule, lower for speed
     async with limited_app(config) as client:
-        for _ in range(default_limit + 1):
+        for _ in range(6):
             assert (await _post(client, "sk_site")).status_code == 200
         response = await client.get(
             MEMORY_URL,

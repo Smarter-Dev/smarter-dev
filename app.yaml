@@ -212,14 +212,18 @@ redis:
 
 rate_limit:
   # Skrift's global limiter. Unmatched requests share the IP-keyed default
-  # (60/min). The site Worker's card lookups get their own namespace (still
-  # keyed by IP), so they never spend the site-memory routes' budget.
-  # 600/min: one batched call (at most 5 batches of 100 URLs) per chat page
-  # load, earlier-history page, version switch, shared-answer view and
-  # completed answer; on a 429 the Worker shows its stored cards. Not
+  # (60/min). The site Worker calls /api/site/* from a few Cloudflare egress
+  # addresses, for every member at once, so no site route uses the default:
+  # each route family has its own namespace, still keyed by IP. Not
   # `key: api_key`: Skrift 0.2.1a3 puts the raw bearer token in the Redis key
   # name, and every invented token would get a fresh budget.
+  # The most specific rule wins: an exact path beats a prefix, a longer
+  # prefix beats a shorter one, so /api/site/ only catches routes no family
+  # names. tests/web/site_rate_limit_test.py pins every site route to its rule.
   rules:
+    # 600/min: one batched call (at most 5 batches of 100 URLs) per chat page
+    # load, earlier-history page, version switch, shared-answer view and
+    # completed answer; on a 429 the Worker shows its stored cards.
     - name: site-resources
       match:
         path: /api/site/resources/sources
@@ -252,6 +256,77 @@ rate_limit:
           per: minute
         - limit: 3000
           per: hour
+    # 3000/min: a member's chat web search polls its run every 800 ms for up
+    # to 100 s (~75/min each), and an open /s/r/ page polls through the
+    # Worker every 1.5-8 s; ~40 searches at once. Starts keep their per-member
+    # limits in the handler.
+    - name: site-search
+      match:
+        path: /api/site/search/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 3000
+          per: minute
+    # 1200/min: a chatting member's tier is read at most every 10 s, the
+    # launch flag on a backoff, catalog on /sudo views, checkout and portal on
+    # a click; ~200 members chatting at once.
+    - name: site-billing
+      match:
+        path: /api/site/billing/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 1200
+          per: minute
+    # 600/min, one bucket for both shapes: the agent page reads public
+    # memory once per view (edge-cached for signed-out views). The guild
+    # routes also keep their own per-key limiter.
+    - name: site-memory
+      match:
+        path: /api/site/memory/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 600
+          per: minute
+    - name: site-memory
+      match:
+        path: /api/site/guilds/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 600
+          per: minute
+    # 300/min: one PUT per sign-in, link or unlink, and only when the
+    # account's identity revision changed since the last sync.
+    - name: site-identity
+      match:
+        path: /api/site/identities/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 300
+          per: minute
+    # 300/min: the privacy page reads opt-out once per view and writes it on
+    # a click; the deletion queue sends one call per account.
+    - name: site-privacy
+      match:
+        path: /api/site/privacy/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 300
+          per: minute
+    # Any other /api/site/ route until it gets a family of its own.
+    - name: site
+      match:
+        path: /api/site/
+        prefix: true
+      key: ip
+      limits:
+        - limit: 600
+          per: minute
 
 security_headers:
   enabled: true
