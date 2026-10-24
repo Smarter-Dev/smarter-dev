@@ -32,6 +32,7 @@ from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifi
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import SCAM
+from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import PastAction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
@@ -47,6 +48,7 @@ from smarter_dev.bot.moderation_coordinator.shadow import ModerationShadow
 from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.models import ModerationIncidentEntry
 from smarter_dev.web.models import ModerationIncidentLink
+from smarter_dev.web.models import ModerationOutbox
 from smarter_dev.web.moderation_gateway import ModerationGateway
 from smarter_dev.web.moderation_gateway import types as gw
 from smarter_dev.web.moderation_gateway.gateway import default_session_factory
@@ -94,6 +96,9 @@ class FakeMessenger:
     async def dm(self, user_id, content):
         self.dms.append((str(user_id), content))
         return True
+
+    def guild_name(self, guild_id):
+        return "Smarter Dev"
 
 
 class Recorder:
@@ -231,9 +236,9 @@ async def test_the_1749_scam_is_muted_and_removed_first_then_banned():
     assert ("ban", scammer.id) == h.port.calls[kinds.index("ban")][:2]
     assert post.message_id in h.deleted()
     assert h.messenger.posts == []
-    notes = await entries(gw.ENTRY_NOTE)
+    history = await entries(gw.ENTRY_HISTORY)
     assert any(
-        note.startswith("History: no earlier moderation actions") for note in notes
+        note.startswith("History: no earlier moderation actions") for note in history
     )
     # One report, in the moderators' channel.
     assert {p["channel_id"] for p in h.port.posts} == {REPORTS}
@@ -257,7 +262,11 @@ async def test_a_clean_verdict_releases_the_hold_and_closes_its_notice():
     assert h.deleted() == set()
     assert (posts[1].channel_id, INVESTIGATING) in h.messenger.posts
     assert (posts[1].channel_id, CLOSED_CLEAN) in h.messenger.posts
-    assert any("released" in note for note in await entries(gw.ENTRY_NOTE))
+    report = h.port.latest_report_text(REPORTS)
+    assert f"Hold on <@{victim.id}>" in report and "lifted" in report
+    # The spam engine's warning for the repeat stands; the hold is gone.
+    assert "**Summary:** Scam check found nothing: warned, hold lifted." in report
+    assert "Coordinator decision" not in report
 
 
 async def test_no_verdict_leaves_the_hold_and_alerts_with_the_cause():
@@ -909,10 +918,14 @@ async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_rep
     assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
     # Review item 1: both reasons reach the member. The ping warning took
     # the incident's one DM, and the timeout's DM was lost.
-    assert h.messenger.dms == [
-        (PINGER.id, act_module._warning_dm(rules.MASS_MENTION_WARNING)),
-        (PINGER.id, act_module.SECURE_ACCOUNT_TEXT),
-    ]
+    [(warned, warning), (told, hacked)] = h.messenger.dms
+    assert (warned, warning) == (
+        PINGER.id,
+        act_module._warning_dm(rules.MASS_MENTION_WARNING),
+    )
+    assert told == PINGER.id
+    assert hacked.startswith("Your account posted what looks like a scam")
+    assert f"timed you out until <t:{int(timeouts[1])}:f>" in hacked
 
 
 def _db_actions(history: AuthorHistory):
@@ -1318,7 +1331,9 @@ async def test_a_ping_warning_with_closed_dms_is_still_recorded_and_reported():
         text for channel, text in h.messenger.posts if channel == post.channel_id
     ]
     assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
-    assert "was not delivered" in h.port.latest_report_text(REPORTS)
+    report = h.port.latest_report_text(REPORTS)
+    assert f"Warning DM to <@{PINGER.id}> not delivered" in report
+    assert "**DM not delivered**" in report
 
 
 async def test_a_dm_that_raises_is_logged_and_the_warning_still_reported(caplog):
@@ -1342,7 +1357,9 @@ async def test_a_dm_that_raises_is_logged_and_the_warning_still_reported(caplog)
         await h.judge(post)
 
     assert (gw.WARN, rules.MASS_MENTION_WARNING) in await _actions()
-    assert "was not delivered" in h.port.latest_report_text(REPORTS)
+    report = h.port.latest_report_text(REPORTS)
+    assert f"Warning DM to <@{PINGER.id}> not delivered" in report
+    assert "**DM not delivered**" in report
     assert any("could not DM" in r.getMessage() for r in caplog.records)
     assert len(h.recorder.rows) == 1
 
@@ -1860,3 +1877,198 @@ async def test_a_clean_post_does_not_release_a_copy_still_reading_ownership():
     untils = [c[2] for c in h.port.calls if c[0] == "timeout"]
     assert untils[-1] - time.time() > 3600  # the copy's 24 h timeout stands
     assert h.executor._holds == {}
+
+
+# -- #333: the report as a timeline, the hacked-account DM, DM delivery -----
+
+HONEY = Member("luluhoney", 33, NOW - timedelta(days=760), NOW - timedelta(days=30))
+
+
+def _image_only_burst():
+    """Incident 4d3f0c64 (Oct 24 13:42Z): the same four images with no text,
+    posted in two channels 2 s apart, as a member's first message. Haiku
+    calls it a scam; the account is two years old, so a 24 h timeout."""
+    files = tuple(
+        Attachment(
+            f"IMG_{i}.png",
+            "image/png",
+            480_000 + i,
+            f"https://cdn.discordapp.com/attachments/1/2/IMG_{i}.png",
+            width=1080,
+            height=1920,
+        )
+        for i in range(4)
+    )
+    posts = [
+        say(HONEY, "", NOW, channel=GENERAL, attachments=files),
+        say(HONEY, "", NOW + timedelta(seconds=2), channel=OTHER, attachments=files),
+    ]
+    case = ReplayCase(
+        name="image-only burst",
+        policy=acting(replace(policy(), spam=None)),
+        messages=posts,
+        answers={SCAM: (True, 0.97), ABUSE: (False, 0.97)},
+        reads=ReplayReads(histories={HONEY.id: FIRST}),
+    )
+    return case, posts
+
+
+async def _incident_ids() -> set:
+    async with default_session_factory()() as session:
+        return set(
+            (await session.execute(select(ModerationIncidentLink.incident_id)))
+            .scalars()
+            .all()
+        )
+
+
+async def _outbox() -> list[tuple[str, str | None]]:
+    async with default_session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(ModerationOutbox.kind, ModerationOutbox.detail)
+            )
+        ).all()
+    return [(row[0], row[1]) for row in rows]
+
+
+async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
+    """The report Zech asked for: one line per step in time order, then a
+    summary. No "expired without a verdict" once the verdict landed, no
+    "already covered" hold or skipped duplicate delete, one incident for the
+    burst (an image-only post has a fingerprint now)."""
+    case, posts = _image_only_burst()
+    h = harness(case)
+
+    await h.judge(*posts)
+
+    assert {p.message_id for p in posts} <= h.deleted()
+    assert len(await _incident_ids()) == 1
+    reports = [p for p in h.port.posts if p["channel_id"] == REPORTS]
+    assert len(reports) == 1
+    report = h.port.latest_report_text(REPORTS)
+    lines = report.splitlines()
+
+    def at(text: str) -> int:
+        return next(i for i, line in enumerate(lines) if text in line)
+
+    held = at(f"Held <@{HONEY.id}> luluhoney for 5 minutes")
+    upgraded = at(f"Hold on <@{HONEY.id}> luluhoney upgraded to a 24-hour timeout")
+    deletes = [i for i, line in enumerate(lines) if "Deleted a message from" in line]
+    told = at(f"DM to <@{HONEY.id}> delivered.")
+    summary = at("**Summary:**")
+    # The copy is judged after the post: its removal comes after the DM.
+    assert held < upgraded < deletes[0] < told < deletes[1] < summary
+    assert len(deletes) == 2
+    assert all(lines[i].startswith("- <t:") for i in (held, upgraded, told))
+    assert lines[summary] == (
+        "**Summary:** Confirmed scam from a likely hacked account: 2 messages "
+        "removed, timed out for 24 hours, told by DM. No earlier actions."
+    )
+    assert lines[summary + 1].startswith("To undo a timeout")
+    assert "expired without a verdict" not in report
+    assert "already covered" not in report and "not done" not in report
+    assert report.count("History:") == 0  # said once, in the summary
+
+    # The member is told what happened and how to take the account back.
+    [(member, dm)] = h.messenger.dms
+    until = [c[2] for c in h.port.calls if c[0] == "timeout"][-1]
+    assert member == HONEY.id
+    # The post is decided before its copy arrives here: one message so far.
+    assert dm.startswith(
+        "Your account posted what looks like a scam in **Smarter Dev**, so we "
+        f"removed that message and timed you out until <t:{int(until)}:f>."
+    )
+    assert "change your Discord password" in dm
+    assert "once the timeout ends" in dm
+    assert len(dm) < 2000
+    assert (gw.MESSAGE_DM, "delivered") in await _outbox()
+
+
+async def test_a_dm_that_did_not_arrive_is_recorded_and_reported():
+    case, posts = _image_only_burst()
+    h = harness(case)
+
+    async def closed(user_id, content):
+        h.messenger.dms.append((str(user_id), content))
+        return False
+
+    h.messenger.dm = closed
+    await h.judge(*posts)
+
+    report = h.port.latest_report_text(REPORTS)
+    assert (
+        f"DM to <@{HONEY.id}> not delivered (DMs closed or Discord refused it)."
+        in report
+    )
+    assert "**DM not delivered**" in report
+    assert (gw.MESSAGE_DM, "not delivered") in await _outbox()
+
+
+def test_a_timed_out_hacked_account_is_told_the_count_and_the_end():
+    text = act_module.hacked_account_dm("Smarter Dev", 2, 1792935734.6, timed_out=True)
+
+    assert text.startswith(
+        "Your account posted what looks like a scam in **Smarter Dev**, so we "
+        "removed those messages (2) and timed you out until <t:1792935734:f>. "
+        "This usually means someone else has access to your account."
+    )
+    assert "Authorized Apps and Devices" in text
+    assert text.endswith("reply to a moderator once the timeout ends.")
+
+
+def test_a_warned_hacked_account_is_told_without_a_timeout():
+    text = act_module.hacked_account_dm("Smarter Dev", 1, None, timed_out=False)
+
+    assert text.startswith(
+        "Your account posted what looks like a scam in **Smarter Dev**, so we "
+        "removed that message. This usually means someone else has access"
+    )
+    assert "timed you out" not in text
+    assert text.endswith("If this was a mistake, reply to a moderator.")
+
+
+def test_a_copys_already_sanctioned_qualifier_stays_out_of_the_incident():
+    """The report repeated "confirmed scam" and "confirmed scam, already
+    sanctioned for this post" as two reasons; the incident gets one."""
+    from smarter_dev.bot.moderation_coordinator.model import TargetDecision
+
+    copy = TargetDecision(
+        user_id=HONEY.id, reasons=["confirmed scam" + rules.ALREADY_SANCTIONED]
+    )
+    post = TargetDecision(user_id=HONEY.id, reasons=["confirmed scam"])
+
+    assert act_module._reason([copy]) == "confirmed scam"
+    assert act_module._reason([post, copy]) == "confirmed scam"
+
+
+async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incident():
+    """Incident 4d3f0c64 as it ran: the copy arrived while the post's check
+    was out, was held under its own trigger, and its check answered first
+    and took the sanction. Its hold opened a second incident (no text, no
+    fingerprint), and the post's landed verdict read as "expired without a
+    verdict". One incident and one report now, with no such alert."""
+    case, (first, _) = _image_only_burst()
+    copy = _copy_in(first, OTHER)
+    case = replace(
+        case,
+        messages=[first, copy],
+        haiku=_answers(post=(True, 0.3), copy=(True, 0.05)),
+    )
+    h = harness(case)
+    h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
+    h.shadow.submit(first)
+    await asyncio.sleep(0.02)
+    h.shadow.submit(copy)
+    await h.shadow.drain()
+
+    assert h.calls.total == 2
+    assert {first.message_id, copy.message_id} <= h.deleted()
+    assert len(await _incident_ids()) == 1
+    assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
+    report = h.port.latest_report_text(REPORTS)
+    assert "expired without a verdict" not in report
+    assert "upgraded to a 24-hour timeout" in report
+    assert "2 messages removed, timed out for 24 hours, told by DM" in report
+    [(_, dm)] = h.messenger.dms
+    assert "we removed those messages (2)" in dm

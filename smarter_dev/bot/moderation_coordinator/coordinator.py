@@ -815,7 +815,7 @@ class Coordinator:
             facts.guild_id, facts.author_id, key, sanctions[0], now
         ):
             return scam_hits
-        return rules.without_sanction(scam_hits, ", already sanctioned for this post")
+        return rules.without_sanction(scam_hits, rules.ALREADY_SANCTIONED)
 
     async def _refusals(
         self,

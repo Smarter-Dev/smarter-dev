@@ -330,7 +330,9 @@ def test_a_deterministic_reason_of_equal_strength_is_not_model_only():
         (Sanction(gw.TIMEOUT, DAY), "violation", "upgraded"),
         (None, "clean", "released"),
         (None, "unknown", "expired"),
-        (Sanction(gw.WARN), "violation", "expired"),
+        # A verdict landed: the hold is the incident's to resolve (#333).
+        (Sanction(gw.WARN), "violation", "decided"),
+        (None, "violation", "decided"),
     ],
 )
 def test_provisional_resolution(sanction, outcome, resolution):

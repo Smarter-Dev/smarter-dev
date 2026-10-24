@@ -468,6 +468,11 @@ def scam_claim(key: str) -> str:
     return f"scam:{key}"
 
 
+#: How a copy's scam reasons say the post's sanction went elsewhere. The
+#: incident's report leaves it out: the sanction's own line gives the reason.
+ALREADY_SANCTIONED = ", already sanctioned for this post"
+
+
 def without_sanction(hits: Sequence[RuleHit], why: str) -> list[RuleHit]:
     """The scam gate's hits as cleanup only: the post's sanction is owed once."""
     return [

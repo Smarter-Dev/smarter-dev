@@ -107,6 +107,15 @@ def _now_dt(seconds: float) -> datetime:
     return datetime.fromtimestamp(seconds, UTC)
 
 
+def _epoch_of(moment: datetime | None) -> float | None:
+    """A stored time as epoch seconds; SQLite hands it back without a zone."""
+    if moment is None:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return moment.timestamp()
+
+
 def _timeout_key_prefix(incident_id: UUID, target: str, claim: str | None) -> str:
     # A claim can be long (a handler id and a script's key); the key names it
     # by digest so it fits the column.
@@ -314,6 +323,46 @@ class ModerationGateway:
                 return False
         return True
 
+    async def record_member_message(
+        self,
+        incident_id: UUID,
+        *,
+        kind: str,
+        target_user_id: str,
+        delivered: bool,
+        source: str,
+        report_channel_id: str | None = None,
+    ) -> None:
+        """Whether a claimed DM (``dm`` or ``warning_dm``) reached the member.
+
+        Kept on its outbox row (``detail``) and as a ``delivery`` entry, so
+        the report's timeline says "DM delivered" or "not delivered"."""
+        target = str(target_user_id)
+        async with self._session() as session:
+            await session.execute(
+                update(ModerationOutbox)
+                .where(
+                    ModerationOutbox.incident_id == incident_id,
+                    ModerationOutbox.dedupe_key == f"{kind}:{incident_id}:{target}",
+                )
+                .values(detail="delivered" if delivered else "not delivered")
+            )
+            await session.commit()
+        what = "Warning DM" if kind == t.MESSAGE_WARNING_DM else "DM"
+        text = (
+            f"{what} to <@{target}> delivered."
+            if delivered
+            else f"{what} to <@{target}> not delivered (DMs closed or Discord "
+            "refused it)."
+        )
+        await self.add_notes(
+            incident_id,
+            source=source,
+            notes=[(t.ENTRY_DELIVERY, text, {"delivered": delivered, "message": kind})],
+            report_channel_id=report_channel_id,
+            target_user_id=target,
+        )
+
     async def release_member_message(
         self, incident_id: UUID, *, kind: str, target_user_id: str
     ) -> None:
@@ -352,16 +401,18 @@ class ModerationGateway:
         incident_id: UUID,
         *,
         source: str,
-        notes: Sequence[tuple[str, str]],
+        notes: Sequence[tuple[str, str] | tuple[str, str, dict[str, Any] | None]],
         report_channel_id: str | None = None,
         target_user_id: str | None = None,
     ) -> None:
-        """Several ``(kind, text)`` lines at once, then one report update."""
+        """Several ``(kind, text)`` or ``(kind, text, details)`` lines at once,
+        then one report update."""
         async with self._session() as session:
             incident = await session.get(ModerationIncident, incident_id)
             if incident is None:
                 return
-            for kind, text in notes:
+            for note in notes:
+                kind, text = note[0], note[1]
                 session.add(
                     ModerationIncidentEntry(
                         incident_id=incident_id,
@@ -373,6 +424,7 @@ class ModerationGateway:
                         else None,
                         rule=text if kind in t.NOTE_KINDS else None,
                         target_user_id=target_user_id,
+                        details=note[2] if len(note) > 2 else None,
                     )
                 )
             if report_channel_id and not incident.report_channel_id:
@@ -601,6 +653,9 @@ class ModerationGateway:
                     rule=trigger.reason,
                     target_user_id=trigger.author_id,
                     channel_id=trigger.channel_id,
+                    # A post with no text has no evidence entry: the reason
+                    # carries its fingerprint, so its copies still join.
+                    fingerprint=trigger.fingerprint,
                 )
             )
         seen_messages = {row[3] for row in already if row[0] == t.ENTRY_EVIDENCE}
@@ -1613,6 +1668,8 @@ class ModerationGateway:
                     target_user_id=entry.target_user_id,
                     channel_id=entry.channel_id,
                     message_id=entry.message_id,
+                    at=_epoch_of(entry.created_at),
+                    details=entry.details or None,
                 )
                 for entry in entries
                 if entry.kind != t.ENTRY_TRANSCRIPT
@@ -1630,6 +1687,9 @@ class ModerationGateway:
                     deleted=tuple((op.result or {}).get("deleted") or ()),
                     duration_seconds=(op.requested or {}).get("duration_seconds"),
                     expires_at=op.expires_at,
+                    at=_epoch_of(op.created_at),
+                    reason=op.reason,
+                    provisional=bool((op.requested or {}).get("provisional")),
                 )
                 for op in operations
                 if not (op.state == t.SKIPPED and op.detail == "already deleted")

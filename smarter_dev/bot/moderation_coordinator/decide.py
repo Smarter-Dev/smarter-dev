@@ -29,6 +29,11 @@ PROVISIONAL_SECONDS = 300
 
 UPGRADED = "upgraded"
 RELEASED = "released"
+#: The verdict landed (a scam) but this message's own decision carries no
+#: longer sanction: its copy claimed the post's sanction, or it is a warn.
+#: The hold stays under the incident's sanction or runs out; it did not
+#: "expire without a verdict" (#333).
+DECIDED = "decided"
 EXPIRED = "expired"
 
 
@@ -106,4 +111,6 @@ def _resolve_provisional(
         return replace(provisional, resolution=UPGRADED)
     if scam_outcome == "clean":
         return replace(provisional, resolution=RELEASED)
+    if scam_outcome == "violation":
+        return replace(provisional, resolution=DECIDED)
     return replace(provisional, resolution=EXPIRED)
