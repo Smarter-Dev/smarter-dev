@@ -77,7 +77,8 @@ from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
 from smarter_dev.web.agent_session_cleanup import session_billing
 from smarter_dev.web.research_tools import brave_search
-from smarter_dev.web.research_tools import jina_read
+from smarter_dev.web.resources_corpus import read_corpus
+from smarter_dev.web.resources_corpus import search_corpus
 
 logger = logging.getLogger(__name__)
 
@@ -940,12 +941,6 @@ async def _emit_tool_event(
 # Tools
 # ---------------------------------------------------------------------------
 
-_READ_CACHE: dict[str, tuple[float, str]] = {}
-_READ_TTL_SECONDS = 60 * 60  # 60 minutes, in-memory fallback for non-curated URLs
-_READ_MAX_CHARS = 10_000
-_READ_DB_TTL_DAYS = 30  # how long a stored jina body is considered fresh
-
-
 @researcher_agent.tool
 async def search_resources(
     ctx: RunContext[RunDeps], query: str, limit: int = 8
@@ -966,134 +961,9 @@ async def search_resources(
         directory, category}]``. ``kind`` is "source" for curated articles
         and "tool" for indexed tools.
     """
-    from sqlalchemy import text
-    from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy.pool import NullPool
-
-    from smarter_dev.shared.config import get_settings
-    from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
-
     if not query or not query.strip():
         return []
-    limit = max(1, min(limit, 20))
-
-    settings = get_settings()
-    engine = create_async_engine(
-        convert_postgres_url_for_asyncpg(settings.effective_database_url),
-        poolclass=NullPool,
-    )
-    # Word-level matching: `to_tsvector @@ plainto_tsquery` matches if any
-    # query word appears (with stemming) in the title or blurb. Trigram
-    # similarity gates a fuzzy second pass so phrases like "postgres queue"
-    # still surface entries titled "Postgres SKIP LOCKED queues".
-    try:
-        async with engine.connect() as conn:
-            await conn.execute(text("SET search_path TO skrift, public"))
-            sources_sql = text(
-                """
-                SELECT s.title, s.url, s.byline, s.blurb, s.learning_type,
-                       d.slug AS directory, COALESCE(c.slug, '') AS category,
-                       GREATEST(
-                         similarity(s.title, :q),
-                         similarity(coalesce(s.blurb, ''), :q),
-                         CASE WHEN to_tsvector('english',
-                                coalesce(s.title,'') || ' ' || coalesce(s.blurb,'')
-                              ) @@ plainto_tsquery('english', :q) THEN 0.4 ELSE 0 END
-                       ) AS score
-                FROM resource_sources s
-                LEFT JOIN resource_directory_spine dsp ON dsp.source_id = s.id
-                LEFT JOIN resource_directories d ON d.id = dsp.directory_id
-                LEFT JOIN resource_tool_sources ts ON ts.source_id = s.id
-                LEFT JOIN resource_tools t ON t.id = ts.tool_id
-                LEFT JOIN resource_categories c ON c.id = t.category_id
-                WHERE
-                  to_tsvector('english',
-                    coalesce(s.title,'') || ' ' || coalesce(s.blurb,'')
-                  ) @@ plainto_tsquery('english', :q)
-                  OR similarity(s.title, :q) > 0.15
-                  OR similarity(coalesce(s.blurb, ''), :q) > 0.15
-                ORDER BY score DESC NULLS LAST, s.first_indexed_at DESC
-                LIMIT :limit
-                """
-            )
-            tools_sql = text(
-                """
-                SELECT t.name AS title, t.url, '' AS byline, t.blurb,
-                       'Tool' AS learning_type, d.slug AS directory, c.slug AS category,
-                       GREATEST(
-                         similarity(t.name, :q),
-                         similarity(coalesce(t.blurb, ''), :q),
-                         CASE WHEN to_tsvector('english',
-                                coalesce(t.name,'') || ' ' || coalesce(t.blurb,'')
-                              ) @@ plainto_tsquery('english', :q) THEN 0.4 ELSE 0 END
-                       ) AS score
-                FROM resource_tools t
-                JOIN resource_categories c ON c.id = t.category_id
-                JOIN resource_directories d ON d.id = c.directory_id
-                WHERE
-                  to_tsvector('english',
-                    coalesce(t.name,'') || ' ' || coalesce(t.blurb,'')
-                  ) @@ plainto_tsquery('english', :q)
-                  OR similarity(t.name, :q) > 0.15
-                  OR similarity(coalesce(t.blurb, ''), :q) > 0.15
-                ORDER BY score DESC NULLS LAST, t.name
-                LIMIT :tool_limit
-                """
-            )
-            src_rows = (
-                (await conn.execute(sources_sql, {"q": query, "limit": limit}))
-                .mappings()
-                .all()
-            )
-            tool_rows = (
-                (
-                    await conn.execute(
-                        tools_sql,
-                        {"q": query, "tool_limit": max(2, limit // 2)},
-                    )
-                )
-                .mappings()
-                .all()
-            )
-    finally:
-        await engine.dispose()
-
-    hits: list[dict] = []
-    seen: set[str] = set()
-    for row in src_rows:
-        if row["url"] in seen:
-            continue
-        seen.add(row["url"])
-        hits.append(
-            {
-                "kind": "source",
-                "title": row["title"],
-                "url": row["url"],
-                "byline": row["byline"] or "",
-                "blurb": row["blurb"] or "",
-                "learning_type": row["learning_type"],
-                "directory": row["directory"],
-                "category": row["category"] or "",
-            }
-        )
-    for row in tool_rows:
-        if row["url"] in seen:
-            continue
-        seen.add(row["url"])
-        hits.append(
-            {
-                "kind": "tool",
-                "title": row["title"],
-                "url": row["url"],
-                "byline": "",
-                "blurb": row["blurb"] or "",
-                "learning_type": "Tool",
-                "directory": row["directory"],
-                "category": row["category"] or "",
-            }
-        )
-
-    hits = hits[:limit]
+    hits = await search_corpus(query, limit)
     for hit in hits:
         _record_hit({"source": "search", **hit})
         if hit.get("url"):
@@ -1148,43 +1018,19 @@ async def read_source(ctx: RunContext[RunDeps], url: str) -> str:
             "Run `search_resources` first and use a URL from the results."
         )
 
-    body: str | None = None
-
-    db_body = await _read_from_db_cache(url)
-    if db_body is not None:
-        _record_hit({"source": "read", "url": url})
-        body = db_body
-    else:
-        now = time.time()
-        cached = _READ_CACHE.get(url)
-        if cached and (now - cached[0]) < _READ_TTL_SECONDS:
-            _record_hit({"source": "read", "url": url})
-            body = cached[1]
-        else:
-            async with httpx.AsyncClient() as client:
-                result = await jina_read(client, url)
-
-            if "error" in result:
-                # Emit a failing tool event so the UI can show the error
-                # alongside the chip rather than swallowing silently.
-                await _emit_tool_event(
-                    ctx.deps,
-                    tool="read_source",
-                    label=url,
-                    summary=f"[error] {result['error']}",
-                )
-                return f"[error] {result['error']}"
-
-            title = result.get("title", "") or ""
-            content = result.get("content", "") or ""
-            body = f"{title}\n\n{content}".strip()[:_READ_MAX_CHARS]
-
-            stored = await _write_to_db_cache(url, body)
-            if not stored:
-                # Non-curated URL — fall back to the in-process LRU.
-                _READ_CACHE[url] = (now, body)
-
-            _record_hit({"source": "read", "url": url})
+    read = await read_corpus(url)
+    if read.error is not None:
+        # Emit a failing tool event so the UI can show the error
+        # alongside the chip rather than swallowing silently.
+        await _emit_tool_event(
+            ctx.deps,
+            tool="read_source",
+            label=url,
+            summary=f"[error] {read.error}",
+        )
+        return f"[error] {read.error}"
+    body = read.body
+    _record_hit({"source": "read", "url": url})
 
     label = body.split("\n", 1)[0].strip() if body else url
     if len(label) > 80:
@@ -1196,97 +1042,6 @@ async def read_source(ctx: RunContext[RunDeps], url: str) -> str:
         summary=url,
     )
     return body
-
-
-# ---------------------------------------------------------------------------
-# Durable Jina cache (resource_sources.jina_content / jina_fetched_at)
-# ---------------------------------------------------------------------------
-
-
-def _open_db_session():
-    """Open a short-lived AsyncSession bound to the main DB.
-
-    ``read_source`` runs inside an in-progress request, but the request's
-    ``db_session`` isn't reachable from a ``@tool_plain`` (Skrift hands the
-    tool a plain function, not a context-aware one). Opening our own session
-    keeps the tool decoupled and avoids interfering with the request's
-    transaction state.
-    """
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-    from sqlalchemy.ext.asyncio import create_async_engine
-    from sqlalchemy.pool import NullPool
-
-    from smarter_dev.shared.config import get_settings
-    from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
-
-    settings = get_settings()
-    engine = create_async_engine(
-        convert_postgres_url_for_asyncpg(settings.effective_database_url),
-        poolclass=NullPool,
-    )
-    Session = async_sessionmaker(engine, expire_on_commit=False)
-    return engine, Session()
-
-
-async def _read_from_db_cache(url: str) -> str | None:
-    """Return cached Jina body if fresh, else None. None also means non-curated."""
-    from datetime import datetime
-    from datetime import timedelta
-
-    from sqlalchemy import text as sql_text
-
-    engine, session = _open_db_session()
-    try:
-        async with session as s:
-            await s.execute(sql_text("SET search_path TO skrift, public"))
-            row = (
-                await s.execute(
-                    sql_text(
-                        "SELECT jina_content, jina_fetched_at "
-                        "FROM resource_sources WHERE url = :url"
-                    ),
-                    {"url": url},
-                )
-            ).first()
-    finally:
-        await engine.dispose()
-
-    if row is None:
-        return None  # Non-curated URL — caller falls back to in-memory + Jina.
-    content, fetched_at = row
-    if not content or not fetched_at:
-        return None  # Curated but not warmed yet — caller will warm it.
-    if datetime.now(UTC) - fetched_at > timedelta(days=_READ_DB_TTL_DAYS):
-        return None  # Stale — caller will refresh.
-    return content
-
-
-async def _write_to_db_cache(url: str, body: str) -> bool:
-    """Persist a freshly fetched Jina body. Returns True if the URL was curated."""
-    from datetime import datetime
-
-    from sqlalchemy import text as sql_text
-
-    engine, session = _open_db_session()
-    try:
-        async with session as s:
-            await s.execute(sql_text("SET search_path TO skrift, public"))
-            result = await s.execute(
-                sql_text(
-                    "UPDATE resource_sources "
-                    "SET jina_content = :body, jina_fetched_at = :now "
-                    "WHERE url = :url"
-                ),
-                {
-                    "body": body,
-                    "now": datetime.now(UTC),
-                    "url": url,
-                },
-            )
-            await s.commit()
-            return result.rowcount > 0
-    finally:
-        await engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -1372,37 +1127,18 @@ async def read_url(ctx: RunContext[RunDeps], url: str) -> str:
             "Run `web_search` first and use a URL from the results."
         )
 
-    # Reuse the same tiered cache the researcher uses: durable DB cache
-    # first, in-process LRU second, live Jina Reader last. Web URLs
-    # won't be in `resource_sources` so the DB-cache write is a no-op
-    # for them (handled by `_write_to_db_cache` returning False).
-    body: str | None = None
-    db_body = await _read_from_db_cache(url)
-    if db_body is not None:
-        body = db_body
-    else:
-        now = time.time()
-        cached = _READ_CACHE.get(url)
-        if cached and (now - cached[0]) < _READ_TTL_SECONDS:
-            body = cached[1]
-        else:
-            async with httpx.AsyncClient() as client:
-                result = await jina_read(client, url)
-            if "error" in result:
-                await _emit_tool_event(
-                    ctx.deps,
-                    tool="read_url",
-                    label=url,
-                    summary=f"[error] {result['error']}",
-                )
-                return f"[error] {result['error']}"
-
-            title = result.get("title", "") or ""
-            content = result.get("content", "") or ""
-            body = f"{title}\n\n{content}".strip()[:_READ_MAX_CHARS]
-            stored = await _write_to_db_cache(url, body)
-            if not stored:
-                _READ_CACHE[url] = (now, body)
+    # The same tiered cache the researcher uses: web URLs aren't curated
+    # rows, so they land in the in-process layer.
+    read = await read_corpus(url)
+    if read.error is not None:
+        await _emit_tool_event(
+            ctx.deps,
+            tool="read_url",
+            label=url,
+            summary=f"[error] {read.error}",
+        )
+        return f"[error] {read.error}"
+    body = read.body
 
     label = body.split("\n", 1)[0].strip() if body else url
     if len(label) > 80:
