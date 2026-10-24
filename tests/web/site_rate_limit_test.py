@@ -50,6 +50,8 @@ SITE_ROUTES = {
     ("GET", "/api/site/privacy/opt-out/{discord_user_id:str}"): "site-privacy",
     ("POST", "/api/site/privacy/opt-out/{discord_user_id:str}"): "site-privacy",
     ("DELETE", "/api/site/privacy/opt-out/{discord_user_id:str}"): "site-privacy",
+    ("POST", "/api/site/resources/read"): "site-corpus-read",
+    ("POST", "/api/site/resources/search"): "site-corpus-search",
     ("POST", "/api/site/resources/sources"): "site-resources",
     ("GET", "/api/site/search/anonymous-runs/{search_id:str}"): "site-search",
     ("GET", "/api/site/search/users/{owner_id:str}/link-owner"): "site-search",
@@ -62,20 +64,24 @@ SITE_ROUTES = {
     ): "site-search",
 }
 
-# Each family's per-minute limit, as app.yaml sets it.
+# Each family's (limit, window seconds) pairs, as app.yaml sets them.
 FAMILY_LIMITS = {
-    "site-resources": 600,
-    "site-search": 3000,
-    "site-billing": 1200,
-    "site-memory": 600,
-    "site-identity": 300,
-    "site-privacy": 300,
-    "site": 600,
+    "site-resources": [(600, 60.0)],
+    "site-corpus-search": [(240, 60.0)],
+    "site-corpus-read": [(120, 60.0), (3000, 3600.0)],
+    "site-search": [(3000, 60.0)],
+    "site-billing": [(1200, 60.0)],
+    "site-memory": [(600, 60.0)],
+    "site-identity": [(300, 60.0)],
+    "site-privacy": [(300, 60.0)],
+    "site": [(600, 60.0)],
 }
 
 # One concrete request per namespace; site-memory has both of its shapes.
 FAMILY_REQUESTS = {
     "site-resources": [("POST", "/api/site/resources/sources")],
+    "site-corpus-search": [("POST", "/api/site/resources/search")],
+    "site-corpus-read": [("POST", "/api/site/resources/read")],
     "site-search": [("GET", f"/api/site/search/users/{SAMPLE_ID}/runs/r1")],
     "site-billing": [("GET", f"/api/site/billing/users/{SAMPLE_ID}/membership")],
     "site-memory": [
@@ -131,7 +137,8 @@ def concrete(template):
 
 
 def lowered(config, name, limit):
-    """The app.yaml config with every rule in ``name`` limited to ``limit``."""
+    """The app.yaml config with every rule in ``name`` limited to ``limit``
+    in its first (per-minute) window."""
     for rule in config.rules:
         if rule.name == name:
             rule.limits[0].limit = limit
@@ -220,7 +227,7 @@ def test_every_site_route_resolves_to_its_family(route, name):
     assert (rule.name, rule.key, rule.limits) == (
         name,
         "ip",
-        [(FAMILY_LIMITS[name], 60.0)],
+        FAMILY_LIMITS[name],
     )
 
 
@@ -231,7 +238,7 @@ def test_every_site_rule_is_ip_keyed_and_has_a_known_limit():
     for rule in config.rules:
         assert rule.key == "ip", rule.name
         assert rule.match.path.startswith("/api/site/"), rule.name
-        assert [w.pair for w in rule.limits] == [(FAMILY_LIMITS[rule.name], 60.0)]
+        assert [w.pair for w in rule.limits] == FAMILY_LIMITS[rule.name]
 
 
 def test_non_site_routes_keep_default_and_auth():
