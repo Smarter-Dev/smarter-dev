@@ -43,9 +43,11 @@ from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import BotApiException
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.user_content import StillRunning
 from smarter_dev.web.user_content import delete_search
+from smarter_dev.web.user_content import mark_search_key_forgotten
 from smarter_dev.web.web_search import anonymous
 from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import structured as site_snapshot
@@ -68,19 +70,44 @@ class StartAnonymousSearch(BaseModel):
     visitor: str = Field(pattern=r"^[A-Za-z0-9_-]{16,128}$")
 
 
-async def _member(session: AsyncSession, user_id: str) -> User:
+def _account_id(user_id: str) -> UUID:
     try:
         uid = UUID(user_id)
         if str(uid) != user_id.lower():
             raise ValueError
     except ValueError:
         raise plain_error(400, "Invalid account ID") from None
-    user = await session.scalar(
-        select(User).where(User.id == uid, User.is_active.is_(True))
+    return uid
+
+
+async def _member(session: AsyncSession, user_id: str, *, lock=False) -> User:
+    query = select(User).where(
+        User.id == _account_id(user_id), User.is_active.is_(True)
     )
+    user = await session.scalar(query.with_for_update() if lock else query)
     if user is None:
         raise plain_error(404, "Account not found")
     return user
+
+
+def _key(key: str) -> str:
+    try:
+        return dashboard._validate_submission_key(key)
+    except HTTPException as exc:
+        raise plain_error(422, _detail(exc)) from None
+
+
+async def _run_for_key(session: AsyncSession, owner: UUID, key: str):
+    return await session.scalar(
+        select(WebSearchRun).where(
+            WebSearchRun.owner_user_id == owner,
+            WebSearchRun.submission_key == key,
+        )
+    )
+
+
+async def _forgotten(session: AsyncSession, owner: UUID, key: str) -> bool:
+    return await session.get(WebSearchForgottenKey, (owner, key)) is not None
 
 
 async def _owned(session: AsyncSession, user: User, run_id: str) -> WebSearchRun:
@@ -155,17 +182,14 @@ class SiteSearchController(Controller):
     async def start(
         self, db_session: AsyncSession, user_id: str, data: StartSearch
     ) -> dict[str, Any]:
-        user = await _member(db_session, user_id)
-        try:
-            key = dashboard._validate_submission_key(data.key)
-        except HTTPException as exc:
-            raise plain_error(422, _detail(exc)) from None
-        existing = await db_session.scalar(
-            select(WebSearchRun).where(
-                WebSearchRun.owner_user_id == user.id,
-                WebSearchRun.submission_key == key,
-            )
-        )
+        # The lock a forget of this key takes too (lock order:
+        # dashboard_controller.create_search): a forgotten key refuses before
+        # the idempotent repeat, and create_search checks again under it.
+        user = await _member(db_session, user_id, lock=True)
+        key = _key(data.key)
+        if await _forgotten(db_session, user.id, key):
+            raise plain_error(410, dashboard.SEARCH_FORGOTTEN)
+        existing = await _run_for_key(db_session, user.id, key)
         if existing is not None:
             return {"search": site_snapshot(existing), "idempotent": True}
         try:
@@ -178,17 +202,14 @@ class SiteSearchController(Controller):
         owner_id = user.id
         try:
             run = await dashboard.create_search(db_session, owner_id, text, key)
+        except dashboard.SearchKeyForgotten:
+            raise plain_error(410, dashboard.SEARCH_FORGOTTEN) from None
         except IntegrityError:
             # Two starts for the same turn raced and the other one saved its
             # run first (unique owner + key). Answer as an idempotent repeat.
             # The rollback expires ``user``; the lookup uses the saved id.
             await db_session.rollback()
-            existing = await db_session.scalar(
-                select(WebSearchRun).where(
-                    WebSearchRun.owner_user_id == owner_id,
-                    WebSearchRun.submission_key == key,
-                )
-            )
+            existing = await _run_for_key(db_session, owner_id, key)
             if existing is None:
                 raise
             return {"search": site_snapshot(existing), "idempotent": True}
@@ -201,6 +222,60 @@ class SiteSearchController(Controller):
         user = await _member(db_session, user_id)
         return {"search": site_snapshot(await _owned(db_session, user, run_id))}
 
+    @get("/users/{user_id:str}/keys/{key:str}", guards=SITE_SEARCH_GUARDS)
+    async def by_key(
+        self, db_session: AsyncSession, user_id: str, key: str
+    ) -> dict[str, Any]:
+        """The run a start with this key made, or ``{"search": null}`` when
+        none did. For a start whose reply was lost: the site rejoins the run,
+        or finds it to delete, without starting one. Never a 404 for a key
+        with no run, so the site can tell this route from an API without it."""
+        user = await _member(db_session, user_id)
+        run = await _run_for_key(db_session, user.id, _key(key))
+        return {"search": site_snapshot(run) if run is not None else None}
+
+    @delete(
+        "/users/{user_id:str}/keys/{key:str}",
+        guards=SITE_SEARCH_GUARDS,
+        status_code=200,
+    )
+    async def forget_key(
+        self, db_session: AsyncSession, user_id: str, key: str
+    ) -> dict[str, str]:
+        """Forget the run a start with this key made, or will make: for a
+        start whose reply was lost, so its id never reached the site.
+
+        The key is marked forgotten first, under the member's user row lock
+        that ``start`` takes too, so a start still on its way refuses (410).
+        Then the run, if one was made, is deleted: 409 while it is still
+        running, the mark kept, and the site asks again. Any member, closing
+        accounts too; an account already gone has nothing left to forget.
+        Done is 200 ``{"status": "forgotten"}``, never a 404, so the site
+        tells it from an API without this route."""
+        uid = _account_id(user_id)
+        key = _key(key)
+        # Lock order (dashboard_controller.create_search): the users row
+        # before the mark, the run and its dispatches, as starts and the
+        # account purge take them.
+        user = await db_session.scalar(
+            select(User).where(User.id == uid).with_for_update()
+        )
+        if user is None:
+            return {"status": "forgotten"}
+        await mark_search_key_forgotten(db_session, uid, key)
+        run = await _run_for_key(db_session, uid, key)
+        # The mark is kept whatever the run's delete says: from here a start
+        # with this key refuses.
+        await db_session.commit()
+        if run is not None:
+            try:
+                await delete_search(db_session, run)
+            except StillRunning:
+                raise plain_error(
+                    409, "Wait for this search to finish, then delete it."
+                ) from None
+        return {"status": "forgotten"}
+
     @delete(
         "/users/{user_id:str}/runs/{run_id:str}",
         guards=SITE_SEARCH_GUARDS,
@@ -209,6 +284,8 @@ class SiteSearchController(Controller):
     async def remove(
         self, db_session: AsyncSession, user_id: str, run_id: str
     ) -> dict[str, str]:
+        # delete_search takes the users row, re-reads the run under it and
+        # marks a site key forgotten with the delete.
         user = await _member(db_session, user_id)
         run = await _owned(db_session, user, run_id)
         try:

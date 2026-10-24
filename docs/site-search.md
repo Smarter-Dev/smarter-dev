@@ -15,13 +15,16 @@ exist and be active in Python. A browser never calls these routes.
 | ----- | ------------- |
 | `POST /api/site/search/users/{user_id}/runs` | `{request, key}` → 201 `{search}`. `key` (8–64 letters, digits, `-`) is one per chat turn: a retry returns the same run with `idempotent: true`, before limits are checked. `request` is collapsed to one line and must be 3–500 characters. 429 carries the dashboard's limit message. |
 | `GET /api/site/search/users/{user_id}/runs/{run_id}` | `{search}` for the owner's run, 404 otherwise. |
-| `DELETE /api/site/search/users/{user_id}/runs/{run_id}` | Deletes a finished run and its results; 409 while it runs. |
+| `DELETE /api/site/search/users/{user_id}/runs/{run_id}` | Deletes a finished run and its results; 409 while it runs. A site key (64 hex, one per chat turn) is marked forgotten with it, so a start retried with that key gets 410; a dashboard key, which can recur, is not. |
+| `GET /api/site/search/users/{user_id}/keys/{key}` | `{search}` for the run a start with `key` made, or `{search: null}` when none did; never a 404 for a key without a run. For a start whose reply was lost: the site rejoins the run without starting one. |
+| `DELETE /api/site/search/users/{user_id}/keys/{key}` | Forgets a start's key: marks it forgotten, so a start with it refuses (410), then deletes its run if there is one; 409 while that run runs (the mark stays; ask again). 200 `{status: "forgotten"}` is done, also for an account already gone. Every start (this API's, the dashboard's, a search link's) makes its run in `dashboard_controller.create_search`, which locks the member's user row, as the forget does, and refuses a forgotten key (410): a start still on its way either made its run first (the forget deletes it) or finds the key forgotten. The marks go with the account. Lock order everywhere: identity fence (account deletion), users row, then the member's runs, dispatches and marks. |
 
 `search` is structured data: `id`, `request`, `status` (`queued`, `planning`,
 `searching`, `ranking`, `answering`, `complete`, `error`), `active`,
 `queries[]` (`query`, `angle`, `status`, `count`, `domains`), `results[]`
 (`title`, `url`, `domain`, `snippet`, `favicon`, `age`, `relevant`, `best`,
-`score`), `ranked`, `needs_answer`, `answer` (`status`, `markdown`, `reads`,
+`score`, `quality` (Jev's trusted-source verdict) and `queries`, the indexes
+into `queries[]` of the searches that found it), `ranked`, `needs_answer`, `answer` (`status`, `markdown`, `reads`,
 `error`) and `version`. The answer is Markdown with `[n]` citations into
 `results`; it is never HTML, so the site renders it with its own safe
 renderer. The pipeline now stores the streaming Markdown alongside the HTML it

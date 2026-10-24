@@ -29,6 +29,7 @@ so a run its worker abandoned never blocks a delete.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -37,6 +38,7 @@ from uuid import UUID
 
 from skrift.db.models.notification import StoredNotification
 from skrift.db.models.push_subscription import PushSubscription
+from skrift.db.models.user import User
 from sqlalchemy import delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +53,7 @@ from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatTurn
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
@@ -75,6 +78,8 @@ class DeleteAllResult:
     running: int
     # Chats whose uploads could not all be removed; they stay, retryable.
     stranded: int = 0
+    # The searches left (still running).
+    kept: tuple[UUID, ...] = ()
 
 
 def _recent(changed_at: datetime | None) -> bool:
@@ -304,31 +309,119 @@ async def delete_all_resources_conversations(
 # ── Dashboard web searches ───────────────────────────────────────────
 
 
-async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
+async def mark_search_key_forgotten(
+    session: AsyncSession, owner_id: UUID, key: str
+) -> None:
+    """Mark a site search key forgotten, so a start with it refuses (410):
+    for a site chat turn whose start reply was lost. Idempotent; flushes,
+    never commits. The caller holds the owner's users-row lock (lock order:
+    ``dashboard_controller.create_search``), as every delete path that
+    forgets a key must: the site's forget by key, and any delete-all."""
+    if await session.get(WebSearchForgottenKey, (owner_id, key)) is None:
+        session.add(WebSearchForgottenKey(owner_user_id=owner_id, submission_key=key))
+        await session.flush()
+
+
+# The site's keys: SHA-256 of a chat turn's id, so one per turn and never
+# reused. The dashboard's own keys can recur for the same text; never these.
+SITE_SEARCH_KEY = re.compile(r"^[0-9a-f]{64}$")
+
+
+async def lock_member(session: AsyncSession, user_id: UUID) -> UUID | None:
+    """Lock the member's users row (lock order:
+    ``dashboard_controller.create_search``); their id, or None when gone."""
+    return await session.scalar(
+        select(User.id).where(User.id == user_id).with_for_update()
+    )
+
+
+async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID) -> str:
+    """Delete one of the member's runs in its own transaction, deciding from
+    the run as it is now, not as a caller last saw it (port of lane 1's
+    smarter-dev 1cd6d610). Lock order (``dashboard_controller.create_search``):
+    the member's users row first, then the run's row, which a worker takes
+    to change its status, then the site key's mark, the dispatches and the
+    run, committed together. A site key (64 hex, one per chat turn) is marked
+    forgotten with the delete, so a start retried with it (a lost reply)
+    can't make the run again; a dashboard key, which can recur, is not.
+    "deleted" only when this call's DELETE removed the row; "kept" for one
+    still running (nothing marked); "gone" for one already deleted."""
+    await lock_member(session, user_id)
+    run = (
+        await session.execute(
+            select(
+                WebSearchRun.id,
+                WebSearchRun.status,
+                WebSearchRun.updated_at,
+                WebSearchRun.submission_key,
+            )
+            .where(WebSearchRun.id == run_id, WebSearchRun.owner_user_id == user_id)
+            .with_for_update()
+        )
+    ).first()
+    # Nothing to write: the locks go, and with them anything a caller left
+    # unsaved, which it commits itself if it wants it kept.
+    if run is None:
+        await session.rollback()
+        return "gone"
     if run.status not in FINISHED_SEARCH_STATUSES and _recent(run.updated_at):
-        raise StillRunning
+        await session.rollback()
+        return "kept"
+    if SITE_SEARCH_KEY.match(run.submission_key):
+        await mark_search_key_forgotten(session, user_id, run.submission_key)
     await forget_dispatches(session, "web_search.run", [run.id])
-    await session.delete(run)
+    removed = await session.execute(
+        delete(WebSearchRun).where(WebSearchRun.id == run.id)
+    )
     await session.commit()
+    return "deleted" if removed.rowcount else "gone"
 
 
-async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAllResult:
-    runs = list(
+async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
+    """Delete one finished search: the dashboard's delete, the site's by id
+    or by key. StillRunning, with nothing marked or deleted, while it runs."""
+    owner_id, run_id = run.owner_user_id, run.id
+    if await _delete_one_search(session, owner_id, run_id) == "kept":
+        raise StillRunning
+
+
+async def _search_ids(session: AsyncSession, user_id: UUID) -> list[UUID]:
+    """The member's run ids, in one read: ids only, so a member with
+    thousands of searches never has their results loaded, and one read, so
+    the list is the runs that existed at one moment (lane 1's dd2e9eed)."""
+    return list(
         (
             await session.execute(
-                select(WebSearchRun).where(WebSearchRun.owner_user_id == user_id)
+                select(WebSearchRun.id)
+                .where(WebSearchRun.owner_user_id == user_id)
+                .order_by(WebSearchRun.id)
             )
         ).scalars()
     )
+
+
+async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAllResult:
+    """Every search the member owns but those still running.
+
+    The runs are listed first, ids only and in one read: those are the runs
+    it deletes, so one started meanwhile is never reached. Each is then
+    decided and deleted in a transaction of its own under the member's lock
+    (:func:`_delete_one_search`), its site key marked forgotten: never one
+    long lock over all of them, and a run that started or finished since it
+    was listed is judged as it is. (Lane 1's smarter-dev 1cd6d610 and
+    dd2e9eed, ported without their ``keep`` options, which PR 222 adds.)"""
+    run_ids = await _search_ids(session, user_id)
+    await session.commit()
     deleted = running = 0
-    for run in runs:
-        try:
-            await delete_search(session, run)
-        except StillRunning:
+    kept: list[UUID] = []
+    for run_id in run_ids:
+        outcome = await _delete_one_search(session, user_id, run_id)
+        if outcome == "deleted":
+            deleted += 1
+        elif outcome == "kept":
             running += 1
-            continue
-        deleted += 1
-    return DeleteAllResult(deleted=deleted, running=running)
+            kept.append(run_id)
+    return DeleteAllResult(deleted=deleted, running=running, kept=tuple(kept))
 
 
 # ── Account deletion ─────────────────────────────────────────────────
@@ -351,6 +444,12 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     from smarter_dev.web.site_identity import fence_account_deletion
 
     await fence_account_deletion(session, user_id)
+    # Lock order (dashboard_controller.create_search): the identity fence,
+    # then the users row, before any of the owner's rows are written. A site
+    # forget takes the users row before the mark, run and dispatches it
+    # writes, so the two never wait on each other in a cycle; and a mark it
+    # committed first is purged below, while one after finds no user.
+    await session.execute(select(User.id).where(User.id == user_id).with_for_update())
     await delete_account_signups(session, user_id)
     await forget_admin_identifiers(session, user_id)
     turn_ids = list(
@@ -400,6 +499,11 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     await forget_dispatches(session, "web_search.run", search_ids)
     await session.execute(
         delete(WebSearchRun).where(WebSearchRun.owner_user_id == user_id)
+    )
+    await session.execute(
+        delete(WebSearchForgottenKey).where(
+            WebSearchForgottenKey.owner_user_id == user_id
+        )
     )
     await session.execute(
         delete(WebSearchLink).where(WebSearchLink.owner_user_id == user_id)

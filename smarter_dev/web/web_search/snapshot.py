@@ -89,6 +89,14 @@ def structured(run: WebSearchRun) -> dict[str, Any]:
                 "relevant": bool(item.get("relevant")),
                 "best": bool(item.get("best")),
                 "score": item.get("score"),
+                # Jev's "good quality" verdict: the Trusted source badge.
+                "quality": bool(item.get("quality")),
+                # Which planned searches found it, by position in "queries".
+                "queries": [
+                    index
+                    for index in item.get("queries") or []
+                    if isinstance(index, int) and not isinstance(index, bool)
+                ],
             }
             for item in run.results or []
         ],

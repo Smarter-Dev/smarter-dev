@@ -54,6 +54,7 @@ from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.dashboard_nav import nav_context
 from smarter_dev.web.dashboard_nav import recent_searches
 from smarter_dev.web.models import UsageCostRow
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.user_content import StillRunning
@@ -250,10 +251,37 @@ def new_link_token() -> str:
     return secrets.token_urlsafe(18)
 
 
+SEARCH_FORGOTTEN = "This search was deleted."
+
+
+class SearchKeyForgotten(Exception):
+    """A start with a key the site forgot (``web_search_forgotten_keys``):
+    the start's reply was lost and the site has deleted the search; or one
+    whose owner no longer exists. It makes no run; every caller answers
+    410."""
+
+
 async def create_search(
     db_session: AsyncSession, user_id: UUID, text: str, submission_key: str
 ) -> WebSearchRun:
-    """Save a new search and hand it to the agent-worker."""
+    """Save a new search and hand it to the agent-worker.
+
+    Every run is made here, so here is where a forgotten key refuses
+    (SearchKeyForgotten), under the owner's users-row lock that the site's
+    forget (``site_search.forget_key``) takes too: a start either commits
+    its run before a forget of its key, which then deletes it, or finds the
+    key forgotten. Lock order, for every path that makes, forgets or purges
+    an owner's searches: the identity fence (account deletion only), then
+    the users row, then the owner's runs, dispatches and forgotten keys."""
+    owner = await db_session.scalar(
+        select(User.id).where(User.id == user_id).with_for_update()
+    )
+    # An owner gone (an account purged while this start waited) has no
+    # forget left to delete the run: no run either.
+    if owner is None:
+        raise SearchKeyForgotten
+    if await db_session.get(WebSearchForgottenKey, (user_id, submission_key)):
+        raise SearchKeyForgotten
     run = WebSearchRun(
         owner_user_id=user_id,
         submission_key=submission_key,
@@ -413,24 +441,27 @@ class DashboardController(Controller):
         self, request: Request, db_session: AsyncSession, search_id: UUID
     ) -> dict:
         require_api_csrf(request)
-        user = await _active_user(request, db_session)
+        # Kept as a value: the delete may roll back, which expires ``user``.
+        user_id = (await _active_user(request, db_session)).id
         try:
-            await delete_search(db_session, await _owned(db_session, user.id, search_id))
+            await delete_search(db_session, await _owned(db_session, user_id, search_id))
         except StillRunning:
             raise HTTPException(
                 status_code=409, detail="Wait for this search to finish, then delete it."
             ) from None
-        return {"searches": await _recent(db_session, user.id), "build": CLIENT_BUILD}
+        return {"searches": await _recent(db_session, user_id), "build": CLIENT_BUILD}
 
     @delete("/api/searches", status_code=200)
     async def delete_every_search(self, request: Request, db_session: AsyncSession) -> dict:
         require_api_csrf(request)
-        user = await _active_user(request, db_session)
-        result = await delete_all_searches(db_session, user.id)
+        # Kept as a value: each run's delete commits or rolls back, which
+        # expires ``user``.
+        user_id = (await _active_user(request, db_session)).id
+        result = await delete_all_searches(db_session, user_id)
         return {
             "deleted": result.deleted,
             "running": result.running,
-            "searches": await _recent(db_session, user.id),
+            "searches": await _recent(db_session, user_id),
             "build": CLIENT_BUILD,
         }
 
@@ -451,5 +482,8 @@ class DashboardController(Controller):
             return {"search": snapshot(existing), "idempotent": True, "build": CLIENT_BUILD}
         text = _validate_request(data.request)
         await _enforce_limits(db_session, user.id)
-        run = await create_search(db_session, user.id, text, submission_key)
+        try:
+            run = await create_search(db_session, user.id, text, submission_key)
+        except SearchKeyForgotten:
+            raise HTTPException(status_code=410, detail=SEARCH_FORGOTTEN) from None
         return {"search": snapshot(run), "build": CLIENT_BUILD}

@@ -216,7 +216,13 @@ class SearchLinkController(Controller):
             await dashboard._enforce_limits(db_session, user.id)
         except HTTPException as error:
             return _limited(request, message=str(error.detail), wait=None, login=False)
-        run = await dashboard.create_search(db_session, user.id, text, uuid4().hex)
+        # A key of its own, never a site turn's, so no forget names it; but
+        # the account can be purged while this waits, and create_search then
+        # refuses (no run for an owner who is gone).
+        try:
+            run = await dashboard.create_search(db_session, user.id, text, uuid4().hex)
+        except dashboard.SearchKeyForgotten:
+            raise HTTPException(status_code=410, detail=dashboard.SEARCH_FORGOTTEN) from None
         return Redirect(path=f"/dashboard/search/{run.id}", status_code=303)
 
     @get("/{token:str}/opensearch.xml")
