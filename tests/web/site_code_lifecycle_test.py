@@ -237,3 +237,24 @@ async def test_a_request_cancelled_at_its_wait_leaves_nothing_to_run(
     )
     assert outcome == {"status": "expired"}
     assert started == []
+
+
+async def test_a_finished_run_is_never_read_as_a_dead_worker(redis, monkeypatch):
+    # Between the run ending and its text being published, the route must
+    # still see the job alive (#335: a pause here read as a dead worker).
+    publish = site_code.push_result
+    paused, go = asyncio.Event(), asyncio.Event()
+
+    async def slow_publish(client, run_id, text):
+        paused.set()
+        await go.wait()
+        await publish(client, run_id, text)
+
+    monkeypatch.setattr(site_code, "push_result", slow_publish)
+    run_id, job = await _job(redis, "6 * 7")
+    await asyncio.wait_for(paused.wait(), 10)
+    assert not await site_code.worker_gone(redis, run_id)
+    go.set()
+    assert await asyncio.wait_for(job, 10) == {"status": "complete"}
+    assert await site_code.wait_for_result(redis, run_id, 1) == "return value: 42"
+    assert not await redis.exists(site_code.running_key(run_id))

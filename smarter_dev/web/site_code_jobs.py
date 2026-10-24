@@ -66,18 +66,26 @@ async def run_site_code_job(payload: SiteCodePayload) -> dict:
             await asyncio.sleep(site_code.HEARTBEAT_SECONDS)
 
     watcher = asyncio.ensure_future(keep_alive())
+    published = False
     try:
-        text = await run
-    except RunNotWanted:
-        return {"status": "abandoned"}
-    except asyncio.CancelledError:
-        if not abandoned:
-            raise  # the job itself was cancelled
-        return {"status": "abandoned"}
+        try:
+            text = await run
+        except RunNotWanted:
+            return {"status": "abandoned"}
+        except asyncio.CancelledError:
+            if not abandoned:
+                raise  # the job itself was cancelled
+            return {"status": "abandoned"}
+        finally:
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
+        # The heartbeat stays until this publishes the text: the same
+        # transaction drops it, so the route never sees a finished run with
+        # neither a heartbeat nor a result.
+        await site_code.push_result(redis, run_id, text)
+        published = True
+        return {"status": "complete"}
     finally:
-        watcher.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await watcher
-        await site_code.finish(redis, run_id)
-    await site_code.push_result(redis, run_id, text)
-    return {"status": "complete"}
+        if not published:
+            await site_code.finish(redis, run_id)
