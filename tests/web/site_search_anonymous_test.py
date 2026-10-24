@@ -564,7 +564,20 @@ async def test_a_site_search_runs_without_a_row_or_a_notification(
     saved = await anonymous.load(redis, state["id"])
     site = saved["site"]
     assert site["status"] == "complete" and site["ranked"] is True
-    assert site["results"] and "queries" not in site["results"][0]
+    # The site's structured view, not the row: no Brave hits or HTML.
+    assert site["results"] and set(site["results"][0]) == {
+        "title",
+        "url",
+        "domain",
+        "snippet",
+        "favicon",
+        "age",
+        "relevant",
+        "best",
+        "score",
+        "quality",
+        "queries",
+    }
     assert site["version"] == saved["search"]["version"] > 0
     session = search_env["session"]
     assert await session.scalar(select(func.count()).select_from(WebSearchRun)) == 0

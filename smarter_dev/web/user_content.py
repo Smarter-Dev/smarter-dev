@@ -37,6 +37,7 @@ from uuid import UUID
 
 from skrift.db.models.notification import StoredNotification
 from skrift.db.models.push_subscription import PushSubscription
+from skrift.db.models.user import User
 from sqlalchemy import delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -51,6 +52,7 @@ from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatTurn
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
@@ -400,6 +402,15 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     await forget_dispatches(session, "web_search.run", search_ids)
     await session.execute(
         delete(WebSearchRun).where(WebSearchRun.owner_user_id == user_id)
+    )
+    # Under the user row's lock, which a site forget takes before it writes
+    # a mark: one committed before this is purged here, and one after finds
+    # no user and writes none.
+    await session.execute(select(User.id).where(User.id == user_id).with_for_update())
+    await session.execute(
+        delete(WebSearchForgottenKey).where(
+            WebSearchForgottenKey.owner_user_id == user_id
+        )
     )
     await session.execute(
         delete(WebSearchLink).where(WebSearchLink.owner_user_id == user_id)

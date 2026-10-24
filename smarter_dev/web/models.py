@@ -6728,6 +6728,24 @@ class WebSearchRun(Base):
     )
 
 
+class WebSearchForgottenKey(Base):
+    """A site chat turn's search key whose run the site asked to forget.
+
+    The site starts a member's search with one key per chat turn. When the
+    start's reply is lost, the site never learns the run's id, so it forgets
+    the run by its key: the run goes if there is one, and this mark makes a
+    start with the key still on its way refuse (410), rather than make a run
+    nobody will delete. The forget and the start both lock the member's user
+    row, so one of them always sees the other. Purged with the account."""
+
+    __tablename__ = "web_search_forgotten_keys"
+
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True
+    )
+    submission_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+
 class WebSearchLink(Base):
     """A user's search link: a URL with a secret token they add to their
     browser as a search engine (``/s/<token>?q=%s``).

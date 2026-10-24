@@ -43,6 +43,7 @@ from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatTurn
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
@@ -615,6 +616,9 @@ async def test_deleting_the_account_leaves_none_of_it_behind(db_session, monkeyp
         WebSearchLink(owner_user_id=user_id, token=uuid4().hex, open_addresses=False)
     )
     db_session.add(
+        WebSearchForgottenKey(owner_user_id=user_id, submission_key=uuid4().hex)
+    )
+    db_session.add(
         PushSubscription(
             user_id=str(user_id),
             endpoint="https://push.example/1",
@@ -656,6 +660,10 @@ async def test_deleting_the_account_leaves_none_of_it_behind(db_session, monkeyp
     for model, condition in (
         (WebSearchRun, WebSearchRun.owner_user_id == user_id),
         (WebSearchLink, WebSearchLink.owner_user_id == user_id),
+        (
+            WebSearchForgottenKey,
+            WebSearchForgottenKey.owner_user_id == user_id,
+        ),
         (PushSubscription, PushSubscription.user_id == str(user_id)),
         (StoredNotification, StoredNotification.source_key == f"user:{user_id}"),
         (WorkDispatch, WorkDispatch.job_type != "chat.account.delete"),
