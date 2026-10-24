@@ -49,6 +49,7 @@ from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
+from smarter_dev.web.user_content import count_searches
 from smarter_dev.web.user_content import delete_all_searches
 from smarter_dev.web.user_content import delete_search
 
@@ -606,6 +607,61 @@ async def test_deleting_searches_does_not_reset_the_daily_limit(
     assert await dashboard_controller.searches_in_last_day(db_session, user.id) == 2
 
 
+@pytest.mark.asyncio
+async def test_your_data_counts_every_search_the_member_owns(db_session):
+    from smarter_dev.web.account_controller import _your_data
+
+    user = await _user(db_session)
+    other = await _user(db_session)
+    assert await count_searches(db_session, user.id) == 0
+    await _search(db_session, user)
+    await _search(db_session, user, status="searching")
+    await _search(db_session, user, status="planning", stalled=True)
+    await _search(db_session, other)
+
+    assert await count_searches(db_session, user.id) == 3
+    assert (await _your_data(db_session, user.id))["searches"] == 3
+    assert await count_searches(db_session, other.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_deleting_all_searches_leaves_the_ones_named_in_keep(db_session):
+    user = await _user(db_session)
+    other = await _user(db_session)
+    finished = await _search(db_session, user)
+    stalled = await _search(db_session, user, status="planning", stalled=True)
+    running = await _search(db_session, user, status="searching")
+    cited = await _search(db_session, user)
+    foreign = await _search(db_session, other)
+    user_id = user.id
+    ids = {
+        name: run.id
+        for name, run in {
+            "finished": finished,
+            "stalled": stalled,
+            "running": running,
+            "cited": cited,
+            "foreign": foreign,
+        }.items()
+    }
+
+    result = await delete_all_searches(
+        db_session, user_id, keep={ids["cited"], ids["foreign"]}
+    )
+
+    assert (result.deleted, result.running) == (2, 2)
+    assert set(result.kept) == {ids["running"], ids["cited"]}
+    db_session.expire_all()
+    assert set(await db_session.scalars(select(WebSearchRun.id))) == {
+        ids["running"],
+        ids["cited"],
+        ids["foreign"],
+    }
+    # Without keep, as the account page and the dashboard call it.
+    again = await delete_all_searches(db_session, user_id)
+    assert (again.deleted, again.running, again.kept) == (1, 1, (ids["running"],))
+
+
 # ── Account deletion ─────────────────────────────────────────────────
 
 
@@ -993,9 +1049,9 @@ async def _after_listing(monkeypatch, change):
     listed = user_content._search_ids
     done = False
 
-    async def listing(session, user_id):
+    async def listing(session, user_id, *args):
         nonlocal done
-        page = await listed(session, user_id)
+        page = await listed(session, user_id, *args)
         if not done:
             done = True
             await change()

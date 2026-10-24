@@ -30,6 +30,7 @@ so a run its worker abandoned never blocks a delete.
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -40,6 +41,8 @@ from skrift.db.models.notification import StoredNotification
 from skrift.db.models.push_subscription import PushSubscription
 from skrift.db.models.user import User
 from sqlalchemy import delete
+from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -78,8 +81,11 @@ class DeleteAllResult:
     running: int
     # Chats whose uploads could not all be removed; they stay, retryable.
     stranded: int = 0
-    # The searches left (still running).
+    # The searches left (still running, or named in ``keep``), for the site.
     kept: tuple[UUID, ...] = ()
+    # A bounded delete-all that stopped short: the last run it decided, to
+    # carry on after; None once every run has been reached.
+    next_after: UUID | None = None
 
 
 def _recent(changed_at: datetime | None) -> bool:
@@ -377,6 +383,18 @@ async def _delete_one_search(session: AsyncSession, user_id: UUID, run_id: UUID)
     return "deleted" if removed.rowcount else "gone"
 
 
+async def count_searches(session: AsyncSession, user_id: UUID) -> int:
+    """Every search the member owns, as "Your data" counts them."""
+    return (
+        await session.scalar(
+            select(func.count())
+            .select_from(WebSearchRun)
+            .where(WebSearchRun.owner_user_id == user_id)
+        )
+        or 0
+    )
+
+
 async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
     """Delete one finished search: the dashboard's delete, the site's by id
     or by key. StillRunning, with nothing marked or deleted, while it runs."""
@@ -385,35 +403,95 @@ async def delete_search(session: AsyncSession, run: WebSearchRun) -> None:
         raise StillRunning
 
 
-async def _search_ids(session: AsyncSession, user_id: UUID) -> list[UUID]:
-    """The member's run ids, in one read: ids only, so a member with
-    thousands of searches never has their results loaded, and one read, so
-    the list is the runs that existed at one moment (lane 1's dd2e9eed)."""
-    return list(
-        (
-            await session.execute(
-                select(WebSearchRun.id)
-                .where(WebSearchRun.owner_user_id == user_id)
-                .order_by(WebSearchRun.id)
-            )
-        ).scalars()
+def _owned_searches(
+    user_id: UUID, keep: Collection[UUID], keep_keys: Collection[str], named: bool
+):
+    """SQL for the member's runs: those named in ``keep`` (by id) or
+    ``keep_keys`` (by key) when ``named``, else all the others."""
+    is_named = or_(
+        WebSearchRun.id.in_(list(keep)),
+        WebSearchRun.submission_key.in_(list(keep_keys)),
+    )
+    return select(WebSearchRun.id).where(
+        WebSearchRun.owner_user_id == user_id, is_named if named else ~is_named
     )
 
 
-async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAllResult:
-    """Every search the member owns but those still running.
+async def _search_ids(
+    session: AsyncSession,
+    user_id: UUID,
+    keep: Collection[UUID] = (),
+    keep_keys: Collection[str] = (),
+    after: UUID | None = None,
+    limit: int | None = None,
+) -> list[UUID]:
+    """The member's run ids, in one read: ids only, so a member with
+    thousands of searches never has their results loaded, and one read, so
+    the list is the runs that existed at one moment (lane 1's dd2e9eed).
+    Those named in ``keep``/``keep_keys`` are left out by the query itself,
+    never read, locked or rescanned. In id order, those after ``after``, at
+    most ``limit``."""
+    query = _owned_searches(user_id, keep, keep_keys, named=False).order_by(
+        WebSearchRun.id
+    )
+    if after is not None:
+        query = query.where(WebSearchRun.id > after)
+    if limit is not None:
+        query = query.limit(limit)
+    return list((await session.execute(query)).scalars())
+
+
+async def delete_all_searches(
+    session: AsyncSession,
+    user_id: UUID,
+    keep: Collection[UUID] = (),
+    keep_keys: Collection[str] = (),
+    *,
+    after: UUID | None = None,
+    limit: int | None = None,
+) -> DeleteAllResult:
+    """Every search the member owns but those still running, and those in
+    ``keep`` or started under a key in ``keep_keys``, which count as running:
+    the site names the searches its replies are still being written from, by
+    run id when it has one, and by the reply's search keys when a start's
+    reply was lost, so a run the site may still rejoin is never deleted, or
+    its key marked, under it. An id or key that is not one of the member's is
+    ignored.
 
     The runs are listed first, ids only and in one read: those are the runs
     it deletes, so one started meanwhile is never reached. Each is then
     decided and deleted in a transaction of its own under the member's lock
     (:func:`_delete_one_search`), its site key marked forgotten: never one
     long lock over all of them, and a run that started or finished since it
-    was listed is judged as it is. (Lane 1's smarter-dev 1cd6d610 and
-    dd2e9eed, ported without their ``keep`` options, which PR 222 adds.)"""
-    run_ids = await _search_ids(session, user_id)
+    was listed is judged as it is.
+
+    With ``limit`` it decides at most that many runs, those after ``after``
+    in id order, and says where to carry on (``next_after``), so one call's
+    work is bounded; the site calls again until it is None, holding its
+    member's new searches back meanwhile."""
+    # The runs the site named are kept, unread and unmarked: counted once,
+    # on the first call of a bounded delete.
+    kept: list[UUID] = (
+        list(
+            (
+                await session.execute(
+                    _owned_searches(user_id, keep, keep_keys, named=True).order_by(
+                        WebSearchRun.id
+                    )
+                )
+            ).scalars()
+        )
+        if (keep or keep_keys) and after is None
+        else []
+    )
+    run_ids = await _search_ids(
+        session, user_id, keep, keep_keys, after, None if limit is None else limit + 1
+    )
+    more = limit is not None and len(run_ids) > limit
+    run_ids = run_ids[:limit] if more else run_ids
     await session.commit()
-    deleted = running = 0
-    kept: list[UUID] = []
+    deleted = 0
+    running = len(kept)
     for run_id in run_ids:
         outcome = await _delete_one_search(session, user_id, run_id)
         if outcome == "deleted":
@@ -421,7 +499,12 @@ async def delete_all_searches(session: AsyncSession, user_id: UUID) -> DeleteAll
         elif outcome == "kept":
             running += 1
             kept.append(run_id)
-    return DeleteAllResult(deleted=deleted, running=running, kept=tuple(kept))
+    return DeleteAllResult(
+        deleted=deleted,
+        running=running,
+        kept=tuple(kept),
+        next_after=run_ids[-1] if more else None,
+    )
 
 
 # ── Account deletion ─────────────────────────────────────────────────

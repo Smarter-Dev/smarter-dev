@@ -59,6 +59,8 @@ SITE_ROUTES = {
     ("GET", "/api/site/search/users/{owner_id:str}/link-owner"): "site-search",
     ("POST", "/api/site/search/users/{owner_id:str}/anonymous-runs"): "site-search",
     ("POST", "/api/site/search/users/{user_id:str}/runs"): "site-search",
+    ("GET", "/api/site/search/users/{user_id:str}/runs/count"): "site-search",
+    ("POST", "/api/site/search/users/{user_id:str}/runs/delete-all"): "site-search",
     ("GET", "/api/site/search/users/{user_id:str}/runs/{run_id:str}"): "site-search",
     (
         "DELETE",

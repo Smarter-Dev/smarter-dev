@@ -42,8 +42,9 @@ from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import SudoMembership
 from smarter_dev.web.models import UserProfile
 from smarter_dev.web.models import WebChatConversation
-from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.site_identity import fence_account_deletion
+from smarter_dev.web.user_content import DeleteAllResult
+from smarter_dev.web.user_content import count_searches
 from smarter_dev.web.user_content import delete_all_chats
 from smarter_dev.web.user_content import delete_all_resources_conversations
 from smarter_dev.web.user_content import delete_all_searches
@@ -66,13 +67,27 @@ async def _your_data(db_session: AsyncSession, user_id: UUID) -> dict[str, int]:
             .where(AgentConversation.owner_user_id == user_id)
         )
         or 0,
-        "searches": await db_session.scalar(
-            select(func.count())
-            .select_from(WebSearchRun)
-            .where(WebSearchRun.owner_user_id == user_id)
-        )
-        or 0,
+        "searches": await count_searches(db_session, user_id),
     }
+
+
+def deleted_message(noun: str, result: DeleteAllResult) -> str:
+    """What the account page says after deleting all of one kind."""
+    plural = "es" if noun == "search" else "s"
+    message = f"Deleted {result.deleted} {noun}{'' if result.deleted == 1 else plural}."
+    if result.running:
+        message += (
+            f" {result.running} still being answered "
+            f"{'was' if result.running == 1 else 'were'} kept; delete "
+            f"{'it' if result.running == 1 else 'them'} once "
+            f"{'it finishes' if result.running == 1 else 'they finish'}."
+        )
+    if result.stranded:
+        message += (
+            f" {result.stranded} could not be deleted yet because their uploaded"
+            " files could not be removed; try again shortly."
+        )
+    return message
 
 
 def _passkey_factor_key(skrift_settings) -> str | None:
@@ -329,23 +344,7 @@ class AccountController(Controller):
         else:
             flash_error(request, "There is nothing of that kind to delete.")
             return Redirect(path="/account/security")
-        plural = "es" if noun == "search" else "s"
-        message = (
-            f"Deleted {result.deleted} {noun}{'' if result.deleted == 1 else plural}."
-        )
-        if result.running:
-            message += (
-                f" {result.running} still being answered "
-                f"{'was' if result.running == 1 else 'were'} kept; delete "
-                f"{'it' if result.running == 1 else 'them'} once "
-                f"{'it finishes' if result.running == 1 else 'they finish'}."
-            )
-        if result.stranded:
-            message += (
-                f" {result.stranded} could not be deleted yet because their uploaded"
-                " files could not be removed; try again shortly."
-            )
-        flash_success(request, message)
+        flash_success(request, deleted_message(noun, result))
         return Redirect(path="/account/security")
 
     @post("/data/signups/{signup_id:uuid}/delete")
