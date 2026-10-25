@@ -59,3 +59,31 @@ def test_the_migration_builds_the_index_and_its_downgrade_drops_it():
     run(migration.downgrade)
     assert NAME not in indexes()
     assert "ix_web_search_runs_owner_created" in indexes()
+
+
+def test_a_page_of_delete_all_is_served_by_the_index_with_no_sort():
+    """The page delete-all reads (``user_content._search_ids``): the member's
+    runs after a cursor, in id order, at most a batch. With the index it is
+    a seek, never a sort of the member's whole history."""
+    from uuid import uuid4
+
+    from smarter_dev.web.user_content import _owned_searches
+
+    engine = sa.create_engine("sqlite://")
+    with engine.begin() as connection:
+        WebSearchRun.__table__.create(connection)
+        query = (
+            _owned_searches(uuid4(), [uuid4()], ["a" * 64], named=False)
+            .where(WebSearchRun.id > uuid4())
+            .order_by(WebSearchRun.id)
+            .limit(51)
+        )
+        compiled = query.compile(
+            dialect=connection.dialect, compile_kwargs={"literal_binds": True}
+        )
+        plan = " | ".join(
+            row[-1]
+            for row in connection.exec_driver_sql(f"EXPLAIN QUERY PLAN {compiled}")
+        )
+    assert f"USING INDEX {NAME}" in plan or f"USING COVERING INDEX {NAME}" in plan, plan
+    assert "TEMP B-TREE" not in plan, plan
