@@ -259,7 +259,7 @@ UNION ALL SELECT 'handler_runs mentioning (drop from mentions)', count(*) FROM h
 UNION ALL SELECT 'chat_agent_errors (clear text)', count(*) FROM chat_agent_errors WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'chat_agent_engagements topic (clear)', count(*) FROM chat_agent_engagements WHERE coalesce(last_topic, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(last_notes, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 -- moderation gateway: what they posted, and what a model or a pending delivery says about them
-UNION ALL SELECT 'moderation_incident_entries content (delete)', count(*) FROM moderation_incident_entries WHERE kind IN ('evidence', 'transcript', 'assessment') AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'))
+UNION ALL SELECT 'moderation_incident_entries content (delete)', count(*) FROM moderation_incident_entries WHERE kind IN ('evidence', 'transcript', 'assessment', 'deleted_summary') AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'))
 UNION ALL SELECT 'moderation_outbox (delete)', count(*) FROM moderation_outbox WHERE target_user_id = :'did'
 UNION ALL SELECT 'moderation_shadow_decisions (delete)', count(*) FROM moderation_shadow_decisions WHERE author_id = :'did' OR concat_ws(' ', target_ids::text, staff_excluded::text, labels::text, decision::text, provisional::text, legacy::text) ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 -- kept:
@@ -630,12 +630,13 @@ DELETE FROM forum_user_subscriptions WHERE user_id = :'did';
 DELETE FROM campaign_signups WHERE discord_id = :'did';
 DELETE FROM help_conversations WHERE user_id = :'did';
 DELETE FROM research_sessions WHERE user_id = :'did';
--- Moderation gateway: what they posted (evidence), transcripts and model
--- assessments that name them, and deliveries about them. Incidents,
+-- Moderation gateway: what they posted (evidence), descriptions of their
+-- deleted messages, transcripts and model assessments that name them, and
+-- deliveries about them. Incidents,
 -- operations, reasons and notes stay: they are moderation history.
 -- (smarter_dev/web/moderation_gateway/privacy.py states the same deletes.)
 DELETE FROM moderation_incident_entries
- WHERE kind IN ('evidence', 'transcript', 'assessment')
+ WHERE kind IN ('evidence', 'transcript', 'assessment', 'deleted_summary')
    AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'));
 DELETE FROM moderation_outbox WHERE target_user_id = :'did';
 -- The moderation coordinator's shadow record: an experiment, not history.

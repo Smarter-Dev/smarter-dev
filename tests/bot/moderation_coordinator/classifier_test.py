@@ -283,6 +283,8 @@ def test_the_worst_haiku_request_is_bounded_and_a_day_costs_under_a_dollar_fifty
         ring_candidates=tuple(
             RingCandidate(user_id=i, username=big, messages=(big,) * 5) for i in ids
         ),
+        # The deletion summary's question too (#378).
+        summarize=True,
     )
     input_bytes = len(clf.HAIKU_INSTRUCTIONS.encode()) + len(
         haiku_prompt(request).encode()

@@ -378,6 +378,9 @@ class ClassifierRequest:
     limits: BudgetLimits | None = None
     deadline: float | None = None
     ring_only_backend: str = JEV
+    #: Ask Haiku for the message's one-line description too (#378), in the
+    #: same request: the report's line for a deletion. Jev is never asked.
+    summarize: bool = False
 
 
 @dataclass(slots=True)
@@ -395,6 +398,15 @@ class ClassifierResult:
     outcome: str = "not_needed"
     refused_by: str | None = None
     images: ImageCounts | None = None
+    #: The message described in one line (:data:`SUMMARY_RULES`), cleaned by
+    #: :func:`clean_summary`; None when not asked or not given. Never recorded
+    #: with the decision: it goes to the incident only if the message is
+    #: deleted.
+    summary: str | None = None
+    #: The images' bytes as loaded for the request, by attachment index, so a
+    #: description can still be written once the message is gone. Kept in
+    #: memory only.
+    images_loaded: Mapping[int, bytes | None] | None = None
 
     def as_record(self) -> dict:
         return {
@@ -507,6 +519,8 @@ class LoadedImages:
     #: Attachment index -> how the prompt describes it.
     notes: Mapping[int, str] = field(default_factory=dict)
     counts: ImageCounts = ImageCounts()
+    #: Attachment index -> the bytes loaded for it (None: not loaded).
+    loaded: Mapping[int, bytes | None] = field(default_factory=dict)
 
 
 async def _load_one(item: Attachment, fetch: ImageFetcher) -> bytes | None:
@@ -579,6 +593,7 @@ async def load_images(
         return await _load_one(item, fetch)
 
     loaded = await asyncio.gather(*(one(index, item) for index, item in shown))
+    by_index = {index: data for (index, _), data in zip(shown, loaded, strict=True)}
     contents = []
     for (index, _), data in zip(shown, loaded, strict=True):
         media_type = image_type(data) if data else None
@@ -599,6 +614,7 @@ async def load_images(
             sampled=sample is not None,
             not_sampled=not_sampled,
         ),
+        loaded=by_index,
     )
 
 
@@ -664,7 +680,60 @@ _PARTICIPANT_TEXT = (
     "Messages about something else, or doubtful reactions to it, are not."
 )
 
+#: How a deleted message is described for the report (#378), in the
+#: classifier's request and in the separate one (:mod:`.summary`) alike.
+SUMMARY_RULES = (
+    "Say in a few words what the message is, then what each attachment is: "
+    "what an image shows, what a file is by its name and type. For example: "
+    "Fake Steam gift-card giveaway: text links to steamcommunnity[.]ru; 2 "
+    "images, screenshots of a 'claim your $50' page. Describe, do not judge "
+    "and do not quote at length. Never write a link, domain or invite that "
+    "could be clicked: write each of its dots as [.]. Never repeat a slur, "
+    "insult or explicit sexual content word for word: name what it is (a "
+    "slur aimed at a member, a sexual image)."
+)
+#: The longest description kept, in characters.
+SUMMARY_CHARS = 240
+
+_SUMMARY_TEXT = (
+    "a string (not an answer object): one line of at most 200 characters "
+    "describing the MESSAGE for a moderator who cannot see it. " + SUMMARY_RULES
+)
+
 _FENCE = re.compile(r"</?untrusted>", re.IGNORECASE)
+#: A link, or anything shaped like a domain (``steamcommunnity.ru``,
+#: ``discord.gg/abc``), in a description: defanged whatever the model did.
+_LINKISH = re.compile(
+    r"(?i)\b(?:[a-z][a-z0-9+.-]*://\S+|www\.\S+|(?:[a-z0-9-]+\.)+[a-z]{2,}\b\S*)"
+)
+_MASS_PING = re.compile(r"@(everyone|here)", re.IGNORECASE)
+
+
+def defang(text: str) -> str:
+    """Links and domains made unclickable (``a[.]b``), ``://`` broken, mass
+    mentions broken: a description never re-broadcasts what it describes."""
+
+    def inert(match: re.Match) -> str:
+        return match.group(0).replace("://", "[://]").replace(".", "[.]")
+
+    text = _LINKISH.sub(inert, text)
+    # A dot the model already wrote as [.] stays as it is, never [[.]].
+    text = text.replace("[[.]]", "[.]")
+    return _MASS_PING.sub(lambda m: "@\u200b" + m.group(1), text)
+
+
+def clean_summary(text) -> str | None:
+    """A model's description as the report may show it: one line, bounded,
+    defanged; None when there is nothing usable."""
+    if not isinstance(text, str):
+        return None
+    line = " ".join(_FENCE.sub("", text).split())
+    if not line:
+        return None
+    line = defang(line)
+    if len(line) > SUMMARY_CHARS:
+        line = line[: SUMMARY_CHARS - 1].rstrip() + "\u2026"
+    return line
 
 
 def _clip(text: str, limit: int) -> str:
@@ -703,6 +772,8 @@ def haiku_prompt(
             '- "participants": an object with one entry per CANDIDATE id below, '
             "each answering: " + _PARTICIPANT_TEXT
         )
+    if request.summarize:
+        lines.append('- "summary": ' + _SUMMARY_TEXT)
     # The MESSAGE is always the revision being judged; a follow-up's ring
     # questions are about the earlier AD, which gets its own block.
     material = ["MESSAGE:", _clip(request.content, MAX_MESSAGE_CHARS)]
@@ -720,6 +791,10 @@ def haiku_prompt(
     # channel context, newest first. A candidate left out gets no answer,
     # which is unknown: never acted on.
     room = MAX_MATERIAL_BYTES - _size(material) - _TITLE_BYTES
+    if request.summarize:
+        # The description's question comes out of the context's share, so
+        # the worst request stays as bounded as before (#378).
+        room -= _size(lines[-1:])
     candidates = {c.user_id: c for c in request.ring_candidates}
     said: dict[str, list[str]] = {}
     for user_id in participants:
@@ -795,6 +870,18 @@ def parse_haiku_reply(text: str, labels: frozenset[str]) -> dict[str, LabelVerdi
             entry = data.get(label)
         verdicts[label] = _verdict_from(label, entry)
     return verdicts
+
+
+def parse_haiku_summary(text: str) -> str | None:
+    """The reply's ``summary``, cleaned; None when absent or not a string."""
+    match = _JSON_OBJECT.search(text or "")
+    try:
+        data = json.loads(match.group(0)) if match else None
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return clean_summary(data.get("summary"))
 
 
 def build_haiku_model() -> Model:
@@ -981,6 +1068,11 @@ class ModerationClassifier:
             setattr(self, attr, model)
         return model
 
+    def haiku_model(self) -> Model:
+        """The Haiku this classifier asks: the deletion summaries use the same
+        one (#378), never a second model id."""
+        return self._model(HAIKU)
+
     async def preload(
         self, attachments: Sequence[Attachment]
     ) -> dict[int, bytes | None]:
@@ -1038,7 +1130,8 @@ class ModerationClassifier:
                             preloaded=request.preloaded_images,
                         )
                         result.images = images.counts
-                        verdicts = await self._ask_haiku(
+                        result.images_loaded = images.loaded
+                        verdicts, result.summary = await self._ask_haiku(
                             model, request, images, deadline
                         )
                     else:
@@ -1085,7 +1178,8 @@ class ModerationClassifier:
         request: ClassifierRequest,
         images: LoadedImages,
         deadline: float | None = None,
-    ) -> dict[str, LabelVerdict]:
+    ) -> tuple[dict[str, LabelVerdict], str | None]:
+        """Every label's verdict, and the description when it was asked for."""
         agent = Agent(
             model, output_type=str, instructions=HAIKU_INSTRUCTIONS, retries=0
         )
@@ -1096,7 +1190,8 @@ class ModerationClassifier:
             usage_limits=UsageLimits(request_limit=1),
         )
         verdicts = parse_haiku_reply(run.output, request.labels)
-        return unseen_is_unknown(verdicts, images.counts)
+        summary = parse_haiku_summary(run.output) if request.summarize else None
+        return unseen_is_unknown(verdicts, images.counts), summary
 
     async def _ask_jev(
         self, model: Model, request: ClassifierRequest, deadline: float | None = None

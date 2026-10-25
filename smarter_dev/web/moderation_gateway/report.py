@@ -11,6 +11,12 @@ same message as the incident grows.
 Everything a member wrote is quoted sanitised (no live links, no mentions),
 and the message is posted with every mention off except the role the
 detectors asked to ping, so quoting a scam cannot re-broadcast it.
+
+What a deleted message was (#378) is a model's one line, written before the
+delete and recorded as a ``deleted_summary`` entry: it follows the delete's
+line in the timeline and is repeated in a **Deleted:** line under the
+summary. Copies of one post share one line ("×3 in #a, #b"). The line is
+sanitised like member text.
 """
 
 from __future__ import annotations
@@ -30,6 +36,12 @@ NOTE_LIMIT = 400
 ASSESSMENT_LIMIT = 900
 #: Reasons shown before the rest are counted.
 REASON_LIMIT = 6
+#: A deleted message's description, and the **Deleted:** line they make.
+DELETED_LIMIT = 240
+DELETED_LINE_LIMIT = 600
+#: Posts the **Deleted:** line names before the rest are counted.
+DELETED_POSTS = 3
+SUMMARY_UNAVAILABLE = "summary unavailable"
 #: What :meth:`ModerationPort.find_message` looks for when a post's fate is
 #: unknown; the report's last line carries it.
 MARKER_PREFIX = "Incident "
@@ -290,6 +302,59 @@ class _Line:
     tag: str = _TAG_DONE
 
 
+@dataclass(slots=True)
+class _Deleted:
+    """One post's deleted messages and their one description."""
+
+    text: str | None
+    message_ids: list[str]
+    channel_ids: list[str]
+    shown: bool = False
+
+    def words(self) -> str:
+        text = (
+            sanitize(self.text, DELETED_LIMIT) if self.text else SUMMARY_UNAVAILABLE
+        )
+        count = len(self.message_ids)
+        if count > 1:
+            where = ", ".join(f"<#{channel}>" for channel in self.channel_ids)
+            text += f" (\u00d7{count}" + (f" in {where}" if where else "") + ")"
+        return text
+
+
+def deleted_posts(facts: ReportFacts) -> list[_Deleted]:
+    """The deletion summaries, one per post: the entries of its copies (the
+    same ``details.key``) merged, the first description that was written
+    standing for all of them."""
+    posts: dict[str, _Deleted] = {}
+    for index, entry in enumerate(facts.entries):
+        if entry.kind != t.ENTRY_DELETED_SUMMARY:
+            continue
+        details = entry.details or {}
+        key = str(details.get("key") or f"entry-{index}")
+        text = entry.content if details.get("status") == "ok" else None
+        post = posts.setdefault(key, _Deleted(None, [], []))
+        if post.text is None and text:
+            post.text = text
+        post.message_ids = list(
+            dict.fromkeys([*post.message_ids, *map(str, details.get("message_ids") or ())])
+        )
+        post.channel_ids = list(
+            dict.fromkeys([*post.channel_ids, *map(str, details.get("channel_ids") or ())])
+        )
+    return list(posts.values())
+
+
+def _deleted_line(posts: list[_Deleted]) -> str | None:
+    """The summary's **Deleted:** line: what each post was."""
+    if not posts:
+        return None
+    named = [post.words() for post in posts[:DELETED_POSTS]]
+    more = len(posts) - len(named)
+    text = "; ".join(named) + (f"; and {more} more" if more > 0 else "")
+    return shorten(f"**Deleted:** {text}", DELETED_LINE_LIMIT)
+
+
 def _lead(facts: ReportFacts, reasons: list[str]) -> str:
     """The summary's opening: the strongest ``summary`` entry (newest among
     equals), so a later unknown verdict never overwrites a confirmed one;
@@ -477,6 +542,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     effects: list[_Line] = []
     given: list[str] = []
     held: set[str] = set()
+    posts = deleted_posts(facts)
     for op in facts.operations:
         if _idle(op):
             continue
@@ -493,6 +559,13 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             if op.kind in _SANCTIONS and op.reason:
                 text += f": {sanitize(op.reason, 200)}"
                 given.append(_norm(op.reason))
+            if op.kind in t.CLEANUP_KINDS:
+                # What it deleted, on the first delete of each post (#378).
+                removed = set(op.deleted or op.message_ids)
+                for post in posts:
+                    if not post.shown and removed & set(post.message_ids):
+                        post.shown = True
+                        text += f" \u2014 {post.words()}"
             rank, tag = _DONE, _TAG_DONE
         else:
             text = f"{_who(op)}: {_effect_words(facts.guild_id, op)}: "
@@ -572,6 +645,9 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         sum(1 for line in effects if line.tag == _TAG_PINNED),
         held,
     )
+    deleted_line = _deleted_line(posts)
+    if deleted_line is not None:
+        summary += "\n" + deleted_line
 
     tail: list[str] = []
     if facts.has_transcript:

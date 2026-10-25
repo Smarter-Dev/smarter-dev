@@ -23,6 +23,9 @@ What this adds is the coordinator's side of the old actors' behaviour:
   report's timeline shows the timeout, its upgrade or its lift (#333).
 * **A failed evaluation after a hold** (:meth:`Executor.evaluation_failed`):
   a line for moderators and a closing notice.
+* **What was deleted** (#378): once a reported decision's removals land,
+  a one-line description of the message (and its copies) is written to the
+  incident in the background (:mod:`.summary`); nothing waits for it.
 
 **The fence.** Each step reads the guild's ownership again first and acts only
 while the coordinator still owns the guild at the generation the decision was
@@ -74,6 +77,9 @@ from smarter_dev.bot.moderation_coordinator.ownership import Ownership
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
 from smarter_dev.bot.moderation_coordinator.policy import load_policy
+from smarter_dev.bot.moderation_coordinator.summary import Deletion
+from smarter_dev.bot.moderation_coordinator.summary import DeletionSummaries
+from smarter_dev.bot.moderation_coordinator.summary import deleted_of_post
 from smarter_dev.bot.spam_engine import analyze_message_content
 from smarter_dev.bot.spam_engine import format_scam_log_entry
 from smarter_dev.bot.spam_engine import format_warning_message
@@ -296,16 +302,21 @@ class Executor:
         *,
         ownership: Callable[[str], Awaitable[Ownership]] = load_ownership,
         policies: Callable[[str], Awaitable[GuildPolicy]] = load_policy,
+        summaries: DeletionSummaries | None = None,
     ) -> None:
         self._gateway_for = gateway_for
         self.messenger = messenger
         self._ownership = ownership
         self._policies = policies
+        #: Describes deleted messages for the report; None writes no lines.
+        self.summaries = summaries
         #: Holds placed and not yet resolved: (guild, author, post key).
         self._holds: dict[tuple[str, str, str], _Hold] = {}
 
     @classmethod
-    def for_bot(cls, bot: Any) -> Executor:
+    def for_bot(
+        cls, bot: Any, *, summaries: DeletionSummaries | None = None
+    ) -> Executor:
         from smarter_dev.bot.moderation_port import bot_gateway
 
         return cls(
@@ -313,7 +324,13 @@ class Executor:
                 bot, extra_role_ids=policy.staff_exempt_role_ids
             ),
             Messenger(bot),
+            summaries=summaries,
         )
+
+    async def drain_summaries(self) -> None:
+        """Wait for the deletion lines still being written (tests, shutdown)."""
+        if self.summaries is not None:
+            await self.summaries.drain()
 
     # ------------------------------------------------------------------
     # The fence
@@ -730,6 +747,7 @@ class Executor:
             if outcome.kind in gw.CLEANUP_KINDS and outcome.applied
             for message_id in outcome.deleted
         }
+        self._describe(evaluation, gateway, trigger, result, targets, deleted)
         for target in targets:
             await self._tell(gateway, trigger, result, target, facts, policy, deleted)
         await self._scam_log(facts, policy, targets, deleted)
@@ -747,6 +765,48 @@ class Executor:
                 hold.channel_id, _closing(provisional, evaluation)
             )
         return result, True
+
+    def _describe(
+        self,
+        evaluation: Evaluation,
+        gateway,
+        trigger: Trigger,
+        result: gw.ActResult,
+        targets: list[TargetDecision],
+        deleted: set[str],
+    ) -> None:
+        """Start the report's line for what this decision deleted of the
+        post (the message and its copies), once the removals landed. Only
+        for a reported decision: a removal no report shows (bump-channel
+        chatter, a blocked file type) is not described."""
+        if (
+            self.summaries is None
+            or result.incident_id is None
+            or trigger.report_channel_id is None
+        ):
+            return
+        facts = evaluation.facts
+        channels = {
+            item.message_id: item.channel_id for t in targets for item in t.cleanup
+        }
+        message_ids, channel_ids = deleted_of_post(
+            facts, evaluation.copy_ids, deleted, channels
+        )
+        if not message_ids:
+            return
+        self.summaries.schedule(
+            Deletion(
+                facts=facts,
+                key=evaluation.key,
+                summary=evaluation.classifier.summary,
+                message_ids=message_ids,
+                channel_ids=channel_ids,
+            ),
+            gateway,
+            result.incident_id,
+            source=ACTOR,
+            report_channel_id=trigger.report_channel_id,
+        )
 
     # ------------------------------------------------------------------
     # Member-facing messages

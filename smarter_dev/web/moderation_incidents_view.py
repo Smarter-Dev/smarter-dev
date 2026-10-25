@@ -49,6 +49,8 @@ OUTCOME_OF = {
     gw.CLAIMED: UNKNOWN,
 }
 #: Entries whose text is the system's own words, safe to show in a list.
+#: A deletion summary is a model's, but written to be shown (defanged, no
+#: slurs quoted) and kept with the incident (#378).
 SYSTEM_ENTRY_KINDS = (
     gw.ENTRY_REASON,
     gw.ENTRY_NOTE,
@@ -56,6 +58,7 @@ SYSTEM_ENTRY_KINDS = (
     gw.ENTRY_DELIVERY,
     gw.ENTRY_HISTORY,
     gw.ENTRY_SUMMARY,
+    gw.ENTRY_DELETED_SUMMARY,
 )
 LIST_LIMIT = 50
 

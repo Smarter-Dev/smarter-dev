@@ -81,6 +81,12 @@ ENTRY_TRANSCRIPT = "transcript"
 #: ``display_name``); not a timeline line.
 ENTRY_MEMBER = "member"
 ENTRY_ASSESSMENT = "assessment"
+#: What a deleted message was, in a model's one line (#378): written from
+#: what the bot saw before the delete, never the message itself. ``details``:
+#: ``key`` (the copies' shared content hash, shortened), ``message_ids``,
+#: ``channel_ids``, ``status`` (``ok`` or ``unavailable``). Kept with the
+#: incident; a deletion request removes it with the evidence.
+ENTRY_DELETED_SUMMARY = "deleted_summary"
 
 _WHITESPACE = re.compile(r"\s+")
 
