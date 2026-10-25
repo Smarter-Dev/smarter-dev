@@ -261,11 +261,13 @@ async def test_admin_fire_job_gives_a_script_claims_and_no_sanctions(
     assert await redis.keys("hhold:*") == []
 
 
-async def test_admin_fire_job_hands_the_actor_the_guilds_staff_roles(
+async def test_admin_fire_job_without_a_policy_hands_the_actor_no_extra_roles(
     monkeypatch, test_engine, redis
 ):
-    """#255: the fire's actor protects the roles the guild's filters treat
-    as staff (``staff_exempt_role_ids``); left unread it refuses everything."""
+    """#255/#242: the fire's actor is handed the guild's extra staff roles,
+    read (an unread list refuses everything); without a moderation policy
+    there are none: the old ``staff_exempt_role_ids`` column is gone, and
+    the built-in staff rule still protects."""
     handler_id = uuid4()
     async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
         session.add(
@@ -281,9 +283,7 @@ async def test_admin_fire_job_hands_the_actor_the_guilds_staff_roles(
                 created_by_admin="A1",
             )
         )
-        session.add(
-            ModerationFilterConfig(guild_id="G1", staff_exempt_role_ids=["R9", 77])
-        )
+        session.add(ModerationFilterConfig(guild_id="G1", content_filter_enabled=True))
         await session.commit()
 
     built = []
@@ -312,7 +312,7 @@ async def test_admin_fire_job_hands_the_actor_the_guilds_staff_roles(
         _job(),
     )
 
-    assert [kwargs["staff_exempt_role_ids"] for kwargs in built] == [("R9", "77")]
+    assert [kwargs["staff_exempt_role_ids"] for kwargs in built] == [()]
 
 
 #: Discord-shaped: the policy accepts only snowflakes.
@@ -323,8 +323,8 @@ POLICY_ROLE_B = "1100000000000000002"
 async def test_admin_fire_job_under_a_policy_hands_the_actor_its_protected_roles(
     monkeypatch, test_engine, redis
 ):
-    """#241: once a guild has a moderation policy its protected roles are the
-    staff roles; the filter config's old column is no longer saved, nor read."""
+    """#241: a guild's moderation policy's protected roles are the staff
+    roles."""
     handler_id = uuid4()
     document = mp.default_document().as_json()
     document["protected_role_ids"] = [POLICY_ROLE_A, POLICY_ROLE_B]
@@ -342,7 +342,7 @@ async def test_admin_fire_job_under_a_policy_hands_the_actor_its_protected_roles
                 created_by_admin="A1",
             )
         )
-        session.add(ModerationFilterConfig(guild_id="G1", staff_exempt_role_ids=["R9"]))
+        session.add(ModerationFilterConfig(guild_id="G1"))
         await session.commit()
         await store.save_policy(
             session, "G1", document, base_revision=None, by="t", source="admin"

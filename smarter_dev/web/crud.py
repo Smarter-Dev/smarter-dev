@@ -43,10 +43,8 @@ from smarter_dev.web.models import (
     ScheduledMessage,
     RepeatingMessage,
     AuditLogConfig,
-    AttachmentFilterConfig,
     ModerationFilterConfig,
     GuildRulesConfig,
-    ModerationConfig,
     ModerationAction,
     ChannelModelOverride,
     ProactiveAgentHistory,
@@ -4896,158 +4894,11 @@ class AuditLogConfigOperations:
             raise DatabaseOperationError(f"Failed to delete audit log config: {e}") from e
 
 
-class AttachmentFilterConfigOperations:
-    """Database operations for attachment filter configuration management.
-
-    Handles CRUD operations for guild-specific attachment filtering settings.
-    Manages blocked file extensions and action configuration.
-    """
-
-    async def get_config(
-        self,
-        session: AsyncSession,
-        guild_id: str
-    ) -> Optional[AttachmentFilterConfig]:
-        """Get attachment filter configuration for a guild.
-
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-
-        Returns:
-            AttachmentFilterConfig or None if not configured
-
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = select(AttachmentFilterConfig).where(AttachmentFilterConfig.guild_id == guild_id)
-            result = await session.execute(stmt)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get attachment filter config: {e}") from e
-
-    async def get_or_create_config(
-        self,
-        session: AsyncSession,
-        guild_id: str
-    ) -> AttachmentFilterConfig:
-        """Get or create attachment filter configuration for a guild.
-
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-
-        Returns:
-            AttachmentFilterConfig: Guild configuration (existing or newly created)
-
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            config = await self.get_config(session, guild_id)
-            if config is None:
-                config = AttachmentFilterConfig(guild_id=guild_id)
-                session.add(config)
-                await session.flush()
-            return config
-        except DatabaseOperationError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get or create attachment filter config: {e}") from e
-
-    async def update_config(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        **updates
-    ) -> AttachmentFilterConfig:
-        """Update attachment filter configuration for a guild.
-
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-            **updates: Fields to update
-
-        Returns:
-            AttachmentFilterConfig: Updated configuration
-
-        Raises:
-            DatabaseOperationError: If update fails
-        """
-        try:
-            config = await self.get_or_create_config(session, guild_id)
-
-            # Update fields
-            for key, value in updates.items():
-                if hasattr(config, key):
-                    setattr(config, key, value)
-
-            config.updated_at = datetime.now(timezone.utc)
-            await session.flush()
-
-            return config
-        except DatabaseOperationError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to update attachment filter config: {e}") from e
-
-    async def get_active_configs(
-        self,
-        session: AsyncSession
-    ) -> List[AttachmentFilterConfig]:
-        """Get all active attachment filter configurations.
-
-        Args:
-            session: Database session
-
-        Returns:
-            List of active AttachmentFilterConfig objects
-
-        Raises:
-            DatabaseOperationError: If query fails
-        """
-        try:
-            stmt = select(AttachmentFilterConfig).where(
-                AttachmentFilterConfig.is_active == True
-            )
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get active attachment filter configs: {e}") from e
-
-    async def delete_config(
-        self,
-        session: AsyncSession,
-        guild_id: str
-    ) -> bool:
-        """Delete attachment filter configuration for a guild.
-
-        Args:
-            session: Database session
-            guild_id: Discord guild snowflake ID
-
-        Returns:
-            bool: True if deleted, False if not found
-
-        Raises:
-            DatabaseOperationError: If deletion fails
-        """
-        try:
-            result = await session.execute(
-                delete(AttachmentFilterConfig).where(AttachmentFilterConfig.guild_id == guild_id)
-            )
-            return result.rowcount > 0
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to delete attachment filter config: {e}") from e
-
-
 class ModerationFilterConfigOperations:
-    """Database operations for the core moderation filter configuration.
+    """Database operations for the per-guild content filter configuration.
 
-    Handles CRUD for the per-guild content filters (blocked TLDs, invites,
-    webhook killer) and the spam engine thresholds shared by the bot and the
-    admin configuration UI.
+    Handles CRUD for the content filters (blocked TLDs, invites, webhook
+    killer) shared by the bot and the admin configuration UI.
     """
 
     async def get_config(
@@ -5089,7 +4940,7 @@ class ModerationFilterConfigOperations:
 
         Returns:
             ModerationFilterConfig: Guild configuration (existing or newly created
-            with the legacy defaults)
+            with the defaults: every filter off)
 
         Raises:
             DatabaseOperationError: If query fails
@@ -5116,7 +4967,7 @@ class ModerationFilterConfigOperations:
     ) -> ModerationFilterConfig:
         """Update the moderation filter configuration for a guild.
 
-        Creates the config with legacy defaults first when the guild has none.
+        Creates the config with its defaults first when the guild has none.
 
         Args:
             session: Database session
@@ -5151,23 +5002,20 @@ class ModerationFilterConfigOperations:
         self,
         session: AsyncSession
     ) -> list[ModerationFilterConfig]:
-        """Get every config with the content filters or the spam engine enabled.
+        """Get every config with the content filters enabled.
 
         Args:
             session: Database session
 
         Returns:
-            List of ModerationFilterConfig objects with at least one subsystem on
+            List of ModerationFilterConfig objects with the content filter on
 
         Raises:
             DatabaseOperationError: If query fails
         """
         try:
             stmt = select(ModerationFilterConfig).where(
-                or_(
-                    ModerationFilterConfig.content_filter_enabled.is_(True),
-                    ModerationFilterConfig.spam_engine_enabled.is_(True),
-                )
+                ModerationFilterConfig.content_filter_enabled.is_(True)
             )
             result = await session.execute(stmt)
             return list(result.scalars().all())
@@ -5339,77 +5187,6 @@ class GuildRulesConfigOperations:
             raise DatabaseOperationError(
                 f"Failed to delete guild rules config: {e}"
             ) from e
-
-
-class ModerationConfigOperations:
-    """Database operations for moderation configuration management.
-
-    Handles CRUD operations for guild-specific AI moderation settings including
-    monitored roles, moderation instructions, and enabled tools.
-    """
-
-    async def get_config(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-    ) -> Optional[ModerationConfig]:
-        """Get moderation config for a guild."""
-        try:
-            stmt = select(ModerationConfig).where(ModerationConfig.guild_id == guild_id)
-            result = await session.execute(stmt)
-            return result.scalar_one_or_none()
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get moderation config: {e}") from e
-
-    async def get_or_create_config(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-    ) -> ModerationConfig:
-        """Get or create moderation config for a guild."""
-        try:
-            config = await self.get_config(session, guild_id)
-            if config is None:
-                config = ModerationConfig(guild_id=guild_id)
-                session.add(config)
-                await session.flush()
-            return config
-        except DatabaseOperationError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get or create moderation config: {e}") from e
-
-    async def update_config(
-        self,
-        session: AsyncSession,
-        guild_id: str,
-        **updates,
-    ) -> ModerationConfig:
-        """Update moderation config for a guild."""
-        try:
-            config = await self.get_or_create_config(session, guild_id)
-            for key, value in updates.items():
-                if hasattr(config, key):
-                    setattr(config, key, value)
-            config.updated_at = datetime.now(timezone.utc)
-            await session.flush()
-            return config
-        except DatabaseOperationError:
-            raise
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to update moderation config: {e}") from e
-
-    async def get_all_active_configs(
-        self,
-        session: AsyncSession,
-    ) -> list[ModerationConfig]:
-        """Get all active moderation configs (for bot startup cache)."""
-        try:
-            stmt = select(ModerationConfig).where(ModerationConfig.is_active == True)
-            result = await session.execute(stmt)
-            return list(result.scalars().all())
-        except Exception as e:
-            raise DatabaseOperationError(f"Failed to get active moderation configs: {e}") from e
 
 
 class ModerationActionOperations:

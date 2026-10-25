@@ -9,9 +9,10 @@
 #   kubectl -n smarter-dev logs job/smarter-dev-moderation-policy-dry-run
 #   kubectl -n smarter-dev delete job smarter-dev-moderation-policy-dry-run
 # Exit status 2 (the Job fails) means refused: nothing was changed.
+# The import writes revision 1 with every rule off (#242: the old config
+# tables are gone); an admin turns rules on from the Moderation page.
 # Undo an import: delete the guild's moderation_policies and
-# moderation_policy_revisions rows (a CRUD Job); the guild then runs on the old
-# config tables again, which the import never changes.
+# moderation_policy_revisions rows (a CRUD Job); the guild then runs nothing.
 apiVersion: batch/v1
 kind: Job
 metadata:

@@ -17,7 +17,6 @@ from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import SCAM
-from smarter_dev.bot.moderation_coordinator.policy import SCAM_BANNER_HANDLER
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
 from smarter_dev.bot.moderation_coordinator.policy import load_policy
 from smarter_dev.bot.moderation_coordinator.replay import ModelCalls
@@ -553,13 +552,14 @@ def test_author_history_before_this_message():
 # -- the policy it reads ------------------------------------------------------
 
 
-async def test_policy_follows_the_legacy_actors_switches(tmp_path):
+async def test_a_guild_without_a_policy_gets_no_rules():
+    """The old config tables are gone (#242): with no policy, whatever else
+    the guild has (the content filter's row, admin handlers), nothing runs."""
     async with sessions() as session:
-        session.add(ModerationFilterConfig(guild_id=GUILD, spam_engine_enabled=True))
-        for name, script, enabled, channels in (
-            (SCAM_BANNER_HANDLER, "pass\n", True, []),
-            ("edit-ping-catch", "pass\n", False, []),
-            ("disboard-bump-tracker", "pass\n", True, ["555"]),
+        session.add(ModerationFilterConfig(guild_id=GUILD, content_filter_enabled=True))
+        for name, channels in (
+            ("scam-banner", []),
+            ("disboard-bump-tracker", ["555"]),
         ):
             session.add(
                 AdminHandler(
@@ -569,28 +569,24 @@ async def test_policy_follows_the_legacy_actors_switches(tmp_path):
                     settings={},
                     channel_ids=channels,
                     description="d",
-                    script=script,
+                    script="pass\n",
                     created_by_admin="A",
-                    enabled=enabled,
+                    enabled=True,
                 )
             )
         await session.commit()
 
-    loaded = await load_policy(GUILD)
-    assert loaded.spam is not None and loaded.ring is not None
-    assert loaded.attachments is None  # no attachment config row: off
-    assert loaded.scam_gate
-    assert "scam_banner_matches_reference" not in loaded.as_record()
-    assert loaded.edit_ping is False
-    assert loaded.bump_channel_ids == frozenset({"555"})
-
-
-async def test_a_guild_with_nothing_configured_runs_only_the_ring():
-    loaded = await load_policy("1")
-    assert loaded.spam is None and loaded.attachments is None
-    assert loaded.ring is not None  # the ring's own default: on
-    assert not loaded.scam_gate and not loaded.edit_ping
-    assert loaded.bump_channel_ids == frozenset()
+    for guild_id in (GUILD, "1"):
+        loaded = await load_policy(guild_id)
+        assert loaded.revision is None
+        assert loaded.spam is None and loaded.attachments is None
+        assert loaded.ring is None
+        assert not loaded.scam_gate and not loaded.edit_ping
+        assert not loaded.mass_mention
+        assert loaded.bump_channel_ids == frozenset()
+        assert loaded.enforced == frozenset()
+        assert loaded.report_channel_id is None
+        assert loaded.as_record()["enforced"] == []
 
 
 # -- retention and privacy ----------------------------------------------------

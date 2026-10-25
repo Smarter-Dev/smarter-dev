@@ -54,12 +54,10 @@ GATEWAY_TABLES = [
     models.ModerationShadowDecision.__table__,
     models.MemberActivity.__table__,
     models.ModerationFilterConfig.__table__,
-    models.AttachmentFilterConfig.__table__,
     models.AdminHandler.__table__,
-    # The cutover: who owns the guild, and what the switch turns off.
+    # The cutover: who owns the guild.
     models.ModerationOwnership.__table__,
     models.ExtensionInstall.__table__,
-    models.ModerationConfig.__table__,
     # The versioned policy (#241).
     models.ModerationPolicy.__table__,
     models.ModerationPolicyRevision.__table__,

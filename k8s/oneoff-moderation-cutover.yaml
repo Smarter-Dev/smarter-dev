@@ -2,7 +2,9 @@
 # workflow; run by hand with the deployed website tag, one command per Job:
 #   <ARGS> = "status --guild 644299523686006834"           (read only)
 #   <ARGS> = "switch --guild 644299523686006834 --by <who>"
-#   (There is no rollback: the legacy actors were removed after the cutover.)
+#   (switch writes only the moderation_ownership row. There is no rollback:
+#   the legacy actors were removed after the cutover. Then run the policy
+#   import Job, k8s/oneoff-moderation-policy-import.yaml: every rule off.)
 #   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<NAME>|status|' -e 's|<ARGS>|status --guild 644299523686006834|' \
 #     k8s/oneoff-moderation-cutover.yaml | kubectl apply -f -
 #   kubectl -n smarter-dev wait --for=condition=complete --timeout=120s job/smarter-dev-moderation-cutover-status

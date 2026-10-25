@@ -312,8 +312,9 @@ class ModerationPolicyAdminController(Controller):
         if stored is None:
             flash_error(
                 request,
-                "This server has no moderation policy yet. It is imported from "
-                "the current settings by the import Job; nothing was saved.",
+                "This server has no moderation policy yet. The import Job "
+                "creates one (every rule off) once the coordinator owns the "
+                "server; nothing was saved.",
             )
             return redirect
         base = str(form.get("base_revision", "")).strip()
@@ -379,13 +380,12 @@ class ModerationPolicyAdminController(Controller):
                 status_code=400,
             )
         # Only the import creates a policy: it refuses a guild the coordinator
-        # does not own, and a policy moves triage, the content filter and the
-        # handler scripts' staff roles off the old columns.
+        # does not own.
         if await store.read_policy(db_session, guild_id) is None:
             return Response(
                 {
-                    "error": "this server has no moderation policy yet; it is "
-                    "imported from the current settings by the import Job",
+                    "error": "this server has no moderation policy yet; the "
+                    "import Job creates one once the coordinator owns it",
                     "revision": None,
                 },
                 status_code=404,

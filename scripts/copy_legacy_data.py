@@ -81,8 +81,12 @@ LEGACY_SOURCE_TABLE_NAMES: frozenset[str] = frozenset({
 # NEVER copied: ``skrift.api_keys`` is Skrift core's own (different-shaped)
 # table — the authoritative bot keys after phase 01. Legacy key rows die with
 # bc_websites in phase 05.
-# ``security_logs`` was dropped in #81 (security events are logs now).
-COPY_EXCLUDED_TABLE_NAMES: frozenset[str] = frozenset({"api_keys", "security_logs"})
+# ``security_logs`` was dropped in #81 (security events are logs now), and
+# ``attachment_filter_configs`` in #242 (the attachment rule is the moderation
+# policy's).
+COPY_EXCLUDED_TABLE_NAMES: frozenset[str] = frozenset(
+    {"api_keys", "security_logs", "attachment_filter_configs"}
+)
 
 COPY_TABLE_NAMES: frozenset[str] = LEGACY_SOURCE_TABLE_NAMES - COPY_EXCLUDED_TABLE_NAMES
 

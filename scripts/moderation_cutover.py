@@ -1,13 +1,14 @@
 """Switch one guild's moderation from the legacy actors to the coordinator.
 
-    status   --guild <id>               read only: owner, generation, every
-                                        legacy switch and handler row, and
-                                        whether the switch saved legacy state
-    switch   --guild <id> --by <who>    hand the guild to the coordinator and
-                                        turn the legacy switches off, in one
-                                        transaction (refused if already done)
+    status   --guild <id>               read only: owner, generation and the
+                                        guild's moderation policy revision
+    switch   --guild <id> --by <who>    hand the guild to the coordinator:
+                                        writes the ownership row only
+                                        (refused if already done)
 
 There is no rollback: the legacy actors were removed after the #240 cutover.
+A guild switched without a moderation policy runs nothing until the import
+(``scripts/moderation_policy_import.py``) writes revision 1, every rule off.
 
 Run in the cluster as a Job (``k8s/oneoff-moderation-cutover.yaml``). The
 logic and its guarantees are in ``smarter_dev/web/moderation_cutover.py``.
@@ -48,8 +49,8 @@ async def main(argv: list[str] | None = None) -> int:
                 result = await cutover.status(session, args.guild)
                 await session.rollback()
             else:  # switch
-                # Only a guild the bot listens to can be handed over; anything
-                # else would turn the legacy actors off with nobody acting.
+                # Only a guild the bot listens to can be handed over; for any
+                # other the coordinator would never see a message.
                 listening = {
                     part.strip()
                     for part in os.getenv(GUILDS_ENV_VAR, "").split(",")

@@ -37,7 +37,6 @@ from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import PastAction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import LEGACY
-from smarter_dev.bot.moderation_coordinator.ownership import RULES
 from smarter_dev.bot.moderation_coordinator.ownership import Ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
 from smarter_dev.bot.moderation_coordinator.replay import ModelCalls
@@ -153,9 +152,7 @@ def harness(case: ReplayCase, *, extra_messages=(), owner_generation: int = 1):
     owner = {"owner": COORDINATOR, "generation": owner_generation}
 
     async def ownership(guild_id):
-        return Ownership(
-            guild_id, owner["owner"], owner["generation"], frozenset(RULES)
-        )
+        return Ownership(guild_id, owner["owner"], owner["generation"])
 
     executor = Executor(lambda _policy: gateway, messenger, ownership=ownership)
     calls = ModelCalls()

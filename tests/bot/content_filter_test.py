@@ -47,8 +47,9 @@ CHANNEL_ID = 777
 CATEGORY_ID = 888
 AUTHOR_ID = 111
 MESSAGE_ID = 999
-STAFF_ROLE_ID = 222
-MOD_LOG_CHANNEL_ID = 333
+#: The guild's policy's protected role and report channel (``filter_env``).
+STAFF_ROLE_ID = 1100000000000002222
+MOD_LOG_CHANNEL_ID = 1100000000000003333
 BOT_USER_ID = 444
 OWNER_ID = 1
 #: Hardcoded in the shared staff rule; not in the guild's configured exemptions.
@@ -445,7 +446,6 @@ def _config(**overrides) -> ModerationFilterConfig:
         "blocked_tlds": [".gay"],
         "invite_filter_enabled": True,
         "invite_filter_exempt_category_ids": [],
-        "staff_exempt_role_ids": [str(STAFF_ROLE_ID)],
         "webhook_killer_enabled": True,
         "mod_log_channel_id": str(MOD_LOG_CHANNEL_ID),
     }
@@ -454,9 +454,12 @@ def _config(**overrides) -> ModerationFilterConfig:
 
 
 @pytest.fixture
-def filter_env(monkeypatch, moderation_gateway_db):
+async def filter_env(monkeypatch, moderation_gateway_db):
     """Stubs the config read and the mod_action dispatch; the gateway is real,
-    and so is the moderation policy read (none unless a test saves one)."""
+    and so is the moderation policy read. The guild has a policy protecting
+    ``STAFF_ROLE_ID`` and reporting to ``MOD_LOG_CHANNEL_ID`` (since #242 the
+    only source of both); :func:`_save_policy` replaces it, ``_no_policy``
+    removes it."""
     from smarter_dev.bot import moderation_port
 
     state = SimpleNamespace(config=_config(), dispatched=[])
@@ -483,6 +486,11 @@ def filter_env(monkeypatch, moderation_gateway_db):
     monkeypatch.setattr(content_filter, "get_db_session_context", fake_session_context)
     state.rows = rows
     state.database = moderation_gateway_db
+    await _save_policy(
+        state,
+        protected_role_ids=[str(STAFF_ROLE_ID)],
+        destinations={"report_channel_id": str(MOD_LOG_CHANNEL_ID)},
+    )
     return state
 
 
@@ -575,8 +583,8 @@ async def test_filter_delete_dispatches_with_the_bot_so_it_reaches_the_event_log
     assert dispatched_bot is bot
 
 
-async def test_blocked_tld_without_mod_log_channel_still_deletes(filter_env):
-    filter_env.config = _config(mod_log_channel_id=None)
+async def test_blocked_tld_without_a_report_channel_still_deletes(filter_env):
+    await _save_policy(filter_env, protected_role_ids=[str(STAFF_ROLE_ID)])
     rest = _FakeRest()
 
     await check_content_filters(
@@ -613,6 +621,7 @@ POLICY_REPORT_CHANNEL_ID = 1100000000000007777
 
 
 async def _save_policy(filter_env, **changes) -> None:
+    """The guild's policy becomes the default document with ``changes``."""
     document = mp.default_document().as_json()
     for section, values in changes.items():
         if isinstance(values, dict):
@@ -620,14 +629,51 @@ async def _save_policy(filter_env, **changes) -> None:
         else:
             document[section] = values
     async with filter_env.database() as session:
+        current = await store.read_policy(session, str(GUILD_ID))
         await store.save_policy(
             session,
             str(GUILD_ID),
             document,
-            base_revision=None,
+            base_revision=current.revision if current else None,
             by="test",
             source=store.SOURCE_ADMIN,
         )
+
+
+async def _no_policy(filter_env) -> None:
+    from sqlalchemy import delete
+
+    from smarter_dev.web.models import ModerationPolicy
+
+    async with filter_env.database() as session:
+        await session.execute(
+            delete(ModerationPolicy).where(ModerationPolicy.guild_id == str(GUILD_ID))
+        )
+        await session.commit()
+
+
+async def test_without_a_policy_the_filter_runs_with_no_extra_staff_and_no_report(
+    filter_env,
+):
+    """#242: the filter still runs from its own row, but a guild without a
+    policy protects only by the built-in staff rule (the old
+    ``staff_exempt_role_ids`` is gone) and reports nowhere (the old report
+    channels, ``mod_log_channel_id`` among them, are not read)."""
+    await _no_policy(filter_env)
+    # The row the filter runs from, stored too, with its old mod log channel.
+    async with filter_env.database() as session:
+        session.add(_config())
+        await session.commit()
+    rest = _FakeRest(roles={STAFF_ROLE_ID: hikari.Permissions.SEND_MESSAGES})
+    event = _make_event("free stuff https://evil.gay/free", role_ids=(STAFF_ROLE_ID,))
+
+    result = await check_content_filters(_bot(rest=rest), event)
+
+    assert result.message_deleted is True
+    assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
+    assert {m[0] for m in rest.created_messages} == {CHANNEL_ID}
+    [action] = await filter_env.rows()
+    assert action.actor == "content_filter"
 
 
 @pytest.mark.parametrize(
@@ -636,9 +682,8 @@ async def _save_policy(filter_env, **changes) -> None:
 async def test_under_a_policy_its_protected_roles_are_staff_not_the_old_column(
     filter_env, role_id, protected
 ):
-    """#241: the filter form no longer saves ``staff_exempt_role_ids`` once a
-    guild has a policy, so the roles edited on the policy page must reach the
-    filter, and the stale column (``STAFF_ROLE_ID``) must not."""
+    """The roles edited on the policy page are the filter's staff; a role
+    the policy no longer lists (``STAFF_ROLE_ID``) is not."""
     await _save_policy(filter_env, protected_role_ids=[str(POLICY_ROLE_ID)])
     rest = _FakeRest(roles={role_id: hikari.Permissions.SEND_MESSAGES})
     event = _make_event(EVERY_FILTER, role_ids=(role_id,))
@@ -656,9 +701,9 @@ async def test_under_a_policy_its_protected_roles_are_staff_not_the_old_column(
 async def test_under_a_policy_the_report_goes_to_its_channel_not_the_old_ones(
     filter_env, reporting
 ):
-    """#241: under a policy the incident report goes to the policy's
+    """The incident report goes to the policy's
     ``destinations.report_channel_id``, and nowhere while its reporting is
-    off; the filter row's ``mod_log_channel_id`` is no longer read for it."""
+    off; the filter row's ``mod_log_channel_id`` is not read for it."""
     await _save_policy(
         filter_env,
         destinations={"report_channel_id": str(POLICY_REPORT_CHANNEL_ID)},
@@ -687,7 +732,7 @@ def _untouched(result: ContentFilterResult, rest: _FakeRest, filter_env) -> None
 
 async def test_hardcoded_staff_role_is_exempt_without_any_configured_role(filter_env):
     # A staff-role moderator with only Moderate Members, and no exempt roles set.
-    filter_env.config = _config(staff_exempt_role_ids=[])
+    await _save_policy(filter_env)
     rest = _FakeRest(roles={HARDCODED_STAFF_ROLE_ID: hikari.Permissions.MODERATE_MEMBERS})
     event = _make_event(EVERY_FILTER, role_ids=(HARDCODED_STAFF_ROLE_ID,))
 

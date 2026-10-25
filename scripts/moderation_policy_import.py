@@ -1,10 +1,9 @@
-"""Write revision 1 of a guild's moderation policy from the config it runs on.
+"""Write revision 1 of a guild's moderation policy: every rule off.
 
     status  --guild <id>               read only: the guild's policy revision,
                                        or none, and who has loaded which
     dry-run --guild <id>               read only: the document the import
-                                       would write, where each part came from,
-                                       and anything to check first
+                                       would write
     import  --guild <id> --by <who>    write it as revision 1 (refused if the
                                        guild has a policy, or the coordinator
                                        does not own it)

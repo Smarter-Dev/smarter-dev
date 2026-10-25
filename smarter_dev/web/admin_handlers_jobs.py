@@ -127,7 +127,7 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         # see a consistent view; changed keys are persisted per key after.
         guild_memory = await load_guild_memory(session, guild_id)
         # The roles the bot's filters treat as staff (the policy's protected
-        # roles when the guild has one), so a script can neither strip one
+        # roles; none without a policy), so a script can neither strip one
         # from a moderator nor act on its holders.
         staff_exempt_role_ids = await protected_role_ids(session, guild_id)
 

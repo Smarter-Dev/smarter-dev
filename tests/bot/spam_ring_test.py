@@ -18,7 +18,6 @@ import hikari
 import pytest
 
 from smarter_dev.bot import spam_ring
-from smarter_dev.web.models import ModerationFilterConfig
 
 GUILD_ID = 100
 CHANNEL_ID = 200
@@ -283,29 +282,12 @@ def test_a_departed_young_account_counts_as_new_and_an_old_one_does_not():
     assert candidates == ("ad", "1")
 
 
-def test_settings_clamp_the_timeout_to_discords_limit():
-    config = ModerationFilterConfig(guild_id="1", spam_ring_timeout_seconds=40 * 86400)
-    settings = spam_ring.SpamRingSettings.from_config(config)
-    assert settings.timeout_seconds == spam_ring.DISCORD_MAX_TIMEOUT_SECONDS
-
-
-def test_settings_report_channel_fallback_order():
-    config = ModerationFilterConfig(guild_id="1", mod_log_channel_id="3")
-    assert spam_ring.SpamRingSettings.from_config(config, "4").report_channel_id == "3"
-    config = ModerationFilterConfig(guild_id="1")
-    assert spam_ring.SpamRingSettings.from_config(config, "4").report_channel_id == "4"
-    assert spam_ring.SpamRingSettings.from_config(config).report_channel_id is None
-
-
-def test_defaults_turn_the_detector_on():
-    settings = spam_ring.SpamRingSettings.from_config(
-        ModerationFilterConfig.get_defaults("1")
+def test_clamp_caps_the_timeout_at_discords_limit():
+    assert (
+        spam_ring.clamp_timeout_seconds(40 * 86400)
+        == spam_ring.DISCORD_MAX_TIMEOUT_SECONDS
     )
-    assert settings.enabled
-    assert settings.new_member_window == timedelta(days=2)
-    assert settings.timeout_seconds == 7 * 86400
-    assert settings.lookback == timedelta(minutes=60)
-    assert settings.followup == timedelta(minutes=15)
+    assert spam_ring.clamp_timeout_seconds(7 * 86400) == 7 * 86400
 
 
 # ---------------------------------------------------------------------------

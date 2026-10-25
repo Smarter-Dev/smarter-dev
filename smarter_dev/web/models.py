@@ -3061,184 +3061,16 @@ class AdventOfCodeThread(Base):
 
 
 
-class AttachmentFilterConfig(Base):
-    """Attachment filter configuration per guild for file type filtering.
-
-    Stores guild-specific settings for filtering message attachments based on
-    file extensions using a three-tier approach:
-    - Ignored extensions: Completely allowed, no action taken
-    - Warn extensions: Send a warning but don't delete
-    - All others (blocked): Delete message and send warning
-
-    Users with manage_messages permission are exempt from deletion (warning only).
-    """
-
-    __tablename__ = "attachment_filter_configs"
-
-    # Primary key
-    guild_id: Mapped[str] = mapped_column(
-        String,
-        primary_key=True,
-        doc="Discord guild (server) snowflake ID"
-    )
-
-    # Feature toggle
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        doc="Whether attachment filtering is enabled"
-    )
-
-    # Ignored file extensions - completely allowed, no action
-    ignored_extensions: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=list,
-        doc="List of ignored file extensions (e.g., ['.png', '.jpg']). No action taken."
-    )
-
-    # Warn file extensions - send warning but don't delete
-    warn_extensions: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=list,
-        doc="List of file extensions that trigger a warning only (e.g., ['.zip', '.rar'])."
-    )
-
-    # Custom message for warn-list files
-    warn_message: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        default=None,
-        doc="Custom message for warn-list files (supports {user}, {extension}, {filename} placeholders)"
-    )
-
-    # Custom message for blocked/deleted files
-    delete_message: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        default=None,
-        doc="Custom message for blocked files (supports {user}, {extension}, {filename} placeholders)"
-    )
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        doc="When this config was created"
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-        doc="When this config was last updated"
-    )
-
-    # Database constraints and indexes
-    __table_args__ = (
-        Index("ix_attachment_filter_configs_guild_id", "guild_id"),
-    )
-
-    def __init__(self, **kwargs):
-        """Initialize AttachmentFilterConfig with default values."""
-        now = datetime.now(timezone.utc)
-        kwargs.setdefault('created_at', now)
-        kwargs.setdefault('updated_at', now)
-        kwargs.setdefault('is_active', False)
-        kwargs.setdefault('ignored_extensions', [])
-        kwargs.setdefault('warn_extensions', [])
-        super().__init__(**kwargs)
-
-    @classmethod
-    def get_defaults(cls, guild_id: str) -> 'AttachmentFilterConfig':
-        """Get default configuration for a guild.
-
-        Args:
-            guild_id: Discord guild ID
-
-        Returns:
-            AttachmentFilterConfig instance with default values
-        """
-        return cls(guild_id=guild_id)
-
-    def get_message(self, user_mention: str, extension: str, filename: str, is_blocked: bool = True) -> str:
-        """Get the formatted message for warn or delete actions.
-
-        Args:
-            user_mention: The user mention string (e.g., <@123456>)
-            extension: The file extension
-            filename: The filename
-            is_blocked: True if the file was deleted (blocked), False if just warned
-
-        Returns:
-            Formatted message
-        """
-        if is_blocked:
-            if self.delete_message:
-                return self.delete_message.format(
-                    user=user_mention,
-                    extension=extension,
-                    filename=filename
-                )
-            return f"{user_mention}, your message was removed because the file type ({extension}) is not allowed. Please use an approved file format."
-        else:
-            if self.warn_message:
-                return self.warn_message.format(
-                    user=user_mention,
-                    extension=extension,
-                    filename=filename
-                )
-            return f"{user_mention}, your attachment ({extension}) requires caution. Please ensure you trust the source of this file."
-
-    def __repr__(self) -> str:
-        """String representation of the attachment filter config."""
-        return f"<AttachmentFilterConfig(guild_id='{self.guild_id}', active={self.is_active})>"
-
-
-#: Messaging platforms most often used as the landing page of a Discord scam
-#: lure. Seeded into every new ``moderation_filter_configs`` row so the
-#: scam-link heuristic works out of the box, and editable per guild afterwards
-#: without a deploy. Bare lowercase hostnames — no scheme, no path, no leading
-#: dot — because the engine compares them against a link's full host.
-DEFAULT_SCAM_LINK_DOMAINS: tuple[str, ...] = (
-    "t.me",
-    "telegram.me",
-    "telegram.dog",
-    "tlgrm.me",
-    "wa.me",
-    "chat.whatsapp.com",
-    "signal.me",
-    "signal.group",
-    "join.skype.com",
-    "kik.me",
-    "line.me",
-    "matrix.to",
-    "icq.im",
-)
-
-
-def default_scam_link_domains() -> list[str]:
-    """Return a fresh, mutable copy of the seeded scam-link domain list.
-
-    Used as the column default so no two rows — and no two
-    :meth:`ModerationFilterConfig.get_defaults` calls — ever share one list.
-    """
-    return list(DEFAULT_SCAM_LINK_DOMAINS)
-
-
 class ModerationFilterConfig(Base):
-    """Per-guild configuration for the core moderation filters and spam engine.
+    """Per-guild configuration for the bot-core content filters.
 
-    One row per guild, shared by three consumers:
-    - the content filters (blocked TLDs, Discord invites, webhook killer),
-    - the spam engine (rate / channel-spread / duplicate / mass-mention heuristics),
-    - the /admin/bot configuration UI.
+    One row per guild: blocked TLDs, Discord invites and the webhook killer
+    (:mod:`smarter_dev.bot.content_filter`), edited on the admin Content
+    Filters page. Every filter ships disabled.
 
-    Both subsystems ship disabled; every threshold carries the legacy bot's
-    value so enabling a subsystem reproduces the historical behaviour exactly.
+    The spam engine, spam ring, staff-role and report-channel columns this
+    table used to carry moved to the guild's moderation policy
+    (``moderation_policies``, #241) and were dropped in #242.
     """
 
     __tablename__ = "moderation_filter_configs"
@@ -3250,7 +3082,6 @@ class ModerationFilterConfig(Base):
         doc="Discord guild (server) snowflake ID"
     )
 
-    # --- Content filters (TLD / invite / webhook killer) ---
     content_filter_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -3262,22 +3093,6 @@ class ModerationFilterConfig(Base):
         nullable=False,
         default=list,
         doc="Blocked top-level domains including the leading dot (e.g. ['.gay', '.xxx'])"
-    )
-    scam_link_domains: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=default_scam_link_domains,
-        doc=(
-            "Hostnames whose links the scam-link heuristic treats as a lure, as "
-            "bare lowercase hostnames with no scheme, path or leading dot "
-            "(e.g. ['t.me', 'chat.whatsapp.com']). Match contract for consumers: "
-            "a link matches when its HOST equals an entry or is a SUBDOMAIN of "
-            "one — 't.me' matches 't.me' and 'x.t.me' but never "
-            "'nott.me'. Comparison is case-insensitive on already-lowercased "
-            "entries. Seeded from DEFAULT_SCAM_LINK_DOMAINS; an empty list "
-            "disables domain-list matching for the guild without touching the "
-            "separate '.gift' pattern rule that lives in the engine."
-        )
     )
     invite_filter_enabled: Mapped[bool] = mapped_column(
         Boolean,
@@ -3291,12 +3106,6 @@ class ModerationFilterConfig(Base):
         default=list,
         doc="Channel category snowflake IDs where the invite filter does not apply"
     )
-    staff_exempt_role_ids: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=list,
-        doc="Role snowflake IDs exempt from every filter and from the spam engine"
-    )
     webhook_killer_enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -3307,137 +3116,10 @@ class ModerationFilterConfig(Base):
         String,
         nullable=True,
         default=None,
-        doc="Channel snowflake ID where content-filter hits are reported"
-    )
-
-    # --- Spam engine ---
-    spam_engine_enabled: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        doc="Master toggle for the heuristic spam engine"
-    )
-    message_rate_threshold: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=5,
-        doc="Messages allowed inside the rate window before a violation (legacy: 5)"
-    )
-    message_rate_window_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=5,
-        doc="Sliding window in seconds for the message-rate check (legacy: 5)"
-    )
-    channel_spread_threshold: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=3,
-        doc="Distinct channels allowed inside the spread window before a violation (legacy: 3)"
-    )
-    channel_spread_window_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=15,
-        doc="Sliding window in seconds for the channel-spread check (legacy: 15)"
-    )
-    duplicate_message_min_length: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=15,
-        doc="Minimum message length considered by the duplicate-message check (legacy: 15)"
-    )
-    duplicate_message_window_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=60,
-        doc="Lookback in seconds for the duplicate-message check (legacy: 60)"
-    )
-    mass_mention_window_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=15,
-        doc="Sliding window in seconds for the mass-mention check (legacy: 15)"
-    )
-    warning_reoffense_window_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=120,
-        doc="A second violation within this many seconds of a warning escalates to a mute (legacy: 120)"
-    )
-    mute_duration_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=86400,
-        doc="How long an escalated mute lasts, in seconds (legacy: 86400)"
-    )
-    mod_alert_channel_id: Mapped[str | None] = mapped_column(
-        String,
-        nullable=True,
-        default=None,
-        doc="Channel snowflake ID where mute escalations are posted"
-    )
-    mod_ping_role_id: Mapped[str | None] = mapped_column(
-        String,
-        nullable=True,
-        default=None,
-        doc="The only role snowflake ID allowed to be pinged on escalation"
-    )
-    scam_log_channel_id: Mapped[str | None] = mapped_column(
-        String,
-        nullable=True,
-        default=None,
-        doc="Channel snowflake ID where sanitized scam links are archived"
-    )
-
-    # --- Spam ring detector (smarter_dev/bot/spam_ring.py) ---
-    spam_ring_enabled: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=True,
-        server_default=text("true"),
         doc=(
-            "Master toggle for the spam ring detector. Unlike the other "
-            "subsystems it ships ON: it only acts on new members posting an "
-            "event ad, and every timeout it applies can be lifted."
-        )
-    )
-    spam_ring_new_member_days: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=2,
-        server_default=text("2"),
-        doc="A member who joined within this many days counts as new"
-    )
-    spam_ring_timeout_seconds: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=604800,
-        server_default=text("604800"),
-        doc="How long each ring participant is timed out (Discord caps a timeout at 28 days)"
-    )
-    spam_ring_lookback_minutes: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=60,
-        server_default=text("60"),
-        doc="How far back from the ad the channel is swept for ring participants"
-    )
-    spam_ring_followup_minutes: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=15,
-        server_default=text("15"),
-        doc="How long after a sweep further ring messages in that channel are removed"
-    )
-    spam_ring_report_channel_id: Mapped[str | None] = mapped_column(
-        String,
-        nullable=True,
-        default=None,
-        doc=(
-            "Channel snowflake ID for spam ring reports. Blank falls back to "
-            "the mod alert channel, then the mod log channel, then the AI "
-            "moderation response channel"
+            "Channel snowflake ID saved by the Content Filters form. Not read "
+            "at runtime since #242: content-filter incidents are reported to "
+            "the moderation policy's report channel"
         )
     )
 
@@ -3462,56 +3144,29 @@ class ModerationFilterConfig(Base):
     )
 
     def __init__(self, **kwargs):
-        """Initialize ModerationFilterConfig with legacy default values."""
+        """Initialize ModerationFilterConfig with every filter off."""
         now = datetime.now(UTC)
         kwargs.setdefault("created_at", now)
         kwargs.setdefault("updated_at", now)
 
         kwargs.setdefault("content_filter_enabled", False)
         kwargs.setdefault("blocked_tlds", [])
-        kwargs.setdefault("scam_link_domains", default_scam_link_domains())
         kwargs.setdefault("invite_filter_enabled", False)
         kwargs.setdefault("invite_filter_exempt_category_ids", [])
-        kwargs.setdefault("staff_exempt_role_ids", [])
         kwargs.setdefault("webhook_killer_enabled", False)
-
-        kwargs.setdefault("spam_engine_enabled", False)
-        kwargs.setdefault("message_rate_threshold", 5)
-        kwargs.setdefault("message_rate_window_seconds", 5)
-        kwargs.setdefault("channel_spread_threshold", 3)
-        kwargs.setdefault("channel_spread_window_seconds", 15)
-        kwargs.setdefault("duplicate_message_min_length", 15)
-        kwargs.setdefault("duplicate_message_window_seconds", 60)
-        kwargs.setdefault("mass_mention_window_seconds", 15)
-        kwargs.setdefault("warning_reoffense_window_seconds", 120)
-        kwargs.setdefault("mute_duration_seconds", 86400)
-
-        kwargs.setdefault("spam_ring_enabled", True)
-        kwargs.setdefault("spam_ring_new_member_days", 2)
-        kwargs.setdefault("spam_ring_timeout_seconds", 604800)
-        kwargs.setdefault("spam_ring_lookback_minutes", 60)
-        kwargs.setdefault("spam_ring_followup_minutes", 15)
 
         super().__init__(**kwargs)
 
     @classmethod
     def get_defaults(cls, guild_id: str) -> ModerationFilterConfig:
-        """Get the default configuration for a guild.
-
-        Args:
-            guild_id: Discord guild ID
-
-        Returns:
-            ModerationFilterConfig instance with legacy default values
-        """
+        """The default configuration for a guild: every filter off."""
         return cls(guild_id=guild_id)
 
     def __repr__(self) -> str:
         """String representation of the moderation filter config."""
         return (
             f"<ModerationFilterConfig(guild_id='{self.guild_id}', "
-            f"content_filter={self.content_filter_enabled}, "
-            f"spam_engine={self.spam_engine_enabled})>"
+            f"content_filter={self.content_filter_enabled})>"
         )
 
 
@@ -3779,73 +3434,6 @@ class SpamRingIncident(Base):
             f"<SpamRingIncident(guild='{self.guild_id}', channel='{self.channel_id}', "
             f"participants={len(self.participant_user_ids or [])})>"
         )
-
-
-class ModerationConfig(Base):
-    """Per-guild configuration for AI moderation triage.
-
-    When a user mentions a monitored role, the bot reads chat history and uses
-    an AI triage agent to freeze dangerous situations (timeout, purge, delete)
-    while waiting for human moderators to arrive.
-    """
-
-    __tablename__ = "moderation_configs"
-
-    guild_id: Mapped[str] = mapped_column(
-        String,
-        primary_key=True,
-        doc="Discord guild (server) snowflake ID",
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        nullable=False,
-        default=False,
-        doc="Whether moderation monitoring is enabled",
-    )
-    monitored_role_ids: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=list,
-        server_default="[]",
-        doc="List of Discord role ID strings to monitor for mentions",
-    )
-    instructions: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        doc="System prompt / moderation instructions given to the AI agent",
-    )
-    enabled_tools: Mapped[list] = mapped_column(
-        JSON,
-        nullable=False,
-        default=lambda: ["timeout", "purge", "delete"],
-        server_default='["timeout", "purge", "delete"]',
-        doc="List of action tool names enabled: timeout, purge, delete",
-    )
-    response_channel_id: Mapped[Optional[str]] = mapped_column(
-        String,
-        nullable=True,
-        doc="Channel where triage reports are posted for human moderator review",
-    )
-    context_message_limit: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        default=25,
-        doc="Number of recent messages to fetch for context",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=func.now(),
-        onupdate=func.now(),
-    )
-
-    def __repr__(self) -> str:
-        return f"<ModerationConfig(guild_id='{self.guild_id}', active={self.is_active})>"
 
 
 class ModerationAction(Base):
@@ -4300,12 +3888,13 @@ class ModerationMemberLock(Base):
 class ModerationOwnership(Base):
     """Who moderates a guild: the legacy actors or the coordinator.
 
-    Written only by ``scripts/moderation_cutover.py``, in the same transaction
-    that turns the legacy actors off (or back on). ``generation`` goes up on
-    every switch and the coordinator checks it before every action, so a
-    decision made under an older generation never acts. ``rules`` are the
-    coordinator's rules; ``legacy_state`` is what the switch changed, so a
-    rollback restores exactly that. No row means ``legacy``.
+    Written only by ``scripts/moderation_cutover.py``. ``generation`` goes up
+    on every switch and the coordinator checks it before every action, so a
+    decision made under an older generation never acts. No row means
+    ``legacy``. ``rules`` and ``legacy_state`` are the #240 cutover's record
+    of the rules it handed over and the legacy switches it turned off; since
+    #242 they are neither read nor written (what runs is the guild's
+    moderation policy).
     """
 
     __tablename__ = "moderation_ownership"

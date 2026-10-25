@@ -1,4 +1,5 @@
-"""Tests for the ModerationFilterConfig model — one row per guild, legacy defaults."""
+"""Tests for the ModerationFilterConfig model: one row per guild, the content
+filter's own settings only (the rest moved to the moderation policy, #242)."""
 
 from __future__ import annotations
 
@@ -10,12 +11,11 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from smarter_dev.web.models import DEFAULT_SCAM_LINK_DOMAINS
 from smarter_dev.web.models import ModerationFilterConfig
 
-# The shipped default list, spelled out here so a silent edit to the model
-# constant fails this test rather than quietly changing every guild's defaults.
-_EXPECTED_DEFAULT_SCAM_LINK_DOMAINS = [
+# The list the scam-link migration seeded, spelled out here so an edit to that
+# historical migration fails this test.
+_SEEDED_SCAM_LINK_DOMAINS = [
     "t.me",
     "telegram.me",
     "telegram.dog",
@@ -32,7 +32,49 @@ _EXPECTED_DEFAULT_SCAM_LINK_DOMAINS = [
 ]
 
 
-async def test_defaults_match_legacy_thresholds(db_session):
+#: The columns #242 dropped from this table; the model must not carry them.
+DROPPED_COLUMNS = (
+    "scam_link_domains",
+    "staff_exempt_role_ids",
+    "spam_engine_enabled",
+    "message_rate_threshold",
+    "message_rate_window_seconds",
+    "channel_spread_threshold",
+    "channel_spread_window_seconds",
+    "duplicate_message_min_length",
+    "duplicate_message_window_seconds",
+    "mass_mention_window_seconds",
+    "warning_reoffense_window_seconds",
+    "mute_duration_seconds",
+    "mod_alert_channel_id",
+    "mod_ping_role_id",
+    "scam_log_channel_id",
+    "spam_ring_enabled",
+    "spam_ring_new_member_days",
+    "spam_ring_timeout_seconds",
+    "spam_ring_lookback_minutes",
+    "spam_ring_followup_minutes",
+    "spam_ring_report_channel_id",
+)
+
+
+def test_the_table_holds_only_the_content_filters_columns():
+    assert set(ModerationFilterConfig.__table__.columns.keys()) == {
+        "guild_id",
+        "content_filter_enabled",
+        "blocked_tlds",
+        "invite_filter_enabled",
+        "invite_filter_exempt_category_ids",
+        "webhook_killer_enabled",
+        "mod_log_channel_id",
+        "created_at",
+        "updated_at",
+    }
+    for column in DROPPED_COLUMNS:
+        assert not hasattr(ModerationFilterConfig, column), column
+
+
+async def test_defaults_are_every_filter_off(db_session):
     db_session.add(ModerationFilterConfig(guild_id="G1"))
     await db_session.commit()
 
@@ -45,67 +87,16 @@ async def test_defaults_match_legacy_thresholds(db_session):
     assert stored.blocked_tlds == []
     assert stored.invite_filter_enabled is False
     assert stored.invite_filter_exempt_category_ids == []
-    assert stored.staff_exempt_role_ids == []
     assert stored.webhook_killer_enabled is False
     assert stored.mod_log_channel_id is None
-
-    # Spam engine defaults off but with the legacy thresholds pre-populated
-    assert stored.spam_engine_enabled is False
-    assert stored.message_rate_threshold == 5
-    assert stored.message_rate_window_seconds == 5
-    assert stored.channel_spread_threshold == 3
-    assert stored.channel_spread_window_seconds == 15
-    assert stored.duplicate_message_min_length == 15
-    assert stored.duplicate_message_window_seconds == 60
-    assert stored.mass_mention_window_seconds == 15
-    assert stored.warning_reoffense_window_seconds == 120
-    assert stored.mute_duration_seconds == 86400
-    assert stored.mod_alert_channel_id is None
-    assert stored.mod_ping_role_id is None
-    assert stored.scam_log_channel_id is None
 
     assert stored.created_at is not None
     assert stored.updated_at is not None
 
 
-async def test_scam_link_domains_default_to_messaging_platforms(db_session):
-    db_session.add(ModerationFilterConfig(guild_id="G1"))
-    await db_session.commit()
-
-    stored = (await db_session.execute(select(ModerationFilterConfig))).scalar_one()
-
-    assert stored.scam_link_domains == _EXPECTED_DEFAULT_SCAM_LINK_DOMAINS
-    assert list(DEFAULT_SCAM_LINK_DOMAINS) == _EXPECTED_DEFAULT_SCAM_LINK_DOMAINS
-
-
-async def test_scam_link_domains_round_trip(db_session):
-    db_session.add(
-        ModerationFilterConfig(guild_id="G1", scam_link_domains=["t.me", "evil.example"])
-    )
-    await db_session.commit()
-
-    stored = (await db_session.execute(select(ModerationFilterConfig))).scalar_one()
-
-    assert stored.scam_link_domains == ["t.me", "evil.example"]
-
-
-def test_get_defaults_returns_independent_scam_link_domain_lists():
-    first = ModerationFilterConfig.get_defaults("G1")
-    second = ModerationFilterConfig.get_defaults("G2")
-
-    first.scam_link_domains.append("evil.example")
-
-    assert second.scam_link_domains == _EXPECTED_DEFAULT_SCAM_LINK_DOMAINS
-    assert list(DEFAULT_SCAM_LINK_DOMAINS) == _EXPECTED_DEFAULT_SCAM_LINK_DOMAINS
-
-
-def test_migration_seed_matches_the_model_default():
-    """The migration freezes its own copy of the seed; it must not drift.
-
-    Existing rows are backfilled by the migration's server default while new
-    rows get the model default, so a mismatch would silently split guilds into
-    two populations with different protection.
-    """
+def test_the_scam_link_migration_seed_is_unchanged():
+    """The migration froze its own copy of the seed (the column was dropped
+    in #242, and its downgrade restores this server default)."""
     migration_path = (
         Path(__file__).resolve().parents[3]
         / "alembic"
@@ -125,7 +116,7 @@ def test_migration_seed_matches_the_model_default():
         )
     )
 
-    assert json.loads(seeded_json) == list(DEFAULT_SCAM_LINK_DOMAINS)
+    assert json.loads(seeded_json) == _SEEDED_SCAM_LINK_DOMAINS
 
 
 async def test_json_list_columns_round_trip(db_session):
@@ -136,7 +127,6 @@ async def test_json_list_columns_round_trip(db_session):
             blocked_tlds=[".gay", ".xxx"],
             invite_filter_enabled=True,
             invite_filter_exempt_category_ids=["555", "666"],
-            staff_exempt_role_ids=["777"],
             webhook_killer_enabled=True,
             mod_log_channel_id="888",
         )
@@ -149,47 +139,8 @@ async def test_json_list_columns_round_trip(db_session):
     assert stored.blocked_tlds == [".gay", ".xxx"]
     assert stored.invite_filter_enabled is True
     assert stored.invite_filter_exempt_category_ids == ["555", "666"]
-    assert stored.staff_exempt_role_ids == ["777"]
     assert stored.webhook_killer_enabled is True
     assert stored.mod_log_channel_id == "888"
-
-
-async def test_spam_engine_settings_round_trip(db_session):
-    db_session.add(
-        ModerationFilterConfig(
-            guild_id="G1",
-            spam_engine_enabled=True,
-            message_rate_threshold=8,
-            message_rate_window_seconds=10,
-            channel_spread_threshold=4,
-            channel_spread_window_seconds=20,
-            duplicate_message_min_length=25,
-            duplicate_message_window_seconds=90,
-            mass_mention_window_seconds=30,
-            warning_reoffense_window_seconds=300,
-            mute_duration_seconds=3600,
-            mod_alert_channel_id="111",
-            mod_ping_role_id="222",
-            scam_log_channel_id="333",
-        )
-    )
-    await db_session.commit()
-
-    stored = (await db_session.execute(select(ModerationFilterConfig))).scalar_one()
-
-    assert stored.spam_engine_enabled is True
-    assert stored.message_rate_threshold == 8
-    assert stored.message_rate_window_seconds == 10
-    assert stored.channel_spread_threshold == 4
-    assert stored.channel_spread_window_seconds == 20
-    assert stored.duplicate_message_min_length == 25
-    assert stored.duplicate_message_window_seconds == 90
-    assert stored.mass_mention_window_seconds == 30
-    assert stored.warning_reoffense_window_seconds == 300
-    assert stored.mute_duration_seconds == 3600
-    assert stored.mod_alert_channel_id == "111"
-    assert stored.mod_ping_role_id == "222"
-    assert stored.scam_log_channel_id == "333"
 
 
 async def test_guild_id_is_unique_primary_key(db_session):
@@ -202,16 +153,14 @@ async def test_guild_id_is_unique_primary_key(db_session):
     await db_session.rollback()
 
 
-def test_get_defaults_returns_unsaved_config_with_legacy_values():
+def test_get_defaults_returns_unsaved_config_with_every_filter_off():
     config = ModerationFilterConfig.get_defaults("G1")
 
     assert config.guild_id == "G1"
     assert config.content_filter_enabled is False
-    assert config.spam_engine_enabled is False
+    assert config.invite_filter_enabled is False
+    assert config.webhook_killer_enabled is False
     assert config.blocked_tlds == []
-    assert config.staff_exempt_role_ids == []
-    assert config.message_rate_threshold == 5
-    assert config.mute_duration_seconds == 86400
 
 
 def test_get_defaults_returns_independent_list_instances():
@@ -227,20 +176,6 @@ def test_repr_identifies_guild_and_toggles():
     config = ModerationFilterConfig.get_defaults("G1")
 
     assert "G1" in repr(config)
-
-
-async def test_spam_ring_detector_ships_on_with_its_defaults(db_session):
-    db_session.add(ModerationFilterConfig(guild_id="G-ring"))
-    await db_session.commit()
-
-    stored = (await db_session.execute(select(ModerationFilterConfig))).scalar_one()
-
-    assert stored.spam_ring_enabled is True
-    assert stored.spam_ring_new_member_days == 2
-    assert stored.spam_ring_timeout_seconds == 7 * 86400
-    assert stored.spam_ring_lookback_minutes == 60
-    assert stored.spam_ring_followup_minutes == 15
-    assert stored.spam_ring_report_channel_id is None
 
 
 def test_spam_ring_migration_turns_existing_rows_on():

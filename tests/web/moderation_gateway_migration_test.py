@@ -545,43 +545,29 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
 async def test_the_cutover_switch_runs_on_the_migrated_postgres_schema(
     migrated, monkeypatch
 ):
-    """#240: the switch in one transaction on Postgres (row locks, JSON
-    columns), and the policy and the fence read the row."""
+    """#240: the switch on Postgres (a row lock), and the policy and the
+    fence read the row; with no policy yet, nothing runs (#242)."""
     from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
     from smarter_dev.bot.moderation_coordinator.policy import load_policy
     from smarter_dev.web import moderation_cutover as cutover
-    from smarter_dev.web.models import AdminHandler
-    from smarter_dev.web.models import AttachmentFilterConfig
     from smarter_dev.web.models import ModerationFilterConfig
     from smarter_dev.web.moderation_gateway import gateway as gateway_module
 
     db = async_sessionmaker(migrated, expire_on_commit=False, autoflush=False)
     monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", db)
     async with db() as session:
-        session.add(ModerationFilterConfig(guild_id=GUILD, spam_engine_enabled=True))
-        session.add(AttachmentFilterConfig(guild_id=GUILD, is_active=True))
-        session.add(
-            AdminHandler(
-                guild_id=GUILD,
-                name="scam-banner",
-                trigger_type="message",
-                settings={},
-                channel_ids=[],
-                description="d",
-                script="pass\n",
-                created_by_admin="A",
-                enabled=True,
-            )
-        )
+        session.add(ModerationFilterConfig(guild_id=GUILD, content_filter_enabled=True))
         await session.commit()
 
     async with db() as session:
         switched = await cutover.switch(session, GUILD, by="test")
     assert switched["owner"] == "coordinator" and switched["generation"] == 1
-    assert switched["handlers"]["scam-banner"]["enabled"] is False
+    assert switched["policy_revision"] is None
     assert (await load_ownership(GUILD)).coordinator_acts
     policy = await load_policy(GUILD)
-    assert policy.acting and policy.scam_gate and policy.spam is not None
+    assert policy.acting and policy.revision is None
+    assert not policy.scam_gate and policy.spam is None
+    assert policy.enforced == frozenset()
 
     async with db() as session:
         with pytest.raises(cutover.CutoverRefused):
@@ -607,23 +593,10 @@ async def test_the_policy_import_and_its_pickup_run_on_the_migrated_postgres_sch
     from smarter_dev.web import moderation_cutover as cutover
     from smarter_dev.web import moderation_policy_import as policy_import
     from smarter_dev.web import moderation_policy_store as store
-    from smarter_dev.web.models import ModerationConfig
-    from smarter_dev.web.models import ModerationFilterConfig
     from smarter_dev.web.moderation_gateway import gateway as gateway_module
 
     db = async_sessionmaker(migrated, expire_on_commit=False, autoflush=False)
     monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", db)
-    async with db() as session:
-        session.add(
-            ModerationFilterConfig(
-                guild_id=GUILD,
-                spam_engine_enabled=True,
-                mod_alert_channel_id=REPORT_CHANNEL,
-                staff_exempt_role_ids=["644390354157568014"],
-            )
-        )
-        session.add(ModerationConfig(guild_id=GUILD, is_active=True, enabled_tools=[]))
-        await session.commit()
     async with db() as session:
         await cutover.switch(session, GUILD, by="test")
     assert (await load_ownership(GUILD)).policy_revision is None
@@ -632,15 +605,16 @@ async def test_the_policy_import_and_its_pickup_run_on_the_migrated_postgres_sch
         await session.execute(text("SET TRANSACTION READ ONLY"))
         plan = await policy_import.plan(session, GUILD)
         await session.rollback()
-    assert plan.document.mode(mp.SPAM_ENGINE) == mp.ENFORCE
-    assert plan.document.triage.enabled_tools == []
+    assert plan.document == mp.default_document()
+    assert plan.document.mode(mp.SPAM_ENGINE) == mp.OFF
 
     async with db() as session:
         await policy_import.run(session, GUILD, by="test")
     cache = PolicyCache(ownership=load_ownership)
     assert (await cache.get(GUILD)).revision == 1
+    assert not (await cache.get(GUILD)).enforces(mp.SPAM_ENGINE)
     edited = plan.document.as_json()
-    edited["rules"]["spam_engine"]["mode"] = mp.EVALUATE
+    edited["rules"]["spam_engine"]["mode"] = mp.ENFORCE
     async with db() as session:
         assert (
             await store.save_policy(
@@ -650,7 +624,7 @@ async def test_the_policy_import_and_its_pickup_run_on_the_migrated_postgres_sch
         )
     assert (await load_ownership(GUILD)).policy_revision == 2
     policy = await cache.get(GUILD)
-    assert policy.revision == 2 and not policy.enforces(mp.SPAM_ENGINE)
+    assert policy.revision == 2 and policy.enforces(mp.SPAM_ENGINE)
 
     now = datetime.now(UTC)
     async with db() as session:

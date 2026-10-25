@@ -14,15 +14,18 @@ is a pure module-level function with no Discord and no database dependency, unit
 tested directly. :func:`check_content_filters` is a thin shell that reads the
 per-guild :class:`ModerationFilterConfig`, applies the exemptions, and performs
 the REST side effects. Staff are exempt by the shared rule in
-:mod:`smarter_dev.bot.staff_protection`, asked only once a filter has fired; an
-author whose standing cannot be established is left alone like staff.
+:mod:`smarter_dev.bot.staff_protection` (plus the guild's moderation policy's
+protected roles), asked only once a filter has fired; an author whose standing
+cannot be established is left alone like staff.
 
 The delete, its record and the report go through the moderation gateway
 (``smarter_dev.web.moderation_gateway``): one ``moderation_actions`` row for
 the one delete every fired filter shares, and the incident's report in place of
-per-filter mod-log lines. When another detector already removed the message,
-no notice is posted for it. A leaked webhook is revoked here directly: that is
-a credential, not a member, and the incident records it.
+per-filter mod-log lines. The report goes to the moderation policy's report
+channel; a guild without a policy gets no report. When another detector
+already removed the message, no notice is posted for it. A leaked webhook is
+revoked here directly: that is a credential, not a member, and the incident
+records it.
 
 Error policy (deliberately unlike ``attachment_filter.py``): nothing is wrapped
 in a bare ``except Exception``. The expected REST outcomes are caught — a 404
@@ -57,9 +60,7 @@ from smarter_dev.web.moderation_gateway import Proposal
 from smarter_dev.web.moderation_gateway import Trigger
 from smarter_dev.web.moderation_gateway import types as gw
 from smarter_dev.web.moderation_gateway.config import load_incident_report_channel
-from smarter_dev.web.moderation_gateway.config import report_channel_from
 from smarter_dev.web.moderation_policy_store import protected_role_ids
-from smarter_dev.web.moderation_policy_store import read_policy
 from smarter_dev.web.webhook_urls import WEBHOOK_PATH_MARKER
 from smarter_dev.web.webhook_urls import is_discord_webhook_url
 from smarter_dev.web.webhook_urls import parse_discord_webhook_url
@@ -410,9 +411,7 @@ async def check_content_filters(
 
     if not (blocked_tld_links or invite_links or webhook_candidates):
         return ContentFilterResult()
-    protected_roles, report_channel_id = await _load_protection_and_report(
-        guild_id, config
-    )
+    protected_roles, report_channel_id = await _load_protection_and_report(guild_id)
     if await _author_is_staff(bot, event, protected_roles):
         return ContentFilterResult()
 
@@ -495,18 +494,17 @@ async def _load_config(guild_id: str) -> ModerationFilterConfig | None:
 
 
 async def _load_protection_and_report(
-    guild_id: str, config: ModerationFilterConfig
+    guild_id: str,
 ) -> tuple[tuple[str, ...], str | None]:
     """The guild's extra staff roles and its incident report channel.
 
-    A guild with a moderation policy: the policy's protected roles and its
-    report channel (none while its reporting is off). Without one, the filter
-    config's ``staff_exempt_role_ids`` and report channels, as before.
+    Both are the guild's moderation policy's: its protected roles and its
+    report channel (none while its reporting is off). A guild without a
+    policy has no extra staff roles (the built-in staff rule still applies)
+    and reports nowhere; the filter itself still runs from this row.
     """
     async with get_db_session_context() as session:
-        roles = await protected_role_ids(session, guild_id, config)
-        if await read_policy(session, guild_id) is None:
-            return roles, report_channel_from(config)
+        roles = await protected_role_ids(session, guild_id)
         return roles, await load_incident_report_channel(session, guild_id)
 
 

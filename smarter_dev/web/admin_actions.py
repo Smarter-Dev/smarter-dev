@@ -132,10 +132,9 @@ class AdminActor(DiscordBotClient):
     guild_id: str
     fire: HandlerFireFacts | None = None
     #: The guild's configured extra staff roles (its moderation policy's
-    #: ``protected_role_ids``, or without one the filter config's
-    #: ``staff_exempt_role_ids``, which the filters, spam engine, spam ring,
-    #: triage and coordinator all treat as staff). None means they were not
-    #: read, and every staff and role check refuses.
+    #: ``protected_role_ids``, none without a policy; the content filter,
+    #: triage and coordinator treat the same roles as staff). None means they
+    #: were not read, and every staff and role check refuses.
     staff_exempt_role_ids: tuple[str, ...] | None = None
     #: Tests hand in a fake Discord; production talks REST through this actor.
     moderation_port: ModerationPort | None = None
