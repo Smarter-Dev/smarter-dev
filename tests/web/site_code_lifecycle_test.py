@@ -396,3 +396,43 @@ async def test_a_caller_that_hangs_up_while_its_run_runs_stops_it(
     assert await redis.zcard(site_code.ALL_LEASES_KEY) == 0
     assert await redis.zcard(site_code.user_leases_key(served.member)) == 0
     assert await redis.llen(site_code.result_key(run_id)) == 0
+
+
+async def test_a_caller_that_hangs_up_while_its_run_is_queued_never_starts_it(
+    served, redis, started, monkeypatch
+):
+    # The queue is slow to take the job: the caller hangs up meanwhile. Then
+    # a worker can see the job before the queue has answered the route.
+    import skrift.workers
+
+    queued: list[str] = []
+    take, job = asyncio.Event(), {}
+
+    async def slow_submit(job_type, payload, **options):
+        queued.append(payload["run_id"])
+        await take.wait()
+        job["outcome"] = await site_code_jobs.run_site_code_job(
+            site_code_jobs.SiteCodePayload(**payload)
+        )
+
+    monkeypatch.setattr(skrift.workers, "submit", slow_submit)
+    await _post_then_hang_up(served, "print('sekrit')\n7", lambda: queued)
+    (run_id,) = queued
+
+    async def dropped() -> bool:
+        return not await redis.exists(site_code.request_key(run_id)) and bool(
+            await redis.exists(site_code.abandoned_key(run_id))
+        )
+
+    # Dropped while it is still being queued: no code left to take.
+    assert await _settled(dropped), await redis.keys("*")
+    # Its places are held until the queueing is done.
+    assert await redis.zcard(site_code.ALL_LEASES_KEY) == 1
+    take.set()
+
+    async def only_the_abandon_mark() -> bool:
+        return await redis.keys("*") == [site_code.abandoned_key(run_id)]
+
+    assert await _settled(only_the_abandon_mark), await redis.keys("*")
+    assert job == {"outcome": {"status": "expired"}}
+    assert started == []  # Monty never started

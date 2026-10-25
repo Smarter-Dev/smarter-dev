@@ -13,7 +13,8 @@ without a result. Each is a plain sentence.
 
 A caller that hangs up stops its run: Hypercorn doesn't cancel the route when
 the connection closes, it only says so on the request's ``receive``, so the
-route watches for that while it waits (``_unless_gone``).
+route watches for that from admission on, while the job is queued and while
+it waits for the result.
 """
 
 from __future__ import annotations
@@ -22,8 +23,6 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Coroutine
-from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
@@ -95,40 +94,70 @@ class SiteCodeController(Controller):
         if refused:
             raise BotApiException(429, {"detail": refused, "wait": 5})
         finished = False
+        # Watched from here on: Hypercorn says the caller left only on
+        # ``receive``, and never cancels the route.
+        gone = asyncio.ensure_future(_gone(request))
+        tasks = [gone]
         try:
             await site_code.store_request(
                 redis, run_id, reason=data.reason, code=data.code
             )
-            try:
-                from skrift.workers import submit as worker_submit
-
-                from smarter_dev.web.chat.dispatch import ensure_submission_handler
-
-                ensure_submission_handler(site_code.JOB_TYPE)
-                await worker_submit(
-                    site_code.JOB_TYPE,
-                    {"run_id": run_id},
-                    queue=site_code.JOB_QUEUE,
-                    job_id=f"site-code:{run_id}",
-                )
-            except Exception as error:  # noqa: BLE001 - a plain 503 for the site
-                # Type only: never the snippet or the reason.
-                logger.error(
-                    "Site code run couldn't be queued (%s)", type(error).__name__
-                )
-                raise plain_error(503, START_FAILED) from None
-            text = await _unless_gone(request, _result(redis, run_id))
+            if gone.done():
+                raise plain_error(499, HUNG_UP)
+            submitting = asyncio.ensure_future(_submit(run_id))
+            tasks.append(submitting)
+            if await _left_first(gone, submitting):
+                # The caller left while the job was being queued: drop the
+                # call now, before a job can take it, then let the queueing
+                # finish (its job finds nothing to run) before the places
+                # are given back.
+                await _drop(redis, run_id)
+                await asyncio.gather(submitting, return_exceptions=True)
+                raise plain_error(499, HUNG_UP)
+            submitting.result()
+            waiting = asyncio.ensure_future(_result(redis, run_id))
+            tasks.append(waiting)
+            if await _left_first(gone, waiting):
+                raise plain_error(499, HUNG_UP)
+            text = waiting.result()
             finished = True
             return {"result": text}
         finally:
+            for task in tasks:
+                task.cancel()
             # Given up for any reason (504, a dead worker, an error, the
             # caller gone, the request cancelled): the job must not run it,
             # or stops it.
             if not finished:
-                with contextlib.suppress(Exception):
-                    await asyncio.shield(site_code.abandon(redis, run_id))
+                await _drop(redis, run_id)
             with contextlib.suppress(Exception):
                 await asyncio.shield(site_code.release(redis, member, run_id))
+
+
+async def _submit(run_id: str) -> None:
+    """Queue the run's job; a plain 503 if it can't be queued."""
+    try:
+        from skrift.workers import submit as worker_submit
+
+        from smarter_dev.web.chat.dispatch import ensure_submission_handler
+
+        ensure_submission_handler(site_code.JOB_TYPE)
+        await worker_submit(
+            site_code.JOB_TYPE,
+            {"run_id": run_id},
+            queue=site_code.JOB_QUEUE,
+            job_id=f"site-code:{run_id}",
+        )
+    except Exception as error:  # noqa: BLE001 - a plain 503 for the site
+        # Type only: never the snippet or the reason.
+        logger.error("Site code run couldn't be queued (%s)", type(error).__name__)
+        raise plain_error(503, START_FAILED) from None
+
+
+async def _drop(redis, run_id: str) -> None:
+    """Abandon the run: the job never starts it, or stops it."""
+    with contextlib.suppress(Exception):
+        await asyncio.shield(site_code.abandon(redis, run_id))
 
 
 async def _result(redis, run_id: str) -> str:
@@ -157,16 +186,7 @@ async def _gone(request: Request) -> None:
         pass
 
 
-async def _unless_gone(request: Request, waiting: Coroutine[Any, Any, str]) -> str:
-    """``waiting``'s text; a 499 if the caller hangs up first."""
-    result = asyncio.ensure_future(waiting)
-    gone = asyncio.ensure_future(_gone(request))
-    try:
-        await asyncio.wait({result, gone}, return_when=asyncio.FIRST_COMPLETED)
-    finally:
-        gone.cancel()
-        if not result.done():
-            result.cancel()
-    if result.done() and not result.cancelled():
-        return result.result()
-    raise plain_error(499, HUNG_UP)
+async def _left_first(gone: asyncio.Future, task: asyncio.Future) -> bool:
+    """Wait for ``task`` or for the caller to leave; whether it left first."""
+    await asyncio.wait({task, gone}, return_when=asyncio.FIRST_COMPLETED)
+    return not task.done()
