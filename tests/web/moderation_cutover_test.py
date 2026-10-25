@@ -1,5 +1,6 @@
-"""The cutover switch (#240): one transaction each way, refusals that change
-nothing, and the policy the bot reads from it."""
+"""The cutover switch (#240): one transaction, refusals that change nothing,
+and the policy the bot reads from it. There is no rollback any more: the
+legacy actors it would restore were removed after the cutover."""
 
 from __future__ import annotations
 
@@ -17,12 +18,12 @@ from smarter_dev.bot.moderation_coordinator.policy import load_policy
 from smarter_dev.extensions.registry import get_registry
 from smarter_dev.extensions.rendering import render_bundle
 from smarter_dev.web import moderation_cutover as cutover
-from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_HANDLER
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import AttachmentFilterConfig
 from smarter_dev.web.models import ExtensionInstall
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.models import ModerationOwnership
+from smarter_dev.web.moderation_cutover import SCAM_BANNER_HANDLER
 from smarter_dev.web.moderation_gateway.gateway import default_session_factory
 
 GUILD = "644299523686006834"
@@ -126,7 +127,7 @@ async def test_status_reads_everything_the_switch_touches():
     assert status["extension_installs"][cutover.DISBOARD_SLUG]["installed_version"] == 3
 
 
-async def test_the_switch_hands_over_in_one_go_and_rollback_restores_it():
+async def test_the_switch_hands_over_in_one_go():
     await _production_like()
     before = await _status()
     async with sessions() as session:
@@ -164,22 +165,8 @@ async def test_the_switch_hands_over_in_one_go_and_rollback_restores_it():
     async with sessions() as session:
         assert len((await session.execute(select(AdminHandler))).all()) == 3
 
-    async with sessions() as session:
-        back = await cutover.rollback(session, GUILD, by="zech")
-    assert back["owner"] == own.LEGACY and back["generation"] == 2
-    assert back["rollback_saved"] is False
-    assert back["notes"] == []
-    for key in (
-        "spam_engine_enabled",
-        "spam_ring_enabled",
-        "attachment_filter_active",
-        "handlers",
-        "extension_installs",
-    ):
-        assert back[key] == before[key], key
 
-
-async def test_a_second_switch_is_refused_and_keeps_the_saved_rollback():
+async def test_a_second_switch_is_refused_and_keeps_the_saved_legacy_state():
     await _production_like()
     async with sessions() as session:
         await cutover.switch(session, GUILD, by="zech")
@@ -195,48 +182,6 @@ async def test_a_second_switch_is_refused_and_keeps_the_saved_rollback():
         assert row.generation == 1
         assert row.legacy_state == saved
         assert row.changed_by == "zech"
-
-
-async def test_rollback_with_nothing_saved_is_refused():
-    await _production_like()
-    async with sessions() as session:
-        with pytest.raises(cutover.CutoverRefused, match="nothing saved"):
-            await cutover.rollback(session, GUILD, by="zech")
-        await session.rollback()
-    assert (await _status())["owner"] == own.LEGACY
-    async with sessions() as session:
-        await cutover.switch(session, GUILD, by="zech")
-    async with sessions() as session:
-        await cutover.rollback(session, GUILD, by="zech")
-    async with sessions() as session:
-        with pytest.raises(cutover.CutoverRefused, match="nothing saved"):
-            await cutover.rollback(session, GUILD, by="zech")
-
-
-async def test_rollback_keeps_a_disboard_script_edited_since_the_switch():
-    await _production_like()
-    async with sessions() as session:
-        await cutover.switch(session, GUILD, by="zech")
-    async with sessions() as session:
-        row = (
-            await session.execute(
-                select(AdminHandler).where(AdminHandler.name == cutover.BUMP_HANDLER)
-            )
-        ).scalar_one()
-        row.script += "\n# an admin's edit\n"
-        await session.commit()
-    async with sessions() as session:
-        back = await cutover.rollback(session, GUILD, by="zech")
-    assert back["notes"] and "Disboard" in back["notes"][0]
-    async with sessions() as session:
-        script = (
-            await session.execute(
-                select(AdminHandler.script).where(
-                    AdminHandler.name == cutover.BUMP_HANDLER
-                )
-            )
-        ).scalar_one()
-    assert script.endswith("# an admin's edit\n")
 
 
 async def test_a_guild_without_a_filter_config_is_refused():
@@ -261,7 +206,9 @@ async def test_the_command_line_exits_two_on_a_refusal(monkeypatch):
     assert await script.main(["switch", "--guild", GUILD, "--by", "zech"]) == 2
     monkeypatch.setenv("MODERATION_SHADOW_GUILD_IDS", f"1, {GUILD}")
     assert await script.main(["status", "--guild", GUILD]) == 0
-    assert await script.main(["rollback", "--guild", GUILD]) == 2
+    # The rollback command is gone with the legacy actors it restored.
+    with pytest.raises(SystemExit):
+        await script.main(["rollback", "--guild", GUILD])
     assert await script.main(["switch", "--guild", GUILD, "--by", "zech"]) == 0
     assert await script.main(["switch", "--guild", GUILD]) == 2
     assert (await _status())["generation"] == 1
@@ -283,12 +230,6 @@ async def test_a_switched_guild_runs_the_saved_rules_with_the_legacy_settings():
     assert loaded.attachments is not None
     assert loaded.scam_gate and loaded.edit_ping
     assert loaded.bump_channel_ids == frozenset({BUMP_CHANNEL})
-
-    async with sessions() as session:
-        await cutover.rollback(session, GUILD, by="zech")
-    back = await load_policy(GUILD)
-    assert not back.acting and back.generation == 2
-    assert back.spam is not None and back.scam_gate  # shadow, as before
 
 
 async def test_a_rule_left_out_of_the_switch_stays_off():

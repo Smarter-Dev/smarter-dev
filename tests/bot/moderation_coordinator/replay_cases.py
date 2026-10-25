@@ -92,7 +92,6 @@ def policy(**over) -> GuildPolicy:
             ),
             ring=SpamRingSettings.from_config(config),
             scam_gate=True,
-            scam_banner_matches_reference=True,
             edit_ping=True,
             bump_channel_ids=frozenset({BUMP}),
         ),

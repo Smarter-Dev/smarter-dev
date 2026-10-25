@@ -1,14 +1,15 @@
 """Tests for the moderation wiring inside :mod:`smarter_dev.bot.client`.
 
 These tests cover the integration point only: that the ``/history`` plugin is
-loaded, that the content-filter and spam-engine listeners are registered on the
-guild-message-create event in the right order, that one failing check cannot
-prevent the other from running, and that the module no longer performs inline
-imports inside its event listeners.
+loaded, that the content-filter listener is registered on the
+guild-message-create event, that its failures are contained or loud as they
+should be, and that the module no longer performs inline imports inside its
+event listeners. The spam engine, spam ring and attachment filter listeners
+were removed after the #240 cutover; the moderation coordinator acts now.
 
-The moderation modules themselves are covered by ``content_filter_test.py`` and
-``spam_engine_test.py``; here they are stubbed except in the two no-op tests
-that deliberately exercise the real "no config row" path.
+The content filter itself is covered by ``content_filter_test.py``; here it is
+stubbed except in the no-op test that deliberately exercises the real "no
+config row" path.
 """
 
 from __future__ import annotations
@@ -26,8 +27,6 @@ import pytest
 
 from smarter_dev.bot import client
 from smarter_dev.bot import content_filter
-from smarter_dev.bot import spam_engine
-from smarter_dev.web.models import ModerationFilterConfig
 
 HISTORY_PLUGIN_PATH = "smarter_dev.bot.plugins.history"
 RULES_PLUGIN_PATH = "smarter_dev.bot.plugins.rules"
@@ -131,23 +130,12 @@ def listeners_for_event(
 @pytest.fixture
 def moderation_listener(recording_bot: ListenerRecordingBot, monkeypatch):
     """The single registered guild-message moderation listener."""
-    # The ring detector is the third stage; tests that care replace it again.
-    monkeypatch.setattr(client, "check_spam_ring", AsyncMock(return_value=None))
     client.register_message_moderation_listeners(recording_bot)
     message_listeners = listeners_for_event(
         recording_bot, hikari.GuildMessageCreateEvent
     )
     assert len(message_listeners) == 1
     return message_listeners[0]
-
-
-@pytest.fixture
-def guild_leave_listener(recording_bot: ListenerRecordingBot):
-    """The registered guild-leave listener that releases spam-engine state."""
-    client.register_message_moderation_listeners(recording_bot)
-    leave_listeners = listeners_for_event(recording_bot, hikari.GuildLeaveEvent)
-    assert len(leave_listeners) == 1
-    return leave_listeners[0]
 
 
 class TestHistoryPluginLoading:
@@ -211,6 +199,26 @@ class TestModerationListenerRegistration:
         )
         assert len(message_listeners) == 1
 
+    def test_registers_nothing_but_the_message_listener(
+        self, recording_bot: ListenerRecordingBot
+    ) -> None:
+        """The guild-leave release of spam-engine state went with the engine."""
+        client.register_message_moderation_listeners(recording_bot)
+
+        assert len(recording_bot.registered_listeners) == 1
+
+    @pytest.mark.parametrize(
+        "removed_name",
+        [
+            "check_spam_engine",
+            "check_spam_ring",
+            "check_attachment_filter",
+            "release_guild_spam_state",
+        ],
+    )
+    def test_the_legacy_actors_are_not_wired(self, removed_name: str) -> None:
+        assert not hasattr(client, removed_name)
+
     def test_run_bot_registers_the_moderation_listeners(self) -> None:
         run_bot_node = find_function_node(client_source_tree(), "run_bot")
         called_names = {
@@ -221,84 +229,20 @@ class TestModerationListenerRegistration:
         assert "register_message_moderation_listeners" in called_names
 
 
-class TestModerationListenerOrdering:
-    """Content filters run before the spam engine, and both always run."""
+class TestModerationListenerRuns:
+    """The content filter sees every human guild message."""
 
-    async def test_content_filter_runs_before_spam_engine(
-        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
-    ) -> None:
-        call_order: list[str] = []
-
-        async def record_content_filter(bot, event):
-            call_order.append("content_filter")
-            return Mock(message_deleted=False)
-
-        async def record_spam_engine(bot, event):
-            call_order.append("spam_engine")
-            return Mock()
-
-        monkeypatch.setattr(client, "check_content_filters", record_content_filter)
-        monkeypatch.setattr(client, "check_spam_engine", record_spam_engine)
-
-        await moderation_listener(make_guild_message_event())
-
-        assert call_order == ["content_filter", "spam_engine"]
-
-    async def test_spam_ring_runs_third_even_after_a_delete(
-        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
-    ) -> None:
-        call_order: list[str] = []
-
-        async def record(name):
-            call_order.append(name)
-            return Mock(message_deleted=True)
-
-        monkeypatch.setattr(client, "check_content_filters", lambda bot, event: record("content_filter"))
-        monkeypatch.setattr(client, "check_spam_engine", lambda bot, event: record("spam_engine"))
-        monkeypatch.setattr(client, "check_spam_ring", lambda bot, event: record("spam_ring"))
-
-        await moderation_listener(make_guild_message_event())
-
-        assert call_order == ["content_filter", "spam_engine", "spam_ring"]
-
-    async def test_spam_engine_still_runs_when_content_filter_deleted_message(
-        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
-    ) -> None:
-        deleting_content_filter = AsyncMock(return_value=Mock(message_deleted=True))
-        spam_check = AsyncMock()
-        monkeypatch.setattr(client, "check_content_filters", deleting_content_filter)
-        monkeypatch.setattr(client, "check_spam_engine", spam_check)
-
-        await moderation_listener(make_guild_message_event())
-
-        spam_check.assert_awaited_once()
-
-    async def test_spam_engine_runs_when_content_filter_fails(
-        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
-    ) -> None:
-        failing_content_filter = AsyncMock(side_effect=RuntimeError("boom"))
-        spam_check = AsyncMock()
-        monkeypatch.setattr(client, "check_content_filters", failing_content_filter)
-        monkeypatch.setattr(client, "check_spam_engine", spam_check)
-
-        with pytest.raises(ExceptionGroup):
-            await moderation_listener(make_guild_message_event())
-
-        spam_check.assert_awaited_once()
-
-    async def test_content_filter_runs_before_a_failing_spam_engine_surfaces(
+    async def test_content_filter_runs_once_per_message(
         self, monkeypatch: pytest.MonkeyPatch, moderation_listener
     ) -> None:
         content_check = AsyncMock(return_value=Mock(message_deleted=False))
         monkeypatch.setattr(client, "check_content_filters", content_check)
-        monkeypatch.setattr(
-            client, "check_spam_engine", AsyncMock(side_effect=RuntimeError("boom"))
-        )
+        event = make_guild_message_event()
 
-        with pytest.raises(ExceptionGroup):
-            await moderation_listener(make_guild_message_event())
+        await moderation_listener(event)
 
         content_check.assert_awaited_once()
+        assert content_check.await_args.args[1] is event
 
 
 def assert_redacted_failures(
@@ -332,51 +276,11 @@ class TestUnexpectedModerationFailuresAreLoud:
         monkeypatch.setattr(
             client, "check_content_filters", AsyncMock(side_effect=misconfiguration)
         )
-        monkeypatch.setattr(client, "check_spam_engine", AsyncMock())
 
         with pytest.raises(ExceptionGroup) as raised:
             await moderation_listener(make_guild_message_event())
 
         assert_redacted_failures(raised.value, ["ValueError"], ["mute duration"])
-
-    async def test_unexpected_spam_engine_failure_propagates(
-        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
-    ) -> None:
-        misconfiguration = ValueError("mute duration must be positive")
-        monkeypatch.setattr(
-            client,
-            "check_content_filters",
-            AsyncMock(return_value=Mock(message_deleted=False)),
-        )
-        monkeypatch.setattr(
-            client, "check_spam_engine", AsyncMock(side_effect=misconfiguration)
-        )
-
-        with pytest.raises(ExceptionGroup) as raised:
-            await moderation_listener(make_guild_message_event())
-
-        assert_redacted_failures(raised.value, ["ValueError"], ["mute duration"])
-
-    async def test_both_stage_failures_are_reported_together(
-        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
-    ) -> None:
-        content_failure = ValueError("bad filter pattern")
-        spam_failure = ValueError("bad mute duration")
-        monkeypatch.setattr(
-            client, "check_content_filters", AsyncMock(side_effect=content_failure)
-        )
-        monkeypatch.setattr(
-            client, "check_spam_engine", AsyncMock(side_effect=spam_failure)
-        )
-
-        with pytest.raises(ExceptionGroup) as raised:
-            await moderation_listener(make_guild_message_event())
-
-        assert_redacted_failures(
-            raised.value,
-            ["ValueError", "ValueError"],
-            ["bad filter pattern", "bad mute duration"],
-        )
 
     async def test_unexpected_failure_is_logged_with_message_context(
         self,
@@ -387,7 +291,6 @@ class TestUnexpectedModerationFailuresAreLoud:
         monkeypatch.setattr(
             client, "check_content_filters", AsyncMock(side_effect=ValueError("boom"))
         )
-        monkeypatch.setattr(client, "check_spam_engine", AsyncMock())
 
         with caplog.at_level(logging.ERROR, logger=client.logger.name):
             with pytest.raises(ExceptionGroup):
@@ -412,17 +315,12 @@ class TestExpectedDiscordFailuresStayContained:
     async def test_discord_http_error_does_not_propagate(
         self, monkeypatch: pytest.MonkeyPatch, moderation_listener
     ) -> None:
-        spam_check = AsyncMock()
-        monkeypatch.setattr(
-            client,
-            "check_content_filters",
-            AsyncMock(side_effect=hikari.HTTPError("connection reset")),
-        )
-        monkeypatch.setattr(client, "check_spam_engine", spam_check)
+        content_check = AsyncMock(side_effect=hikari.HTTPError("connection reset"))
+        monkeypatch.setattr(client, "check_content_filters", content_check)
 
         await moderation_listener(make_guild_message_event())
 
-        spam_check.assert_awaited_once()
+        content_check.assert_awaited_once()
 
     async def test_discord_http_error_is_logged_with_message_context(
         self,
@@ -433,11 +331,6 @@ class TestExpectedDiscordFailuresStayContained:
         monkeypatch.setattr(
             client,
             "check_content_filters",
-            AsyncMock(return_value=Mock(message_deleted=False)),
-        )
-        monkeypatch.setattr(
-            client,
-            "check_spam_engine",
             AsyncMock(side_effect=hikari.HTTPError("connection reset")),
         )
 
@@ -467,20 +360,17 @@ class TestModerationListenerSkips:
         guild_id: int | None,
     ) -> None:
         content_check = AsyncMock()
-        spam_check = AsyncMock()
         monkeypatch.setattr(client, "check_content_filters", content_check)
-        monkeypatch.setattr(client, "check_spam_engine", spam_check)
 
         await moderation_listener(
             make_guild_message_event(is_bot=is_bot, guild_id=guild_id)
         )
 
         content_check.assert_not_awaited()
-        spam_check.assert_not_awaited()
 
 
 class TestModerationListenerIsInertWithoutConfig:
-    """With no config row both real checks are no-ops that touch no REST call."""
+    """With no config row the real check is a no-op that touches no REST call."""
 
     async def test_no_config_row_produces_no_discord_calls(
         self, monkeypatch: pytest.MonkeyPatch, recording_bot: ListenerRecordingBot
@@ -490,7 +380,6 @@ class TestModerationListenerIsInertWithoutConfig:
             yield Mock()
 
         missing_content_filter_config = AsyncMock(return_value=None)
-        missing_spam_engine_settings = AsyncMock(return_value=None)
         monkeypatch.setattr(
             content_filter, "get_db_session_context", fake_db_session_context
         )
@@ -499,16 +388,12 @@ class TestModerationListenerIsInertWithoutConfig:
             "get_config",
             missing_content_filter_config,
         )
-        monkeypatch.setattr(
-            spam_engine, "load_spam_engine_settings", missing_spam_engine_settings
-        )
         client.register_message_moderation_listeners(recording_bot)
 
         await recording_bot.registered_listeners[0](make_guild_message_event())
 
-        # Both real checks were reached and both bailed out before Discord.
+        # The real check was reached and bailed out before Discord.
         missing_content_filter_config.assert_awaited_once()
-        missing_spam_engine_settings.assert_awaited_once()
         assert recording_bot.rest.mock_calls == []
 
 
@@ -517,11 +402,7 @@ class TestNoInlineImportsInListeners:
 
     @pytest.mark.parametrize(
         "checker_name",
-        [
-            "check_attachment_filter",
-            "check_content_filters",
-            "check_spam_engine",
-        ],
+        ["check_content_filters"],
     )
     def test_moderation_checks_are_imported_at_module_top(
         self, checker_name: str
@@ -532,11 +413,10 @@ class TestNoInlineImportsInListeners:
         "listener_name",
         [
             "register_message_moderation_listeners",
-            # The two older per-message listeners swallowed every exception into
+            # The older per-message listeners swallowed every exception into
             # a log line. A silent failure in a moderation-adjacent listener is
             # exactly how a misconfiguration decays into "the bot just stopped
             # enforcing" with nothing to page on.
-            "on_attachment_filter",
             "on_message_create",
         ],
     )
@@ -553,39 +433,6 @@ class TestNoInlineImportsInListeners:
             and handler_only_logs(handler)
         ]
         assert blanket_handlers_that_only_log == []
-
-
-class TestGuildLeaveReleasesSpamState:
-    """Leaving a guild drops its spam-engine state immediately."""
-
-    def test_registers_a_guild_leave_listener(
-        self, recording_bot: ListenerRecordingBot
-    ) -> None:
-        client.register_message_moderation_listeners(recording_bot)
-        assert len(listeners_for_event(recording_bot, hikari.GuildLeaveEvent)) == 1
-
-    async def test_departing_a_guild_releases_its_buffered_state(
-        self, guild_leave_listener
-    ) -> None:
-        spam_engine.reset_spam_states()
-        thresholds = spam_engine.SpamThresholds.from_config(
-            ModerationFilterConfig(guild_id="777")
-        )
-        spam_engine.get_guild_spam_state("777", thresholds, now=1000.0)
-        assert spam_engine.tracked_guild_count() == 1
-
-        await guild_leave_listener(Mock(guild_id=777))
-
-        assert spam_engine.tracked_guild_count() == 0
-
-    async def test_departing_an_untracked_guild_is_a_no_op(
-        self, guild_leave_listener
-    ) -> None:
-        spam_engine.reset_spam_states()
-
-        await guild_leave_listener(Mock(guild_id=888))
-
-        assert spam_engine.tracked_guild_count() == 0
 
     @pytest.mark.parametrize(
         "function_name",

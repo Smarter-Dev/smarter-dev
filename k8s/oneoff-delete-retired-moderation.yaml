@@ -1,0 +1,42 @@
+# One-off Job: scripts/delete_retired_moderation_rows.py (#240). Not applied by
+# the deploy workflow; run by hand with the deployed website tag, `check` first
+# (read only), then `delete`:
+#   <ARGS> = "check --guild 644299523686006834"     (read only)
+#   <ARGS> = "delete --guild 644299523686006834"
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<NAME>|check|' -e 's|<ARGS>|check --guild 644299523686006834|' \
+#     k8s/oneoff-delete-retired-moderation.yaml | kubectl apply -f -
+#   kubectl -n smarter-dev wait --for=condition=complete --timeout=120s job/smarter-dev-delete-retired-moderation-check
+#   kubectl -n smarter-dev logs job/smarter-dev-delete-retired-moderation-check
+#   kubectl -n smarter-dev delete job smarter-dev-delete-retired-moderation-check
+# Then the same four commands with <NAME> = delete and
+# <ARGS> = "delete --guild 644299523686006834". Running `delete` again prints
+# "nothing to delete" and exits 0.
+# Exit status 2 (the Job fails) means refused: nothing was changed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-delete-retired-moderation-<NAME>
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-delete-retired-moderation
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: delete-retired-moderation
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/delete_retired_moderation_rows.py <ARGS>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url

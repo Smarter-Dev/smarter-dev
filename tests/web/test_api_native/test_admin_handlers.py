@@ -14,7 +14,6 @@ from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 from litestar.di import Provide
@@ -317,6 +316,11 @@ def test_replace_script_refuses_when_the_script_moved(client):
 
 
 BANNING = 'await ban_user(context["author_id"], "scam")\n'
+#: A different punishing script (scam-banner's old reference copy is gone).
+OTHER_PUNISHER = (
+    'if "gift" in context["content"]:\n'
+    '    await timeout_user(context["author_id"], 300, "review")\n'
+)
 
 
 def test_create_refuses_a_handler_that_punishes_members(client):
@@ -343,12 +347,13 @@ def test_edit_refuses_to_add_a_sanction(client):
     assert _script_of(client, handler_id)["script"] == _body()["script"]
 
 
-async def test_a_live_punishing_script_is_frozen_but_scam_banner_can_be_reapplied(
+async def test_a_live_punishing_script_is_frozen_even_on_scam_banner(
     db_session, submitted, no_guards
 ):
     """#255: a live script that sanctions cannot be rewritten (the condition
-    around its ban is the punisher); scam-banner may be put back to its
-    reference copy until the cutover, and any script may drop its sanctions."""
+    around its ban is the punisher), and since #240 scam-banner has no
+    reference copy to be put back to; any script may still be saved unchanged
+    or drop its sanctions."""
     record = AdminHandler(
         guild_id="G1",
         name="scam-banner",
@@ -363,10 +368,7 @@ async def test_a_live_punishing_script_is_frozen_but_scam_banner_can_be_reapplie
     await db_session.commit()
     handler_id = str(record.id)
     reworded = BANNING.replace('"scam"', '"confirmed scam"')
-    reference = (
-        Path(__file__).resolve().parents[3]
-        / "scripts/handler_scripts/scam-banner.monty"
-    ).read_text()
+    reference = OTHER_PUNISHER
 
     async with _async_client(db_session) as client:
         rewritten = await client.put(
@@ -390,20 +392,21 @@ async def test_a_live_punishing_script_is_frozen_but_scam_banner_can_be_reapplie
             f"/api/admin/handlers/{handler_id}",
             json={
                 "description": "same script",
-                "script": reference,
+                "script": BANNING,
                 "settings": {},
                 "channel_ids": [],
             },
         )
         disarmed = await client.put(
             f"/api/admin/handlers/{handler_id}/script",
-            json={"script": "x = 1\n", "expected_script": reference},
+            json={"script": "x = 1\n", "expected_script": BANNING},
         )
 
     assert rewritten.status_code == 422
     assert "can no longer be changed" in rewritten.text
     assert rewritten_in_full.status_code == 422
-    assert reapplied.status_code == 200
+    assert reapplied.status_code == 422
+    assert "can no longer be changed" in reapplied.text
     assert kept.status_code == 200
     assert disarmed.status_code == 200
 
@@ -533,8 +536,8 @@ async def test_a_switched_off_edit_ping_catch_cannot_be_renamed_back_on(
 
 
 def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
-    """#255: rename a handler with no sanction to scam-banner, then put the
-    reference script on it. Only the original row may take that copy."""
+    """#255: rename a handler with no sanction to scam-banner, then put a
+    punishing script on it: refused as a new punisher."""
     harmless = _body(name="notes")["script"]
     handler_id = client.post("/api/admin/handlers", json=_body(name="notes")).json()[
         "handler_id"
@@ -549,10 +552,7 @@ def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
             "channel_ids": [],
         },
     )
-    reference = (
-        Path(__file__).resolve().parents[3]
-        / "scripts/handler_scripts/scam-banner.monty"
-    ).read_text()
+    reference = OTHER_PUNISHER
     reapplied = client.put(
         f"/api/admin/handlers/{handler_id}/script",
         json={"script": reference, "expected_script": harmless},

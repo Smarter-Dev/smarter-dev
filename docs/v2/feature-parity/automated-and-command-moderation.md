@@ -254,6 +254,15 @@ Requires widening the `ModerationAction.source` doc/values to include `"handler"
 
 ### 4.1 codes-auto-mod → three guild-wide admin handlers
 
+> **Status (#240, Oct 2026):** Handler B shipped as the bot-core spam engine
+> and Handler C as the `edit-ping-catch` catalog template. Both were removed
+> after the #240 cutover, together with the spam ring detector, the
+> attachment-filter listener and the `scam-banner` handler: the moderation
+> coordinator (`smarter_dev/bot/moderation_coordinator/`) does all of it now,
+> reusing the pure detection code that stays in `spam_engine.py`,
+> `spam_ring.py` and `attachment_filter.py`. The plan below is kept as
+> written.
+
 All authored via the existing admin pipeline (author → lint → dual judge). Hardcoded legacy IDs become **handler memory config**: the admin seeds them at authoring time ("use channel #mod-log for logs") and the author bakes them in as script literals, or the script reads them from `memory_get("config")` so they're editable by re-authoring. The admin author agent already has a `list_channels` tool to resolve names → ids. Legacy IDs map to smarter-dev-guild equivalents chosen at authoring time (the six beginner.codes IDs are not ported).
 
 All three handlers open with the same cheap gate (satisfying the exemption capability):

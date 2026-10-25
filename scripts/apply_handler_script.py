@@ -21,8 +21,8 @@ apply, the next fire shows on ``/admin/handlers?guild_id=…&admin=1`` as a
 ``HandlerRun`` with outcome ``ok`` or an error.
 
     BOT_API_KEY=… .venv/bin/python scripts/apply_handler_script.py \\
-        --guild-id 123 --handler scam-banner \\
-        --file scripts/handler_scripts/scam-banner.monty [--apply]
+        --guild-id 123 --handler raid-alarm \\
+        --file scripts/handler_scripts/raid-alarm.monty [--apply]
 
 ``API_BASE_URL`` (default ``http://localhost:8000/api``) names the website.
 The key is read from the environment and never printed: error output carries

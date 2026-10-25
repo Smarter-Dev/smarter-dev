@@ -1,13 +1,13 @@
-"""Switch one guild's moderation between the legacy actors and the coordinator.
+"""Switch one guild's moderation from the legacy actors to the coordinator.
 
     status   --guild <id>               read only: owner, generation, every
                                         legacy switch and handler row, and
-                                        whether a rollback is saved
+                                        whether the switch saved legacy state
     switch   --guild <id> --by <who>    hand the guild to the coordinator and
-                                        turn the legacy actors off, in one
+                                        turn the legacy switches off, in one
                                         transaction (refused if already done)
-    rollback --guild <id> --by <who>    restore exactly what the switch saved
-                                        (refused if nothing is saved)
+
+There is no rollback: the legacy actors were removed after the #240 cutover.
 
 Run in the cluster as a Job (``k8s/oneoff-moderation-cutover.yaml``). The
 logic and its guarantees are in ``smarter_dev/web/moderation_cutover.py``.
@@ -36,7 +36,7 @@ GUILDS_ENV_VAR = "MODERATION_SHADOW_GUILD_IDS"
 
 async def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("status", "switch", "rollback"))
+    parser.add_argument("command", choices=("status", "switch"))
     parser.add_argument("--guild", required=True)
     parser.add_argument("--by", default="moderation-cutover-job")
     args = parser.parse_args(argv)
@@ -47,7 +47,7 @@ async def main(argv: list[str] | None = None) -> int:
                     await session.execute(text("SET TRANSACTION READ ONLY"))
                 result = await cutover.status(session, args.guild)
                 await session.rollback()
-            elif args.command == "switch":
+            else:  # switch
                 # Only a guild the bot listens to can be handed over; anything
                 # else would turn the legacy actors off with nobody acting.
                 listening = {
@@ -61,8 +61,6 @@ async def main(argv: list[str] | None = None) -> int:
                         "nothing changed"
                     )
                 result = await cutover.switch(session, args.guild, by=args.by)
-            else:
-                result = await cutover.rollback(session, args.guild, by=args.by)
         except cutover.CutoverRefused as refused:
             await session.rollback()
             logger.error("refused: %s", refused)

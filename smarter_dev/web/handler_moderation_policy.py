@@ -15,10 +15,7 @@ works (an edit of the handler's other fields), and so does removing every
 sanction from it, but any other change is refused. Keeping only the sanction
 call sites would not be enough: the condition around a ``ban_user`` call is
 the punisher, and rewriting it ("ban anyone who says hello") keeps the call.
-Nor can it be renamed. The one exception is scam-banner, which may be put back
-to its reference copy (:data:`SCAM_BANNER_REFERENCE_SHA256`) until the cutover
-retires it; a handler without a sanction cannot take that copy up, so the only
-row it applies to is the original.
+Nor can it be renamed.
 
 A script Python cannot parse is refused outright: the runtime (Monty) accepts
 syntax Python 3.13 rejects, so any other reading of such a script could miss a
@@ -51,15 +48,6 @@ SANCTION_FUNCTIONS = frozenset(
         "release_hold",
         "warn_user",
     }
-)
-
-SCAM_BANNER_HANDLER = "scam-banner"
-
-#: sha256 of ``scripts/handler_scripts/scam-banner.monty``, the script the
-#: scam gate was ported from. A test fails when the file changes without this
-#: (and the rules) changing with it.
-SCAM_BANNER_REFERENCE_SHA256 = (
-    "e8ba764de2d9e026ef96c774c4ad9eadc90f0538ee28f2207982a3edeb0af623"
 )
 
 REFUSAL = (
@@ -133,7 +121,9 @@ def moderation_refusal(
     """Why ``script`` may not be saved, or None when it may.
 
     ``existing_script`` is the live script a rewrite replaces (None for a new
-    handler) and ``handler_name`` the handler's name.
+    handler). ``handler_name`` is accepted for the callers' sake and no longer
+    changes the answer: the scam-banner reference-copy exception went with the
+    #240 cutover.
     """
     try:
         calls = sanction_calls(script)
@@ -142,16 +132,9 @@ def moderation_refusal(
     if not calls:
         return None
     if not _uses_sanctions(existing_script):
-        # Nothing frozen to keep: a new punisher, whatever the name says. The
-        # reference copy below is the original scam-banner row's own script,
-        # never one a renamed handler takes up.
+        # Nothing frozen to keep: a new punisher, whatever the name says.
         return REFUSAL.format(calls=", ".join(sorted(calls)))
     if script == existing_script:
-        return None
-    if (
-        handler_name == SCAM_BANNER_HANDLER
-        and script_sha256(script) == SCAM_BANNER_REFERENCE_SHA256
-    ):
         return None
     return FROZEN_REFUSAL.format(calls=", ".join(sorted(calls)))
 
@@ -159,9 +142,9 @@ def moderation_refusal(
 def rename_refusal(script: str | None, *, name: str, new_name: str) -> str | None:
     """Why a handler saving ``script`` may not be renamed, or None.
 
-    A handler that keeps a sanction keeps its name too, so the one named
-    scam-banner is the original row and no other can take up the name (and
-    with it the reference copy). Call after :func:`moderation_refusal` passed.
+    A handler that keeps a sanction keeps its name too, so a frozen punisher
+    cannot take up another handler's name. Call after
+    :func:`moderation_refusal` passed.
     """
     if new_name == name or not _uses_sanctions(script):
         return None

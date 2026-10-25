@@ -553,17 +553,11 @@ def test_author_history_before_this_message():
 # -- the policy it reads ------------------------------------------------------
 
 
-async def test_policy_follows_the_legacy_actors_switches_and_the_live_script(tmp_path):
-    from pathlib import Path
-
-    reference = (
-        Path(__file__).resolve().parents[3]
-        / "scripts/handler_scripts/scam-banner.monty"
-    ).read_text()
+async def test_policy_follows_the_legacy_actors_switches(tmp_path):
     async with sessions() as session:
         session.add(ModerationFilterConfig(guild_id=GUILD, spam_engine_enabled=True))
         for name, script, enabled, channels in (
-            (SCAM_BANNER_HANDLER, reference, True, []),
+            (SCAM_BANNER_HANDLER, "pass\n", True, []),
             ("edit-ping-catch", "pass\n", False, []),
             ("disboard-bump-tracker", "pass\n", True, ["555"]),
         ):
@@ -585,19 +579,10 @@ async def test_policy_follows_the_legacy_actors_switches_and_the_live_script(tmp
     loaded = await load_policy(GUILD)
     assert loaded.spam is not None and loaded.ring is not None
     assert loaded.attachments is None  # no attachment config row: off
-    assert loaded.scam_gate and loaded.scam_banner_matches_reference is True
+    assert loaded.scam_gate
+    assert "scam_banner_matches_reference" not in loaded.as_record()
     assert loaded.edit_ping is False
     assert loaded.bump_channel_ids == frozenset({"555"})
-
-    async with sessions() as session:
-        handler = (
-            await session.execute(
-                select(AdminHandler).where(AdminHandler.name == SCAM_BANNER_HANDLER)
-            )
-        ).scalar_one()
-        handler.script = reference + "\n# drifted\n"
-        await session.commit()
-    assert (await load_policy(GUILD)).scam_banner_matches_reference is False
 
 
 async def test_a_guild_with_nothing_configured_runs_only_the_ring():

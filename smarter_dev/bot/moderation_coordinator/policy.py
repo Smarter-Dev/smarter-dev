@@ -18,11 +18,8 @@ toggles are off: the cutover turned them off. The rules then run from the
 ownership row's rule list, still with each actor's own settings (thresholds,
 file tiers, the ring's windows, the handlers' scopes).
 
-The scam gate is a port of the reference copy of scam-banner
-(``scripts/handler_scripts/scam-banner.monty``). The live script is a database
-row that can drift from that copy, so its sha256 is compared with
-:data:`SCAM_BANNER_REFERENCE_SHA256` and the result is kept with every
-decision: a shadow comparison against a drifted live script says so.
+The scam gate is a port of scam-banner's reference script, which was removed
+with the legacy actors after the #240 cutover.
 """
 
 from __future__ import annotations
@@ -42,9 +39,6 @@ from smarter_dev.bot.spam_engine import SpamEngineSettings
 from smarter_dev.bot.spam_ring import SpamRingSettings
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
-from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_HANDLER
-from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_REFERENCE_SHA256
-from smarter_dev.web.handler_moderation_policy import script_sha256
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.moderation_gateway.config import load_report_channel
@@ -52,6 +46,7 @@ from smarter_dev.web.moderation_gateway.gateway import default_session_factory
 
 logger = logging.getLogger(__name__)
 
+SCAM_BANNER_HANDLER = "scam-banner"
 EDIT_PING_HANDLER = "edit-ping-catch"
 BUMP_TRACKER_HANDLER = "disboard-bump-tracker"
 
@@ -79,9 +74,6 @@ class GuildPolicy:
     attachments: AttachmentPolicy | None = None
     ring: SpamRingSettings | None = None
     scam_gate: bool = False
-    #: Whether the live scam-banner script is the reference copy; None when
-    #: there is no live script to compare.
-    scam_banner_matches_reference: bool | None = None
     edit_ping: bool = False
     #: The live handlers' scopes; empty means every channel, as for handlers.
     scam_gate_channel_ids: frozenset[str] = frozenset()
@@ -110,7 +102,6 @@ class GuildPolicy:
             "attachment_filter": self.attachments is not None,
             "spam_ring": self.ring is not None,
             "scam_gate": self.scam_gate,
-            "scam_banner_matches_reference": self.scam_banner_matches_reference,
             "edit_ping": self.edit_ping,
             "bump_channel": bool(self.bump_channel_ids),
             "mass_mention": self.mass_mention,
@@ -189,11 +180,6 @@ async def load_policy(guild_id: str) -> GuildPolicy:
         attachments=attachments,
         ring=ring,
         scam_gate=on(own.SCAM_GATE) if on else bool(scam and scam.enabled),
-        scam_banner_matches_reference=(
-            script_sha256(scam.script) == SCAM_BANNER_REFERENCE_SHA256
-            if scam is not None
-            else None
-        ),
         edit_ping=on(own.EDIT_PING) if on else bool(edit and edit.enabled),
         scam_gate_channel_ids=_scope(scam),
         edit_ping_channel_ids=_scope(edit),
@@ -278,12 +264,4 @@ class PolicyCache:
         if not policy.loaded_at:
             policy = replace(policy, loaded_at=now)
         self._policies[guild_id] = policy
-        if policy.scam_banner_matches_reference is False and (
-            cached is None or cached.scam_banner_matches_reference is not False
-        ):
-            logger.warning(
-                "The live scam-banner script in guild %s is not the reference "
-                "copy the coordinator's scam gate was ported from",
-                guild_id,
-            )
         return policy

@@ -17,7 +17,6 @@ from aiohttp import web
 
 from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.streak_agent import StreakCelebrationAgent
-from smarter_dev.bot.attachment_filter import check_attachment_filter
 from smarter_dev.bot.audit_logger import log_member_ban
 from smarter_dev.bot.audit_logger import log_member_join
 from smarter_dev.bot.audit_logger import log_member_leave
@@ -35,9 +34,6 @@ from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.services.media_client import MediaClient
 from smarter_dev.bot.services.usage_reporter import configure_usage_reporter
 from smarter_dev.bot.services.usage_reporter import drain_usage_reports
-from smarter_dev.bot.spam_engine import check_spam_engine
-from smarter_dev.bot.spam_engine import release_guild_spam_state
-from smarter_dev.bot.spam_ring import check_spam_ring
 from smarter_dev.bot.utils.embeds import create_error_embed
 from smarter_dev.bot.utils.image_embeds import close_generator
 from smarter_dev.shared.config import Settings
@@ -1215,107 +1211,71 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
 
 
 def register_message_moderation_listeners(bot: lightbulb.BotApp) -> None:
-    """Register the per-message content-filter and spam-engine moderation pass.
+    """Register the per-message content-filter moderation pass.
 
-    Both checks live inside a *single* listener rather than being registered as
-    two independent ones. Hikari dispatches all listeners of an event
-    concurrently, so two registrations would race, and these two checks have a
-    required order:
+    The heuristic spam engine and the spam ring detector used to run here as
+    later stages of the same listener; they were removed after the #240
+    cutover, and the moderation coordinator (``register_moderation_shadow``)
+    now judges and acts on those cases. The content filters are not part of
+    that migration and still run from this listener.
 
-    1. The content filters run first. They can delete the offending message
-       outright, and their mod-log line needs the original content.
-    2. The spam engine runs second, and it runs *unconditionally* — even when a
-       content filter already deleted the message. The engine's rate, channel
-       spread and duplicate metrics are computed from a rolling buffer that
-       only gets filled by messages it sees, so skipping it would blind those
-       metrics to exactly the messages a raid consists of. A message that both
-       stages want deleted is deleted twice at worst, and both modules treat a
-       404 on delete as success.
-    3. The spam ring detector runs last, also unconditionally. It sweeps a
-       whole staged conversation rather than one author, so it must see the ad
-       even when an earlier stage already removed it. It holds a per-channel
-       lock while it sweeps; that only delays this one message's task.
-
-    Failure handling distinguishes the two things that can go wrong in a stage:
+    Failure handling distinguishes the two things that can go wrong:
 
     * ``hikari.HTTPError`` — Discord refused a call or the connection dropped.
-      That is an expected operational outcome (both modules already handle the
-      403/404 cases they can act on), so it is logged with message context and
-      the next stage still runs.
+      That is an expected operational outcome (the content filter already
+      handles the 403/404 cases it can act on), so it is logged with message
+      context and swallowed.
     * anything else — a bug or a misconfiguration, e.g. a mute duration that
-      silently disables enforcement. Those are logged with message context and
-      then re-raised as an ``ExceptionGroup`` once every stage has had its turn,
-      so a broken stage stays loud instead of decaying into a log line nobody
-      reads.
+      silently disables enforcement. That is logged with message context and
+      then re-raised as an ``ExceptionGroup``, so a broken filter stays loud
+      instead of decaying into a log line nobody reads.
 
     Re-raising is safe at this event-loop boundary:
     ``hikari.impl.event_manager_base.EventManagerBase._invoke_callback`` catches
     ``Exception`` out of a listener, logs it at ERROR with the traceback and
     dispatches an ``ExceptionEvent``. It does not tear down the gateway
     connection, and every other listener for the event is invoked in its own
-    task, so none of them are affected. Collecting the failures instead of
-    raising immediately keeps the stages isolated from each other as well.
+    task, so none of them are affected.
 
-    Both moderation modules re-check their own config toggles, so a guild with
-    no config row or a disabled toggle is a no-op that never reaches Discord.
+    The content filter re-checks its own config toggles, so a guild with no
+    config row or a disabled toggle is a no-op that never reaches Discord.
     """
 
     @bot.listen()
     async def on_message_moderation(event: hikari.GuildMessageCreateEvent) -> None:
-        """Run the content filters and then the spam engine over one message."""
+        """Run the content filters over one message."""
         if event.is_bot or not event.guild_id:
             return
 
-        moderation_stages = (
-            ("content filter", check_content_filters),
-            ("spam engine", check_spam_engine),
-            ("spam ring", check_spam_ring),
-        )
         message_context = (
             f"guild {event.guild_id}, channel {event.channel_id}, "
             f"message {event.message_id}"
         )
-        unexpected_stage_failures: list[Exception] = []
 
-        for stage_name, run_stage in moderation_stages:
-            try:
-                await run_stage(bot, event)
-            except hikari.HTTPError as discord_error:
-                logger.warning(
-                    f"Discord call failed during the {stage_name} check "
-                    f"({message_context}): {type(discord_error).__name__}"
-                )
-            except Exception as unexpected_failure:
-                log_exception(
-                    logger,
-                    f"The {stage_name} check failed unexpectedly ({message_context})",
-                )
-                # Hikari logs whatever the listener raises in full, so only
-                # the failure's types and frames go back up.
-                unexpected_stage_failures.append(
-                    RuntimeError(exception_trace(unexpected_failure))
-                )
+        unexpected_failure_trace: Exception | None = None
 
-        if unexpected_stage_failures:
+        try:
+            await check_content_filters(bot, event)
+        except hikari.HTTPError as discord_error:
+            logger.warning(
+                f"Discord call failed during the content filter check "
+                f"({message_context}): {type(discord_error).__name__}"
+            )
+        except Exception as unexpected_failure:
+            log_exception(
+                logger,
+                f"The content filter check failed unexpectedly ({message_context})",
+            )
+            # Hikari logs whatever the listener raises in full, so only the
+            # failure's types and frames go back up — raised outside this
+            # block so the original exception is not chained onto it.
+            unexpected_failure_trace = RuntimeError(exception_trace(unexpected_failure))
+
+        if unexpected_failure_trace is not None:
             raise ExceptionGroup(
                 f"Message moderation failed ({message_context})",
-                unexpected_stage_failures,
+                [unexpected_failure_trace],
             )
-
-    @bot.listen()
-    async def on_guild_leave_release_spam_state(event: hikari.GuildLeaveEvent) -> None:
-        """Drop a departed guild's spam-engine state immediately.
-
-        The engine also ages out guilds that go quiet, but that sweep only runs
-        when some *other* guild receives a message and it deliberately waits out
-        the retention and re-offense windows first. Leaving a guild is
-        unambiguous — none of that state can ever be read again — so release it
-        at once rather than holding a raid's worth of buffered messages until
-        the next sweep happens to notice.
-        """
-        released = release_guild_spam_state(str(event.guild_id))
-        if released:
-            logger.info(f"Released spam-engine state for departed guild {event.guild_id}")
 
 
 def load_plugins(bot: lightbulb.BotApp) -> None:
@@ -1823,47 +1783,13 @@ async def run_bot() -> None:
                     exc_info=True,
                 )
 
-    @bot.listen()
-    async def on_attachment_filter(event: hikari.GuildMessageCreateEvent) -> None:
-        """Check messages for blocked attachment types."""
-        # Skip bot messages
-        if event.is_bot:
-            return
-
-        # Skip if no guild
-        if not event.guild_id:
-            return
-
-        # Skip if no attachments
-        if not event.message.attachments:
-            return
-
-        # A Discord call the filter could not complete is an expected operational
-        # outcome (a missing permission, a message someone else already deleted),
-        # so it is logged and the message is let through. Anything else is a bug
-        # or a misconfiguration and must stay loud: swallowing it silently is how
-        # attachment filtering stops working with nothing to page on. Hikari
-        # catches, logs at ERROR and dispatches an ExceptionEvent per listener
-        # without tearing down the gateway, so re-raising is safe here.
-        try:
-            await check_attachment_filter(bot, event)
-        except hikari.HTTPError as discord_error:
-            logger.warning(
-                f"Discord call failed during the attachment filter check "
-                f"(guild {event.guild_id}, channel {event.channel_id}, "
-                f"message {event.message_id}): {type(discord_error).__name__}"
-            )
-
-    # Content filters (blocked TLDs, invite links, webhook killer) followed by
-    # the heuristic spam engine. Registered together, in that order, by a
-    # dedicated helper — see its docstring for why the order is load-bearing.
-    # The attachment filter above stays an independent listener: it only fires
-    # on messages that carry attachments and shares no state with these two.
+    # Content filters (blocked TLDs, invite links, webhook killer). See the
+    # helper's docstring for its failure handling.
     register_message_moderation_listeners(bot)
 
-    # The moderation coordinator, in shadow for the guilds listed in
-    # MODERATION_SHADOW_GUILD_IDS: it judges the same messages and records its
-    # decision next to the legacy actors' effects. It cannot act.
+    # The moderation coordinator, for the guilds listed in
+    # MODERATION_SHADOW_GUILD_IDS: it judges every message and records its
+    # decision, and acts only in a guild whose ownership row names it (#240).
     register_moderation_shadow(bot)
 
     @bot.listen()
