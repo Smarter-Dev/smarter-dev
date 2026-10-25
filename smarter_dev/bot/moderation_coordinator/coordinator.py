@@ -60,6 +60,7 @@ from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
 from smarter_dev.bot.moderation_coordinator.policy import in_scope
 from smarter_dev.bot.moderation_coordinator.state import RecentPosts
 from smarter_dev.bot.moderation_coordinator.state import RingRegistry
+from smarter_dev.bot.moderation_coordinator.state import ScamBursts
 from smarter_dev.bot.moderation_coordinator.state import ScamSanctions
 from smarter_dev.bot.moderation_coordinator.state import SpamTracker
 from smarter_dev.bot.moderation_coordinator.state import VerdictCache
@@ -137,6 +138,13 @@ class Evaluation:
     #: ad and follow-ups share in the gateway.
     ring_context: tuple[str, ...] = ()
     ring_alias: str | None = None
+    #: The gateway alias of the author's scam burst: every post of it, and
+    #: its holds, are one incident (#376).
+    burst_alias: str | None = None
+    #: Whether the burst already carries its scam sanction (this message's
+    #: own, or another post's): a hold left without a verdict needs no
+    #: moderator then.
+    burst_sanctioned: bool = False
     #: When the deterministic rules were already carried out (before any
     #: classifier wait), what is left to carry out; ``decision`` stays the
     #: whole decision, for the record.
@@ -193,6 +201,7 @@ class Coordinator:
         rings: RingRegistry | None = None,
         verdicts: VerdictCache | None = None,
         sanctions: ScamSanctions | None = None,
+        bursts: ScamBursts | None = None,
     ) -> None:
         self.reads = reads
         self.classifier = classifier
@@ -201,6 +210,7 @@ class Coordinator:
         self.rings = rings or RingRegistry()
         self.verdict_cache = verdicts or VerdictCache()
         self.sanctions = sanctions or ScamSanctions()
+        self.bursts = bursts or ScamBursts()
 
     async def evaluate(
         self,
@@ -437,6 +447,10 @@ class Coordinator:
         history = None
         known_copy = False
         escalated = False
+        held_copy = False
+        earlier = None
+        burst_anchor = None
+        burst_alias = None
         if scam_candidate and not await author_is_staff():
             copies, burst = rules.burst_copies(facts, key, earlier_posts)
             # The post's own actions (its early mass-mention warning, and a
@@ -462,6 +476,19 @@ class Coordinator:
             escalated = known_copy and self.verdict_cache.escalates(
                 facts.guild_id, facts.author_id, key, high_signal, now
             )
+            # The post's check saw every image: the copy is held while that
+            # check is out and reuses its answer, rather than spending the
+            # author's budget on the same question (#376).
+            held_copy = (
+                known_copy
+                and not escalated
+                and self.verdict_cache.holds_while_asked(
+                    facts.guild_id, facts.author_id, key, high_signal, now
+                )
+            )
+            if escalated:
+                # The post's own answer, should the copy's request find none.
+                earlier = self.verdict_cache.asked(facts.guild_id, facts.author_id, key)
             known_copy = known_copy and not escalated
             scam_review = rules.scam_gate_review(
                 facts,
@@ -476,6 +503,10 @@ class Coordinator:
             )
         claimed = None
         if scam_review is not None:
+            burst_anchor = self.bursts.join(
+                facts.guild_id, facts.author_id, facts.message_id, now
+            )
+            burst_alias = _burst_alias(facts.guild_id, facts.author_id, burst_anchor)
             # Claimed here, with nothing awaited since ``known`` and
             # ``escalates`` read the cache: a post and its copy cannot both
             # miss each other, and a post decided later sees its escalated
@@ -487,6 +518,10 @@ class Coordinator:
                 now,
                 reasons=scam_review.high_signal,
                 replace=escalated,
+                sampled=_image_sample(
+                    facts, scam_review, policy.document.rules.scam_gate.image_sample
+                )
+                is not None,
             )
             if claimed[0]:
                 # Copies waiting on this check get no answer if it never runs.
@@ -608,11 +643,12 @@ class Coordinator:
             and (not policy.acting or policy.provisional_allowed())
             else ()
         )
-        if scam_review is not None and held_for and not known_copy:
+        if scam_review is not None and held_for and (not known_copy or held_copy):
             provisional = Provisional(
                 user_id=facts.author_id,
                 duration_seconds=policy.document.provisional.duration_seconds,
                 reasons=held_for,
+                alias=burst_alias,
             )
             if on_provisional is not None:
                 # Contain first: the verdict is up to 10 s away.
@@ -669,6 +705,24 @@ class Coordinator:
                 self._settle(facts, key, first_asker, {})
             raise
         verdicts = Verdicts(result.verdicts).merged(reused)
+        if earlier is not None and scam_review is not None:
+            # An escalated copy whose own check found nothing (a spent
+            # budget, a timeout) is judged on its post's answer.
+            missing = [
+                label for label in scam_review.labels if not verdicts[label].known
+            ]
+            if missing:
+                try:
+                    answer = await asyncio.wait_for(asyncio.shield(earlier), deadline)
+                except TimeoutError:
+                    answer = {}
+                fallback = {
+                    label: answer[label]
+                    for label in missing
+                    if label in answer and answer[label].known
+                }
+                verdicts = verdicts.merged(fallback)
+                reused.update(fallback)
         if first_asker is not None and scam_review is not None:
             self._settle(
                 facts,
@@ -684,7 +738,7 @@ class Coordinator:
             # posted while it was asked is removed with the rest (as
             # scam-banner re-read them after its review). The same author's
             # same post only.
-            later, _ = rules.burst_copies(
+            later, later_burst = rules.burst_copies(
                 facts,
                 key,
                 self.recent.read(facts.guild_id, facts.author_id, now),
@@ -695,9 +749,29 @@ class Coordinator:
                 copies=scam_review.copies
                 + tuple(post for post in later if post.message_id not in known),
             )
+            if (
+                later_burst
+                and not scam_review.copy
+                and rules.HIGH_SIGNAL_BURST not in scam_review.high_signal
+            ):
+                # A copy in another channel arrived while this post was
+                # judged, and waits for this answer: the post is judged as
+                # the burst it became, as an escalated copy would have been
+                # (#376). Its sanction is the burst's one.
+                scam_review = replace(
+                    scam_review,
+                    high_signal=(*scam_review.high_signal, rules.HIGH_SIGNAL_BURST),
+                )
             scam_hits, scam_outcome, lines = scam_review.resolve(verdicts)
             scam_hits = await self._one_sanction(
-                facts, key, scam_hits, first_asker, now, held, deadline
+                facts,
+                key,
+                scam_hits,
+                first_asker,
+                now,
+                held,
+                deadline,
+                burst=burst_anchor,
             )
             hits += scam_hits
             review += lines
@@ -796,6 +870,11 @@ class Coordinator:
             history=history,
             ring_context=ring_context,
             ring_alias=ring_alias,
+            burst_alias=burst_alias,
+            burst_sanctioned=burst_anchor is not None
+            and self.sanctions.given(
+                facts.guild_id, facts.author_id, burst=burst_anchor, now=now
+            ),
             remaining=remaining,
         )
 
@@ -826,6 +905,8 @@ class Coordinator:
         now: float,
         held: _Slot,
         deadline: float | None = None,
+        *,
+        burst: str | None = None,
     ) -> list[RuleHit]:
         """The ``scam:{key}`` claim: a post and its copies are sanctioned once,
         with the strongest sanction (#310 re-review item 2).
@@ -852,7 +933,7 @@ class Coordinator:
                     asyncio.shield(newer), deadline or self.classifier.deadline
                 )
         if self.sanctions.claim(
-            facts.guild_id, facts.author_id, key, sanctions[0], now
+            facts.guild_id, facts.author_id, key, sanctions[0], now, burst=burst
         ):
             return scam_hits
         return rules.without_sanction(scam_hits, rules.ALREADY_SANCTIONED)
@@ -927,6 +1008,11 @@ def _deletes(decision, message_id: str) -> bool:
         for target in decision.targets.values()
         for item in target.cleanup
     )
+
+
+def _burst_alias(guild_id: str, author_id: str, anchor: str) -> str:
+    """One gateway incident for an author's scam burst (#376)."""
+    return f"coordinator_scam:{guild_id}:{author_id}:{anchor}"
 
 
 def _ring_alias(guild_id: str, channel_id: str, ad_message_id: str) -> str:

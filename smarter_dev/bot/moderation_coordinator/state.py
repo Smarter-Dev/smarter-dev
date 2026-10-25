@@ -46,6 +46,9 @@ MAX_RECENT_POSTS = 30
 VERDICT_TTL_SECONDS = 120.0
 #: How long a post's scam sanction is remembered against its copies.
 SANCTION_TTL_SECONDS = 600.0
+#: How long after a member's last scam-gate post the next one still joins
+#: its burst (one incident, one sanction): the verdict cache's reach.
+BURST_GAP_SECONDS = 120.0
 MAX_TRACKED_AUTHORS = 4096
 
 
@@ -246,12 +249,15 @@ class VerdictCache:
     """
 
     def __init__(self) -> None:
+        #: (guild, author, post) -> (asked at, its answer, the high-signal
+        #: reasons it was asked under, whether it saw only a sample of the
+        #: post's images).
         self._entries: dict[
-            tuple[str, str, str], tuple[float, asyncio.Future, frozenset[str]]
+            tuple[str, str, str], tuple[float, asyncio.Future, frozenset[str], bool]
         ] = {}
 
     def _prune(self, now: float) -> None:
-        for key, (at, _, _) in list(self._entries.items()):
+        for key, (at, *_) in list(self._entries.items()):
             if now - at > VERDICT_TTL_SECONDS:
                 del self._entries[key]
 
@@ -264,6 +270,7 @@ class VerdictCache:
         *,
         reasons: Sequence[str] = (),
         replace: bool = False,
+        sampled: bool = False,
     ) -> tuple[bool, asyncio.Future]:
         """``(True, future)`` for the first asker, who must settle the future;
         ``(False, future)`` for a copy, which awaits it.
@@ -271,14 +278,20 @@ class VerdictCache:
         ``reasons`` are the high-signal reasons the asker was judged (and
         held) under. ``replace`` makes this asker the first again: a copy
         that :meth:`escalates` asks with its stronger reasons, and later
-        copies wait for that answer instead."""
+        copies wait for that answer instead. ``sampled``: the asker's check
+        sees only a sample of the post's images."""
         now = time.time() if now is None else now
         self._prune(now)
         entry = self._entries.get((guild_id, author_id, key))
         if entry is not None and not replace:
             return False, entry[1]
         future: asyncio.Future = asyncio.get_running_loop().create_future()
-        self._entries[(guild_id, author_id, key)] = (now, future, frozenset(reasons))
+        self._entries[(guild_id, author_id, key)] = (
+            now,
+            future,
+            frozenset(reasons),
+            sampled,
+        )
         return True, future
 
     def known(
@@ -297,15 +310,40 @@ class VerdictCache:
         reasons: Sequence[str],
         now: float | None = None,
     ) -> bool:
-        """Whether a copy brings high-signal reasons (a burst, a mass mention
-        with a link) its post was not judged under: the earlier verdict (no
-        hold, perhaps one sampled image) does not cover it. A post already
-        found to be a violation covers every copy: it is removed, not asked
-        about again."""
+        """Whether a copy is asked about again: it brings high-signal reasons
+        (a burst, a mass mention with a link) its post was not judged under,
+        and the post's check saw only a sample of the images, so its verdict
+        does not cover what the copy is held for. A check that saw every
+        image already answered the copy's question: the copy waits for it
+        (:meth:`holds_while_asked`) instead of spending the author's budget
+        on the same question (#376). A post already found to be a violation
+        covers every copy: it is removed, not asked about again."""
         now = time.time() if now is None else now
         self._prune(now)
         entry = self._entries.get((guild_id, author_id, key))
-        return entry is not None and _adds_to(entry, reasons)
+        return entry is not None and entry[3] and _adds_to(entry, reasons)
+
+    def holds_while_asked(
+        self,
+        guild_id: str,
+        author_id: str,
+        key: str,
+        reasons: Sequence[str],
+        now: float | None = None,
+    ) -> bool:
+        """Whether a copy is held while it waits for its post's check: it
+        brings high-signal reasons the post was not held under, and that
+        check is still out. A check already answered decides the copy at
+        once, with nothing to contain meanwhile."""
+        now = time.time() if now is None else now
+        self._prune(now)
+        entry = self._entries.get((guild_id, author_id, key))
+        return entry is not None and not entry[1].done() and _adds_to(entry, reasons)
+
+    def asked(self, guild_id: str, author_id: str, key: str) -> asyncio.Future | None:
+        """The post's check as it stands (its answer, or the wait for it)."""
+        entry = self._entries.get((guild_id, author_id, key))
+        return entry[1] if entry is not None else None
 
     def newer(
         self, guild_id: str, author_id: str, key: str, future: asyncio.Future
@@ -332,7 +370,9 @@ class VerdictCache:
             del self._entries[(guild_id, author_id, key)]
 
 
-def _adds_to(entry: tuple[float, asyncio.Future, frozenset[str]], reasons) -> bool:
+def _adds_to(
+    entry: tuple[float, asyncio.Future, frozenset[str], bool], reasons
+) -> bool:
     """Whether ``reasons`` go past what ``entry``'s check was asked under,
     and that check did not already find a violation (which covers copies)."""
     if not set(reasons) - entry[2]:
@@ -344,13 +384,45 @@ def _adds_to(entry: tuple[float, asyncio.Future, frozenset[str]], reasons) -> bo
     return True
 
 
+class ScamBursts:
+    """A member's scam-gate posts close together are one burst (#376).
+
+    Two different scam posts, each copied to a second channel, were judged
+    as two posts: two incidents, two warnings, two DMs. Every post of the
+    burst now shares its first message as the burst's anchor: one incident
+    (the gateway alias) and one sanction (:class:`ScamSanctions`). A post
+    more than :data:`BURST_GAP_SECONDS` after the burst's last one starts a
+    new burst."""
+
+    def __init__(self) -> None:
+        #: (guild, author) -> (the burst's first message, its last post at).
+        self._bursts: dict[tuple[str, str], tuple[str, float]] = {}
+
+    def join(self, guild_id: str, author_id: str, message_id: str, now: float) -> str:
+        """The anchor of the burst this post belongs to (its own id when it
+        starts one)."""
+        entry = self._bursts.get((guild_id, author_id))
+        if entry is not None and now - entry[1] <= BURST_GAP_SECONDS:
+            anchor, last = entry[0], max(entry[1], now)
+        else:
+            anchor, last = message_id, now
+        self._bursts[(guild_id, author_id)] = (anchor, last)
+        if len(self._bursts) > MAX_TRACKED_AUTHORS:
+            for stale, (_, at) in list(self._bursts.items()):
+                if now - at > BURST_GAP_SECONDS:
+                    del self._bursts[stale]
+        return anchor
+
+
 class ScamSanctions:
-    """One scam sanction per post and its copies (the ``scam:{key}`` claim).
+    """One scam sanction per post and its copies (the ``scam:{key}`` claim),
+    and per burst (:class:`ScamBursts`).
 
     An original and its escalated copy are separate messages, so separate
-    incidents; both judged a violation would each warn or time out. The
-    first sanction is recorded here and a later one applies only when it is
-    stronger (a warn, then a held copy's timeout)."""
+    incidents; both judged a violation would each warn or time out. So
+    would two different posts of one burst. The first sanction is recorded
+    here and a later one applies only when it is stronger (a warn, then a
+    held copy's timeout)."""
 
     def __init__(self) -> None:
         self._given: dict[tuple[str, str, str], tuple[float, Sanction]] = {}
@@ -362,14 +434,30 @@ class ScamSanctions:
         key: str,
         sanction: Sanction,
         now: float | None = None,
+        *,
+        burst: str | None = None,
     ) -> bool:
-        """Whether ``sanction`` applies; True records it as the post's."""
+        """Whether ``sanction`` applies: it is stronger than what the post
+        and its burst were already given. True records it as both's."""
         now = time.time() if now is None else now
         for stale, (at, _) in list(self._given.items()):
             if now - at > SANCTION_TTL_SECONDS:
                 del self._given[stale]
-        given = self._given.get((guild_id, author_id, key))
-        if given is not None and not sanction.stronger_than(given[1]):
-            return False
-        self._given[(guild_id, author_id, key)] = (now, sanction)
+        keys = [(guild_id, author_id, key)]
+        if burst is not None:
+            keys.append((guild_id, author_id, f"burst:{burst}"))
+        for claim in keys:
+            given = self._given.get(claim)
+            if given is not None and not sanction.stronger_than(given[1]):
+                return False
+        for claim in keys:
+            self._given[claim] = (now, sanction)
         return True
+
+    def given(
+        self, guild_id: str, author_id: str, *, burst: str, now: float | None = None
+    ) -> bool:
+        """Whether the burst was already given its sanction."""
+        now = time.time() if now is None else now
+        entry = self._given.get((guild_id, author_id, f"burst:{burst}"))
+        return entry is not None and now - entry[0] <= SANCTION_TTL_SECONDS

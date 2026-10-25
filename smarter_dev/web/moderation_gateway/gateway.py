@@ -659,6 +659,31 @@ class ModerationGateway:
                     fingerprint=trigger.fingerprint,
                 )
             )
+        if trigger.author_id and trigger.author_username:
+            named = (
+                await session.execute(
+                    select(ModerationIncidentEntry.id).where(
+                        ModerationIncidentEntry.incident_id == incident_id,
+                        ModerationIncidentEntry.kind == t.ENTRY_MEMBER,
+                        ModerationIncidentEntry.target_user_id
+                        == str(trigger.author_id),
+                    )
+                )
+            ).first()
+            if named is None:
+                session.add(
+                    ModerationIncidentEntry(
+                        incident_id=incident_id,
+                        guild_id=trigger.guild_id,
+                        kind=t.ENTRY_MEMBER,
+                        source=trigger.actor,
+                        target_user_id=str(trigger.author_id),
+                        details={
+                            "username": trigger.author_username,
+                            "display_name": trigger.author_display_name,
+                        },
+                    )
+                )
         seen_messages = {row[3] for row in already if row[0] == t.ENTRY_EVIDENCE}
         if (
             trigger.message_id

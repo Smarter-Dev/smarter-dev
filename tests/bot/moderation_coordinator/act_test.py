@@ -304,7 +304,10 @@ async def test_no_verdict_leaves_the_hold_and_alerts_with_the_cause():
     assert h.port.members[victim.id] is not None  # still held; it runs out
     alerts = await entries(gw.ENTRY_ALERT)
     assert any(
-        "expired without a verdict" in alert and "invalid output" in alert
+        "No verdict from the scam check" in alert
+        and "invalid output" in alert
+        and "5-minute hold stays on and lapses by itself" in alert
+        and "A moderator should look" in alert
         for alert in alerts
     )
     assert (posts[1].channel_id, CLOSED_UNKNOWN) in h.messenger.posts
@@ -1625,6 +1628,23 @@ def _answers(*, post, copy):
     return build
 
 
+def _copies_ask_again(h):
+    """Before #376 a held post's burst copy asked the classifier again; it
+    now waits for the post's answer (only a post judged on a sample of its
+    images is asked about again). The cases using this are about the
+    executor's hold accounting when a post and its copy are decided apart,
+    with different answers, so the copy asks again as it used to."""
+    from smarter_dev.bot.moderation_coordinator import state
+
+    cache = h.shadow.coordinator.verdict_cache
+
+    def escalates(guild_id, author_id, key, reasons, now=None):
+        entry = cache._entries.get((guild_id, author_id, key))
+        return entry is not None and state._adds_to(entry, reasons)
+
+    cache.escalates = escalates
+
+
 async def test_a_clean_original_does_not_lift_its_escalated_copys_hold():
     """Re-review item 4: a held post and its held burst copy share the hold's
     claim. The post's clean verdict released the claim while the copy was
@@ -1642,6 +1662,7 @@ async def test_a_clean_original_does_not_lift_its_escalated_copys_hold():
         reads=ReplayReads(histories={newbie.id: FIRST}),
     )
     h = harness(case)
+    _copies_ask_again(h)
     h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
     h.shadow.submit(first)
     await asyncio.sleep(0.02)
@@ -1722,7 +1743,9 @@ async def test_an_original_still_sanctions_when_its_copy_fails_after_its_verdict
     """Round 3, item 1: the post dropped its sanction once its escalated
     copy's check said yes, trusting the copy to sanction; a copy that failed
     after sharing its verdict (before claiming) left nobody sanctioned. The
-    post always claims after waiting: the sanction is its own."""
+    post always claims after waiting: the sanction is its own. Since #376
+    the post is judged as the burst its copy made of it: the burst's 24 h
+    timeout, not a warn."""
     member = Member("desk", 99, NOW - timedelta(days=900), NOW - timedelta(days=800))
     first = say(member, "my desk setup", NOW, attachments=_shots(4))
     copy = _copy_in(first, FOURTH)
@@ -1739,11 +1762,11 @@ async def test_an_original_still_sanctions_when_its_copy_fails_after_its_verdict
     coordinator = h.shadow.coordinator
     one_sanction = coordinator._one_sanction
 
-    async def fail_on_copy(facts, *args):
+    async def fail_on_copy(facts, *args, **kwargs):
         if facts.message_id == copy.message_id:
             copy_failed.set()
             raise RuntimeError("the copy failed before claiming")
-        return await one_sanction(facts, *args)
+        return await one_sanction(facts, *args, **kwargs)
 
     coordinator._one_sanction = fail_on_copy
     h.port.post(copy.channel_id, copy.message_id, copy.author_id, copy.content)
@@ -1757,8 +1780,9 @@ async def test_an_original_still_sanctions_when_its_copy_fails_after_its_verdict
     assert h.calls.total == 2  # the copy escalated: asked again
     rows = {row.message_id: row for row in h.recorder.rows}
     sanction = rows[first.message_id].decision["targets"][member.id]["sanction"]
-    assert sanction is not None and sanction["kind"] == gw.WARN
-    assert any("has been warned" in text for _, text in h.messenger.posts)
+    assert sanction is not None and sanction["kind"] == gw.TIMEOUT
+    untils = [c[2] for c in h.port.calls if c[0] == "timeout" and c[2] is not None]
+    assert len([u for u in untils if u - time.time() > 3600]) == 1
 
 
 @pytest.mark.parametrize("placed", [True, False], ids=["post held", "post holding"])
@@ -1782,6 +1806,7 @@ async def test_a_copy_whose_hold_failed_does_not_lift_its_posts_hold(placed):
         reads=ReplayReads(histories={newbie.id: FIRST}),
     )
     h = harness(case)
+    _copies_ask_again(h)
     execute = h.executor.execute
 
     async def note_the_copy(evaluation):
@@ -1881,6 +1906,7 @@ async def test_a_clean_post_does_not_release_a_copy_still_reading_ownership():
         reads=ReplayReads(histories={newbie.id: FIRST}),
     )
     h = harness(case)
+    _copies_ask_again(h)
     containing = contextvars.ContextVar("containing", default=None)
     contain = h.executor.contain
 
@@ -2013,6 +2039,7 @@ async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
     )
     assert lines[summary + 1].startswith("To undo a timeout")
     assert "expired without a verdict" not in report
+    assert "No verdict" not in report
     assert "already covered" not in report and "not done" not in report
     assert report.count("History:") == 0  # said once, in the summary
 
@@ -2140,7 +2167,8 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     was out, was held under its own trigger, and its check answered first
     and took the sanction. Its hold opened a second incident (no text, no
     fingerprint), and the post's landed verdict read as "expired without a
-    verdict". One incident and one report now, with no such alert."""
+    verdict". One incident and one report now, with no such alert. Since
+    #376 the held copy waits for the post's answer instead of asking again."""
     case, (first, _) = _image_only_burst()
     copy = _copy_in(first, OTHER)
     case = replace(
@@ -2155,12 +2183,13 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     h.shadow.submit(copy)
     await h.shadow.drain()
 
-    assert h.calls.total == 2
+    assert h.calls.total == 1
     assert {first.message_id, copy.message_id} <= h.deleted()
     assert len(await _incident_ids()) == 1
     assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
     report = h.port.latest_report_text(REPORTS)
     assert "expired without a verdict" not in report
+    assert "No verdict" not in report
     assert "upgraded to a 24-hour timeout" in report
     assert "2 messages removed, timed out for 24 hours, told by DM" in report
     [(_, dm)] = h.messenger.dms

@@ -341,7 +341,7 @@ class Classifier(_Section):
     #: are built with that timeout.
     deadline_seconds: float = Field(10.0, ge=1.0, le=10.0)
     #: Each at least 1: a cap of 0 would switch judging off unannounced.
-    per_author: int = Field(2, ge=1, le=100)
+    per_author: int = Field(5, ge=1, le=100)
     author_window_seconds: int = Field(600, ge=1, le=DAY)
     per_guild_minute: int = Field(20, ge=1, le=1000)
     #: The acting guild's daily ceiling; a guild in shadow keeps the shadow's.

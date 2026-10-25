@@ -185,6 +185,9 @@ def facts_from_message(
         message_id=str(message.id),
         author_id=str(author.id),
         author_name=getattr(author, "username", None) or str(author.id),
+        author_display_name=(getattr(member, "nickname", None) if member else None)
+        or getattr(author, "global_name", None)
+        or None,
         content=content,
         posted_at=now,
         account_created_at=snowflake_to_datetime(int(author.id)),

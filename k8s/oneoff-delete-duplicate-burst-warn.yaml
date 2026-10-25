@@ -1,0 +1,39 @@
+# One-off Job: scripts/delete_duplicate_burst_warn.py (#376). Not applied by
+# the deploy workflow; run by hand with the deployed website tag, `check` first
+# (read only), then `delete`:
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<NAME>|check|' \
+#     k8s/oneoff-delete-duplicate-burst-warn.yaml | kubectl apply -f -
+#   kubectl -n smarter-dev wait --for=condition=complete --timeout=120s job/smarter-dev-delete-duplicate-burst-warn-check
+#   kubectl -n smarter-dev logs job/smarter-dev-delete-duplicate-burst-warn-check
+#   kubectl -n smarter-dev delete job smarter-dev-delete-duplicate-burst-warn-check
+# Then the same four commands with <NAME> = delete. Running `delete` again
+# prints "nothing to delete" and exits 0.
+# Exit status 2 (the Job fails) means refused: nothing was changed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-delete-duplicate-burst-warn-<NAME>
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-delete-duplicate-burst-warn
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: delete-duplicate-burst-warn
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/delete_duplicate_burst_warn.py <NAME>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url
