@@ -120,6 +120,7 @@ controllers:
   - smarter_dev.web.bot_admin.scheduled_messages:ScheduledMessagesAdminController
   - smarter_dev.web.bot_admin.repeating_messages:RepeatingMessagesAdminController
   - smarter_dev.web.bot_admin.guild_configs:GuildConfigsAdminController
+  - smarter_dev.web.bot_admin.moderation_policy:ModerationPolicyAdminController
   - smarter_dev.web.bot_admin.help_conversations:HelpConversationsAdminController
   - smarter_dev.web.bot_admin.extensions:ExtensionsAdminController
   - smarter_dev.web.bot_admin.chat_memory:ChatMemoryAdminController

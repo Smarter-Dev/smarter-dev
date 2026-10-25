@@ -13,6 +13,7 @@ from skrift.admin.helpers import get_admin_context
 from skrift.auth.guards import auth_guard, Permission
 
 from smarter_dev.web.crud import ModerationActionOperations
+from smarter_dev.web.moderation_incidents_view import list_incidents
 
 mod_action_ops = ModerationActionOperations()
 
@@ -64,7 +65,7 @@ class ModActionsAdminController(Controller):
     async def user_mod_history(
         self, request: Request, db_session: AsyncSession, guild_id: str, user_id: str
     ) -> TemplateResponse:
-        """View moderation history for a specific user."""
+        """View moderation history for a specific user, with their incidents."""
         ctx = await get_admin_context(request, db_session)
 
         actions = await mod_action_ops.get_actions_for_user(
@@ -77,6 +78,9 @@ class ModActionsAdminController(Controller):
                 "actions": actions,
                 "guild_id": guild_id,
                 "user_id": user_id,
+                "incidents": await list_incidents(
+                    db_session, guild_id, user_id=user_id
+                ),
                 "active_page": "mod_actions",
                 **ctx,
             },

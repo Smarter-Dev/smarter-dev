@@ -1,0 +1,67 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Incidents - Guild {{ guild_id }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Moderation Incidents</h1>
+            <p>Guild: {{ guild_id }} — {{ incidents|length }} incident{{ 's' if incidents|length != 1 else '' }}{% if filter_user %} about <code>{{ filter_user }}</code>{% endif %} &middot; <a href="/admin/bot/guilds/{{ guild_id }}/moderation">Settings</a></p>
+        </hgroup>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Filters</div>
+            <div class="sk-panel-body">
+                <form method="get" action="/admin/bot/guilds/{{ guild_id }}/moderation/incidents" style="display:flex; gap:1rem; align-items:end; flex-wrap:wrap;">
+                    <div>
+                        <label for="user_search"><strong>User ID</strong></label><br>
+                        <input type="text" name="user_id" id="user_search" value="{{ filter_user }}" placeholder="Discord user ID" style="padding:0.4rem 0.6rem;">
+                    </div>
+                    <div>
+                        <button type="submit" class="sk-btn-outline sk-btn-small">Filter</button>
+                        <a href="/admin/bot/guilds/{{ guild_id }}/moderation/incidents" class="sk-btn-outline sk-btn-small">Clear</a>
+                    </div>
+                </form>
+                <small class="sk-text-muted">Every effect a detector asked for is <strong>requested</strong>; it is then <strong>confirmed</strong> by Discord, <strong>not applied</strong> (refused, already gone, or skipped: protected, weaker, overridden), or <strong>unknown</strong> (it may have landed; it is checked before anything is sent again).</small>
+            </div>
+        </div>
+
+        {% if incidents %}
+        <table class="sk-admin-table">
+            <thead>
+                <tr>
+                    <th>Opened</th>
+                    <th>Incident</th>
+                    <th>Subject</th>
+                    <th>Effects</th>
+                    <th>Outcomes</th>
+                    <th>Report</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in incidents %}
+                {% set incident = item.incident %}
+                <tr>
+                    <td style="white-space:nowrap;">{{ incident.opened_at.strftime('%Y-%m-%d') }}<br>{{ incident.opened_at.strftime('%H:%M') }}</td>
+                    <td style="min-width:14rem;"><a href="/admin/bot/guilds/{{ guild_id }}/moderation/incidents/{{ incident.id }}"><code>{{ item.short_id }}</code></a>{% if item.summary %}<br><small class="sk-text-muted">{{ item.summary }}</small>{% endif %}</td>
+                    <td>{% if incident.subject_user_id %}<a href="/admin/bot/mod-actions/{{ guild_id }}/user/{{ incident.subject_user_id }}"><code>{{ incident.subject_user_id }}</code></a>{% else %}—{% endif %}</td>
+                    <td>{% for kind in item.kinds %}<span class="sk-pill">{{ kind }}</span> {% else %}—{% endfor %}</td>
+                    <td style="white-space:nowrap; line-height:2;">
+                        {{ item.requested }} requested
+                        {% if item.counts['confirmed'] %}<br><span class="sk-pill sk-pill-published">{{ item.counts['confirmed'] }} confirmed</span>{% endif %}
+                        {% if item.counts['not_applied'] %}<br><span class="sk-pill" style="background:#eceff1; color:#37474f;">{{ item.counts['not_applied'] }} not applied</span>{% endif %}
+                        {% if item.counts['unknown'] %}<br><span class="sk-pill" style="background:#fff3cd; color:#856404;">{{ item.counts['unknown'] }} unknown</span>{% endif %}
+                    </td>
+                    <td>{% if item.report_url %}<a href="{{ item.report_url }}" target="_blank" rel="noopener">Open in Discord</a>{% else %}<span class="sk-text-muted">{{ incident.report_state }}</span>{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="sk-no-items">{% if filter_user %}No incidents about this user.{% else %}No incidents recorded for this guild yet.{% endif %}</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

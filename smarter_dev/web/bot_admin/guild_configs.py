@@ -44,6 +44,7 @@ from smarter_dev.web.discord_admin_client import (
     get_admin_discord_client,
 )
 from smarter_dev.web.guild_rules import normalize_newlines, parse_guild_rules
+from smarter_dev.web.moderation_policy_store import read_policy
 from smarter_dev.web.models import (
     AttachmentFilterConfig,
     AuditLogConfig,
@@ -83,6 +84,20 @@ _MODERATION_TOGGLE_FIELDS: tuple[str, ...] = (
     "webhook_killer_enabled",
     "spam_engine_enabled",
     "spam_ring_enabled",
+)
+
+# What the moderation-filter form still edits for a guild with a moderation
+# policy (#241): the content filter, which is not one of the coordinator's
+# rules and still reads this row. Everything else is on the Moderation page.
+CONTENT_FILTER_FIELDS: frozenset[str] = frozenset(
+    {
+        "content_filter_enabled",
+        "blocked_tlds",
+        "invite_filter_enabled",
+        "invite_filter_exempt_category_ids",
+        "webhook_killer_enabled",
+        "mod_log_channel_id",
+    }
 )
 
 # The nullable channel pickers on the moderation-filter form.
@@ -590,8 +605,13 @@ class GuildConfigsAdminController(Controller):
     )
     async def attachment_filter_config(
         self, request: Request, db_session: AsyncSession, guild_id: str
-    ) -> TemplateResponse:
-        """Render the attachment-filter configuration form for one guild."""
+    ) -> TemplateResponse | Redirect:
+        """Render the attachment-filter configuration form for one guild.
+
+        Under a moderation policy the attachment rule is on the Moderation
+        page, and this row is no longer read: redirect there."""
+        if await read_policy(db_session, guild_id) is not None:
+            return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")
         guild, error = await fetch_guild_or_error(
             request, db_session, guild_id, "attachment_filter"
         )
@@ -621,6 +641,12 @@ class GuildConfigsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str
     ) -> Redirect:
         """Persist submitted attachment-filter settings, then redirect back."""
+        if await read_policy(db_session, guild_id) is not None:
+            flash_error(
+                request,
+                "Attachment rules are on the Moderation page now; nothing saved.",
+            )
+            return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")
         redirect = Redirect(
             path=f"/admin/bot/guilds/{guild_id}/attachment-filter"
         )
@@ -659,12 +685,14 @@ class GuildConfigsAdminController(Controller):
         )
         guild_roles = await fetch_guild_roles(guild_id)
         config = await load_or_create_moderation_filter_config(db_session, guild_id)
+        policy = await read_policy(db_session, guild_id)
 
         return TemplateResponse(
             "admin/bot/guild_configs/moderation_filter.html",
             context={
                 "guild": guild,
                 "config": config,
+                "policy_revision": policy.revision if policy else None,
                 "text_channels": text_channels,
                 "category_channels": category_channels,
                 "guild_roles": guild_roles,
@@ -694,6 +722,13 @@ class GuildConfigsAdminController(Controller):
             flash_error(request, f"Moderation filter not saved: {exc}")
             return redirect
 
+        if await read_policy(db_session, guild_id) is not None:
+            # The rest is the policy's; only the content filter is saved here.
+            updates = {
+                key: value
+                for key, value in updates.items()
+                if key in CONTENT_FILTER_FIELDS
+            }
         await moderation_filter_ops.update_config(db_session, guild_id, **updates)
         await db_session.commit()
 

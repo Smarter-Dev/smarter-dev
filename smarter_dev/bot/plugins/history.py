@@ -81,6 +81,9 @@ class HistoryRow:
     source: str
     channel_id: str | None
     trigger_message_id: str | None
+    #: The incident it belongs to (gateway actions), as the admin panel's
+    #: Incidents page names it.
+    incident_id: str | None = None
 
 
 def humanize_time_since(moment: datetime, now: datetime) -> str:
@@ -147,6 +150,8 @@ def format_history_row(row: HistoryRow, guild_id: str) -> str:
     jump_link = build_jump_link(guild_id, row.channel_id, row.trigger_message_id)
     if jump_link:
         rendered += f" [Jump To Action]({jump_link})"
+    if row.incident_id:
+        rendered += f" · incident `{row.incident_id[:8]}`"
     return rendered
 
 
@@ -207,7 +212,13 @@ def to_history_row(action) -> HistoryRow:
         source=action.source,
         channel_id=action.channel_id,
         trigger_message_id=action.trigger_message_id,
+        incident_id=_incident_id(action),
     )
+
+
+def _incident_id(action) -> str | None:
+    incident_id = getattr(action, "incident_id", None)
+    return str(incident_id) if incident_id else None
 
 
 async def resolve_target_profile(
