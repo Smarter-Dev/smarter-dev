@@ -134,7 +134,7 @@ MAX_MATERIAL_BYTES = 16_000
 #: there the classifier is the scam check itself, and an empty budget leaves
 #: every scam check unknown for the rest of the day. 1500 requests bound a
 #: day at about $7.20 worst case.
-PER_AUTHOR = 2
+PER_AUTHOR = 5
 AUTHOR_WINDOW_SECONDS = 600.0
 PER_GUILD_MINUTE = 20
 DAILY_REQUESTS_ENV_VAR = "MODERATION_SHADOW_DAILY_REQUESTS"

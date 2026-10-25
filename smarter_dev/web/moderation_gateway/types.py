@@ -77,6 +77,9 @@ MESSAGE_DM = "dm"
 MESSAGE_WARNING_DM = "warning_dm"
 ENTRY_EVIDENCE = "evidence"
 ENTRY_TRANSCRIPT = "transcript"
+#: Who a member was at the incident (``details``: ``username``,
+#: ``display_name``); not a timeline line.
+ENTRY_MEMBER = "member"
 ENTRY_ASSESSMENT = "assessment"
 
 _WHITESPACE = re.compile(r"\s+")
@@ -173,6 +176,11 @@ class Trigger:
     ping_role_id: str | None = None
     moderator_user_id: str | None = None
     moderator_username: str | None = None
+    #: The author's username and display name as they were at the message:
+    #: the report names the member in plain text, since a mention renders
+    #: as "unknown-user" where the client has not cached them (#376).
+    author_username: str | None = None
+    author_display_name: str | None = None
 
     @property
     def fingerprint(self) -> str | None:

@@ -102,6 +102,7 @@ HAIKU = "haiku"
 TRIAGE_TOOLS = ("timeout", "purge", "delete")
 TRIAGE_ACTIVE_MODES = (EVALUATE, ENFORCE)
 
+HOUR = 3_600
 DAY = 86_400
 #: Discord refuses a timeout longer than this.
 DISCORD_MAX_TIMEOUT_SECONDS = 28 * DAY
@@ -310,8 +311,14 @@ class Sanctions(_Section):
     )
     #: A confirmed scam from an account younger than this is a ban.
     scam_ban_account_age_days: int = Field(7, ge=0, le=365)
-    #: The timeout a confirmed high-signal or repeat scam gets otherwise.
+    #: The timeout a confirmed repeat scam gets otherwise.
     scam_timeout_seconds: int = Field(DAY, ge=60, le=DISCORD_MAX_TIMEOUT_SECONDS)
+    #: The timeout a confirmed high-signal scam (a burst, a scam link, mass
+    #: mention bait) gets otherwise, when it is no repeat: most hacked
+    #: accounts spam in one burst and never again (Zech, Oct 25, #376).
+    scam_high_signal_timeout_seconds: int = Field(
+        HOUR, ge=60, le=DISCORD_MAX_TIMEOUT_SECONDS
+    )
     #: A second scam within this long of an earlier sanction is a repeat.
     repeat_window_seconds: int = Field(30 * DAY, ge=0, le=365 * DAY)
 
@@ -341,7 +348,7 @@ class Classifier(_Section):
     #: are built with that timeout.
     deadline_seconds: float = Field(10.0, ge=1.0, le=10.0)
     #: Each at least 1: a cap of 0 would switch judging off unannounced.
-    per_author: int = Field(2, ge=1, le=100)
+    per_author: int = Field(5, ge=1, le=100)
     author_window_seconds: int = Field(600, ge=1, le=DAY)
     per_guild_minute: int = Field(20, ge=1, le=1000)
     #: The acting guild's daily ceiling; a guild in shadow keeps the shadow's.
@@ -420,11 +427,11 @@ class PolicyDocument(_Section):
 
     @model_validator(mode="after")
     def _consistent(self):
-        if self.sanctions.scam_timeout_seconds > self.sanctions.max_timeout_seconds:
-            raise ValueError(
-                "sanctions.scam_timeout_seconds is longer than "
-                "sanctions.max_timeout_seconds"
-            )
+        for name in ("scam_timeout_seconds", "scam_high_signal_timeout_seconds"):
+            if getattr(self.sanctions, name) > self.sanctions.max_timeout_seconds:
+                raise ValueError(
+                    f"sanctions.{name} is longer than sanctions.max_timeout_seconds"
+                )
         return self
 
     # -- reading ------------------------------------------------------------

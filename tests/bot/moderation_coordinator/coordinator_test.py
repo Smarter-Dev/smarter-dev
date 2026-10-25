@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from smarter_dev.bot.moderation_coordinator.classifier import PER_AUTHOR
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import BUDGET
 from smarter_dev.bot.moderation_coordinator.model import SCAM
@@ -40,11 +41,12 @@ async def test_a_protected_author_is_never_sent_to_the_model():
 
 
 async def test_past_the_author_budget_labels_are_unknown_and_rules_still_apply():
-    """A new member posting a third link in ten minutes: no third request.
-    The scam check is unknown (budget); nothing model-only is decided."""
+    """A new member posting a sixth link in ten minutes (the cap is 5,
+    #376): no sixth request. The scam check is unknown (budget); nothing
+    model-only is decided."""
     posts = [
         say(NEWBIE, f"check https://site{i}.example", NOW + timedelta(seconds=30 * i))
-        for i in range(3)
+        for i in range(PER_AUTHOR + 1)
     ]
     case = ReplayCase(
         name="budget",
@@ -55,13 +57,13 @@ async def test_past_the_author_budget_labels_are_unknown_and_rules_still_apply()
     )
     result = await replay(case)
 
-    assert [e.classifier.requests for e in result.evaluations] == [1, 1, 0]
-    third = result.evaluations[2]
+    assert [e.classifier.requests for e in result.evaluations] == [1] * PER_AUTHOR + [0]
+    third = result.evaluations[-1]
     assert third.classifier.outcome == BUDGET
     assert third.classifier.refused_by == "author"
     assert third.verdicts[SCAM].outcome == BUDGET
     assert third.decision.strongest is None
-    assert result.calls.total == 2
+    assert result.calls.total == PER_AUTHOR == 5
 
 
 async def test_an_off_policy_rule_never_runs():

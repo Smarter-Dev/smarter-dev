@@ -226,7 +226,16 @@ def test_a_cross_channel_copy_within_ten_seconds_is_a_burst():
     ("member", "high_signal", "history", "expected"),
     [
         (NEWBIE, (), SETTLED, (gw.BAN, None)),
-        (REGULAR, ("scam link",), SETTLED, (gw.TIMEOUT, DAY)),
+        (NEWBIE, ("scam link",), SETTLED, (gw.BAN, None)),
+        # Zech, Oct 25 (#376): an established account's high-signal scam is
+        # an hour; a repeat is a day, high-signal or not.
+        (REGULAR, ("scam link",), SETTLED, (gw.TIMEOUT, 3600)),
+        (
+            REGULAR,
+            ("scam link",),
+            AuthorHistory(False, 0, (PastAction("warn", NOW - timedelta(days=3)),)),
+            (gw.TIMEOUT, DAY),
+        ),
         (
             REGULAR,
             (),

@@ -188,6 +188,10 @@ class MessageFacts:
     posted_at: float
     account_created_at: datetime
     author_name: str = ""
+    #: The member's server nickname or global display name when it differs
+    #: from the username, as it was at the message (the report's plain-text
+    #: member line, #376).
+    author_display_name: str | None = None
     joined_at: datetime | None = None
     attachments: tuple[Attachment, ...] = ()
     revision: str = "create"
@@ -315,6 +319,9 @@ class Provisional:
     reasons: tuple[str, ...]
     resolution: str = "expired"
     claim_prefix: str = "provisional:"
+    #: The gateway alias the author's scam burst shares: the hold opens (or
+    #: joins) the burst's one incident (#376).
+    alias: str | None = None
 
 
 @dataclass(slots=True)

@@ -202,7 +202,8 @@
                     <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(16rem, 1fr)); gap:1rem; margin-top:1rem;">
                         <div>{{ number("sanctions.max_timeout_seconds", "Longest timeout", doc.sanctions.max_timeout_seconds, "= " ~ span(doc.sanctions.max_timeout_seconds) ~ ". Longer ones are shortened to this.", unit="seconds") }}</div>
                         <div>{{ number("sanctions.scam_ban_account_age_days", "Ban accounts younger than", doc.sanctions.scam_ban_account_age_days, "A confirmed scam from a newer account is a ban.", unit="days") }}</div>
-                        <div>{{ number("sanctions.scam_timeout_seconds", "Scam timeout", doc.sanctions.scam_timeout_seconds, "= " ~ span(doc.sanctions.scam_timeout_seconds) ~ ". A confirmed high-signal or repeat scam otherwise.", unit="seconds") }}</div>
+                        <div>{{ number("sanctions.scam_high_signal_timeout_seconds", "High-signal scam timeout", doc.sanctions.scam_high_signal_timeout_seconds, "= " ~ span(doc.sanctions.scam_high_signal_timeout_seconds) ~ ". A confirmed burst, scam link or mention bait otherwise, when it is no repeat.", unit="seconds") }}</div>
+                        <div>{{ number("sanctions.scam_timeout_seconds", "Repeat scam timeout", doc.sanctions.scam_timeout_seconds, "= " ~ span(doc.sanctions.scam_timeout_seconds) ~ ". A confirmed repeat scam otherwise, high-signal or not.", unit="seconds") }}</div>
                         <div>{{ number("sanctions.repeat_window_seconds", "Repeat window", doc.sanctions.repeat_window_seconds, "= " ~ span(doc.sanctions.repeat_window_seconds) ~ ". A scam this soon after a sanction is a repeat.", unit="seconds") }}</div>
                     </div>
                 </div>

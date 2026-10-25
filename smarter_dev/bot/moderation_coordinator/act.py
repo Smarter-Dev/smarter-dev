@@ -418,7 +418,11 @@ class Executor:
                 return
             gateway = self._gateway_for(policy)
             result = await gateway.act(
-                self._trigger(facts, reason=hold_reason(provisional.reasons)),
+                self._trigger(
+                    facts,
+                    reason=hold_reason(provisional.reasons),
+                    alias=provisional.alias,
+                ),
                 [
                     Proposal(
                         kind=gw.TIMEOUT,
@@ -664,7 +668,7 @@ class Executor:
             else gw.SOURCE_HANDLER,
             evidence=_evidence(evaluation),
             related=tuple(item.message_id for t in targets for item in t.cleanup),
-            alias=evaluation.ring_alias,
+            alias=evaluation.ring_alias or evaluation.burst_alias,
         )
 
         proposals: list[Proposal] = []
@@ -1116,6 +1120,11 @@ class Executor:
             channel_id=facts.channel_id,
             message_id=facts.message_id,
             author_id=facts.author_id,
+            # ``author_name`` falls back to the id when Discord gave none.
+            author_username=facts.author_name
+            if facts.author_name and facts.author_name != facts.author_id
+            else None,
+            author_display_name=facts.author_display_name,
             content=facts.content or None,
             attachments=tuple(
                 gw.attachment_signature(
@@ -1194,7 +1203,11 @@ def _summary_lead(evaluation: Evaluation) -> str | None:
         return LEAD_CONFIRMED_HACKED if hacked else LEAD_CONFIRMED
     if provisional is not None and provisional.resolution == RELEASED:
         return LEAD_CLEAN
-    if provisional is not None and provisional.resolution == EXPIRED:
+    if (
+        provisional is not None
+        and provisional.resolution == EXPIRED
+        and not evaluation.burst_sanctioned
+    ):
         return LEAD_INCOMPLETE
     return None
 
@@ -1302,13 +1315,26 @@ def _unknown_cause(evaluation: Evaluation) -> str:
 
 
 def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str, str]:
-    """The alert for a hold left without a verdict."""
+    """What became of a hold whose check gave no verdict (#376): the hold
+    stays on and lapses by itself. A moderator is asked to look only when
+    nothing else in the member's burst was confirmed: a burst already
+    confirmed and actioned in this incident needs nobody."""
     user = f"<@{provisional.user_id}>"
+    minutes = max(1, provisional.duration_seconds // 60)
+    cause = _unknown_cause(evaluation)
+    link = jump_link(evaluation.facts)
+    if evaluation.burst_sanctioned:
+        return (
+            gw.ENTRY_NOTE,
+            f"No verdict from the scam check on {user}'s message ({cause}), "
+            "but the rest of their burst was confirmed as a scam and actioned "
+            f"here; the {minutes}-minute hold stays until it lapses: {link}",
+        )
     return (
         gw.ENTRY_ALERT,
-        f"Provisional hold on {user} expired without a verdict "
-        f"({_unknown_cause(evaluation)}); it lapses after 5 minutes. A moderator "
-        f"should look: {jump_link(evaluation.facts)}",
+        f"No verdict from the scam check on {user}'s message ({cause}). The "
+        f"{minutes}-minute hold stays on and lapses by itself. A moderator "
+        f"should look: {link}",
     )
 
 

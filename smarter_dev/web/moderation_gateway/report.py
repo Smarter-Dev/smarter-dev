@@ -397,6 +397,51 @@ def _summary(
     return text
 
 
+_MARKDOWN = re.compile(r"([\\*_~|`])")
+NAME_LIMIT = 40
+UNKNOWN_NAME = "username unknown"
+
+
+def _plain(text: str) -> str:
+    """A name shown as typed: markdown escaped, links and mass mentions made
+    inert, one line."""
+    return _MARKDOWN.sub(r"\\\1", sanitize(" ".join(text.split()), NAME_LIMIT))
+
+
+def member_name(facts: ReportFacts) -> str:
+    """The subject's username (and display name) in plain text, as recorded
+    with the incident (#376): a mention alone reads "unknown-user" on a
+    client that has not cached the member, which leaves nothing to search
+    for. Falls back to the username an operation recorded, and says so when
+    none is known."""
+    subject = facts.subject_user_id
+    named = next(
+        (
+            entry.details or {}
+            for entry in facts.entries
+            if entry.kind == t.ENTRY_MEMBER and entry.target_user_id == subject
+        ),
+        {},
+    )
+    username = named.get("username") or next(
+        (
+            op.target_username
+            for op in facts.operations
+            if op.target_user_id == subject
+            and op.target_username
+            and op.target_username != subject
+        ),
+        None,
+    )
+    if not username:
+        return UNKNOWN_NAME
+    display = named.get("display_name")
+    shown = _plain(username)
+    if display and display != username:
+        shown += f" ({_plain(display)})"
+    return shown
+
+
 def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> str:
     """The report text, at most ``limit`` characters."""
     head: list[str] = []
@@ -405,7 +450,10 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     where = f" in <#{facts.channel_id}>" if facts.channel_id else ""
     head.append(f"🛡️ **Moderation incident**{where} · <t:{int(facts.opened_at)}:f>")
     if facts.subject_user_id:
-        head.append(f"**Member:** <@{facts.subject_user_id}> ({facts.subject_user_id})")
+        head.append(
+            f"**Member:** <@{facts.subject_user_id}> · "
+            f"{member_name(facts)} · {facts.subject_user_id}"
+        )
     link = jump_link(facts.guild_id, facts.channel_id, facts.trigger_message_id)
     if link:
         head.append(f"**Message:** {link}")

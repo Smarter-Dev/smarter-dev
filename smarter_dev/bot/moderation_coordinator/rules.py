@@ -366,8 +366,12 @@ def high_signal_reasons(
 
 #: A repeat inside this window turns a warn into a 24 h timeout.
 RECENT_ACTION_SECONDS = 30 * DAY
-#: Repeat hold, and the timeout a confirmed high-signal scam gets.
+#: Repeat hold, and the timeout a confirmed repeat scam gets.
 REPEAT_TIMEOUT_SECONDS = DAY
+#: The timeout a confirmed high-signal scam from an established account
+#: gets when it is no repeat (Zech, Oct 25, #376: a hacked account's one
+#: burst).
+HIGH_SIGNAL_TIMEOUT_SECONDS = 3600
 #: Burst: a same-looking post in another channel within this long.
 BURST_SECONDS = 10.0
 #: Under this account age a confirmed scam is a ban.
@@ -421,6 +425,7 @@ class ScamLadder:
     ban_account_age: timedelta = BAN_ACCOUNT_AGE
     timeout_seconds: int = REPEAT_TIMEOUT_SECONDS
     repeat_window_seconds: float = RECENT_ACTION_SECONDS
+    high_signal_timeout_seconds: int = HIGH_SIGNAL_TIMEOUT_SECONDS
 
     @classmethod
     def from_policy(cls, document: mp.PolicyDocument) -> ScamLadder:
@@ -429,6 +434,7 @@ class ScamLadder:
             ban_account_age=timedelta(days=sanctions.scam_ban_account_age_days),
             timeout_seconds=sanctions.scam_timeout_seconds,
             repeat_window_seconds=sanctions.repeat_window_seconds,
+            high_signal_timeout_seconds=sanctions.scam_high_signal_timeout_seconds,
         )
 
 
@@ -641,27 +647,32 @@ class ScamReview:
                 else f", account under {self.ladder.ban_account_age.days} days old"
             )
             notice = None
-        elif self.high_signal:
+        elif self.high_signal or self.repeat:
             # Zech: a high-signal scam held while it was judged ends in a
-            # timeout plus cleanup when the account is not new.
+            # timeout plus cleanup when the account is not new: an hour, a
+            # hacked account's one burst (Oct 25, #376). A repeat keeps the
+            # repeat timeout, high-signal or not.
             sanction = Sanction(
                 gw.TIMEOUT,
-                duration_seconds=self.ladder.timeout_seconds,
+                duration_seconds=(
+                    self.ladder.timeout_seconds
+                    if self.repeat
+                    else self.ladder.high_signal_timeout_seconds
+                ),
                 claim=scam_claim(self.key),
             )
-            notice = NOTICE_SECURE_ACCOUNT
-        elif self.repeat:
-            sanction = Sanction(
-                gw.TIMEOUT,
-                duration_seconds=self.ladder.timeout_seconds,
-                claim=scam_claim(self.key),
+            if self.repeat:
+                window = self.ladder.repeat_window_seconds
+                reason += (
+                    ", repeat within 30 days"
+                    if window == RECENT_ACTION_SECONDS
+                    else f", repeat within {_span(int(window))}"
+                )
+            notice = (
+                NOTICE_SECURE_ACCOUNT
+                if self.high_signal or compromised
+                else NOTICE_SCAM_REMOVED
             )
-            reason += (
-                ", repeat within 30 days"
-                if self.ladder.repeat_window_seconds == RECENT_ACTION_SECONDS
-                else f", repeat within {_span(int(self.ladder.repeat_window_seconds))}"
-            )
-            notice = NOTICE_SECURE_ACCOUNT if compromised else NOTICE_SCAM_REMOVED
         else:
             sanction = Sanction(gw.WARN)
             notice = NOTICE_SECURE_ACCOUNT if compromised else NOTICE_SCAM_REMOVED

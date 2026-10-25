@@ -1238,7 +1238,7 @@ def test_the_report_is_a_timeline_then_a_summary():
     link = f"https://discord.com/channels/{GUILD}"
     assert render_report(facts).splitlines() == [
         "🛡️ **Moderation incident** in <#7001> · <t:1792849330:f>",
-        f"**Member:** <@{user}> ({user})",
+        f"**Member:** <@{user}> · luluhoney · {user}",
         f"**Message:** {link}/7001/8001",
         f"- <t:1792849330:f> Held {who} for 5 minutes: {hold}",
         f"- <t:1792849334:T> Hold on {who} upgraded to a 24-hour timeout "
@@ -1818,3 +1818,58 @@ async def test_the_spam_engines_ping_goes_out_when_it_joins_a_posted_report(
     report_id = discord.reports()[0]["message_id"]
     assert ping["content"].endswith(f"/{REPORT_CHANNEL}/{report_id}")
     assert f"Banned <@{SCAMMER}>" in discord.latest_report_text()
+
+
+# -- #376: the member in plain text -----------------------------------------
+
+
+async def test_the_report_names_the_member_once_as_they_were(discord, db, clock):
+    """A mention renders as "unknown-user" on a client that has not cached
+    the member: the report also names them in plain text, with the id to
+    copy, from the first trigger that knew them."""
+    gateway = make_gateway(discord, db, clock)
+    delete = Proposal(
+        kind=t.DELETE,
+        target_user_id=SCAMMER,
+        channel_id=CHANNEL,
+        message_ids=(MESSAGE,),
+    )
+    await gateway.act(
+        spam_trigger(author_username="d1sc_0n3ct", author_display_name="Dis*Co"),
+        [delete],
+    )
+    await gateway.act(
+        spam_trigger(
+            message_id="8100",
+            aliases=("burst",),
+            related_message_ids=(MESSAGE,),
+            author_username="renamed",
+        ),
+        [],
+    )
+
+    report = discord.latest_report_text(REPORT_CHANNEL)
+    [member] = [line for line in report.splitlines() if line.startswith("**Member")]
+    assert member == (f"**Member:** <@{SCAMMER}> · d1sc\\_0n3ct (Dis\\*Co) · {SCAMMER}")
+    assert report.count("d1sc") == 1
+    assert "renamed" not in report
+
+
+async def test_a_member_nobody_named_is_said_to_be_unknown(discord, db, clock):
+    """Control: no username from the trigger and none on an operation."""
+    gateway = make_gateway(discord, db, clock)
+    await gateway.act(
+        spam_trigger(),
+        [
+            Proposal(
+                kind=t.DELETE,
+                target_user_id=SCAMMER,
+                channel_id=CHANNEL,
+                message_ids=(MESSAGE,),
+            )
+        ],
+    )
+
+    report = discord.latest_report_text(REPORT_CHANNEL)
+    [member] = [line for line in report.splitlines() if line.startswith("**Member")]
+    assert member == (f"**Member:** <@{SCAMMER}> · username unknown · {SCAMMER}")
