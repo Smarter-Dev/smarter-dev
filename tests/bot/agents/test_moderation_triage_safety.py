@@ -122,6 +122,8 @@ def stored(monkeypatch):
         reads=0,
         fail=None,
         filter_fail=None,
+        #: The guild's moderation policy (#241); None: the old row is read.
+        policy=None,
     )
 
     @contextlib.asynccontextmanager
@@ -139,6 +141,12 @@ def stored(monkeypatch):
             raise state.filter_fail
         return state.filter_row if guild_id == str(GUILD_ID) else None
 
+    async def read_policy(session, guild_id):
+        if state.policy is None or guild_id != str(GUILD_ID):
+            return None
+        return SimpleNamespace(document=state.policy)
+
+    monkeypatch.setattr(triage_config, "read_policy", read_policy)
     monkeypatch.setattr(triage_config, "get_db_session_context", session)
     monkeypatch.setattr(triage_config._config_ops, "get_config", get_config)
     monkeypatch.setattr(
@@ -649,3 +657,36 @@ async def test_a_triage_run_with_all_tools_acts_through_the_real_path(discord, s
         and r.get("error", "").startswith("Cannot moderate this user")
         for r in _returns(seen)
     )
+
+
+async def test_under_a_policy_triage_reads_its_triage_section(discord, stored):
+    """#241: with a policy the row is not read; ``evaluate`` (or enforcement
+    switched off) leaves triage running with no destructive tool, and an
+    empty ``enabled_tools`` is no tool."""
+    from smarter_dev.shared import moderation_policy as mp
+
+    raw = mp.default_document().as_json()
+    raw["triage"].update(
+        mode=mp.ENFORCE,
+        monitored_role_ids=[str(MOD_ROLE_ID)],
+        enabled_tools=["timeout"],
+    )
+    stored.policy = mp.validate(raw)
+    tools, _ = _tools(discord)
+    assert (await tools["timeout_user"](str(SPAMMER), "10m", "spam"))["success"] is True
+    discord.add_message(424242, SPAMMER)
+    refused = await tools["delete_message"]("424242", "spam")
+    assert refused["success"] is False and "not enabled" in refused["error"]
+
+    raw["triage"]["mode"] = mp.EVALUATE
+    stored.policy = mp.validate(raw)
+    assert (await tools["timeout_user"](str(HELPER), "10m", "spam"))["success"] is False
+    raw["triage"].update(mode=mp.ENFORCE, enabled_tools=[])
+    stored.policy = mp.validate(raw)
+    assert (await tools["timeout_user"](str(HELPER), "10m", "spam"))["success"] is False
+    raw["triage"]["mode"] = mp.OFF
+    stored.policy = mp.validate(raw)
+    result = await tools["timeout_user"](str(HELPER), "10m", "spam")
+    assert result["success"] is False and "switched off" in result["error"]
+    assert [call[1] for call in discord.destructive] == [SPAMMER]
+    assert stored.reads == 0

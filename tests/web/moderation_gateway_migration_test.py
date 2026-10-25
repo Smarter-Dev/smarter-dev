@@ -80,6 +80,10 @@ OWNERSHIP_MIGRATION = (
     REPO_ROOT
     / "alembic/main/versions/20261023_220000_f2b6d9c4a1e7_moderation_ownership.py"
 )
+POLICY_MIGRATION = (
+    REPO_ROOT
+    / "alembic/main/versions/20261025_020000_d3a8f5c2e9b1_moderation_policies.py"
+)
 CREATED = (
     "moderation_incidents",
     "moderation_incident_links",
@@ -171,10 +175,30 @@ def test_the_ownership_migration_creates_every_column_the_model_has():
     )
 
 
+def test_the_policy_migration_creates_every_column_the_models_have():
+    recorded = _run(POLICY_MIGRATION)
+    tables = {
+        "moderation_policies",
+        "moderation_policy_revisions",
+        "moderation_policy_loads",
+    }
+    assert set(recorded.created) == tables
+    for table in tables:
+        assert _shape(recorded.created[table].values()) == _shape(
+            Base.metadata.tables[table].columns
+        ), table
+
+
 @pytest.mark.parametrize("step", ["upgrade", "downgrade"])
 @pytest.mark.parametrize(
     "path",
-    [MIGRATION, SPAM_RING_MIGRATION, SHADOW_MIGRATION, OWNERSHIP_MIGRATION],
+    [
+        MIGRATION,
+        SPAM_RING_MIGRATION,
+        SHADOW_MIGRATION,
+        OWNERSHIP_MIGRATION,
+        POLICY_MIGRATION,
+    ],
     ids=lambda p: p.stem,
 )
 def test_lock_waits_are_bounded_before_any_change(path, step):
@@ -566,3 +590,75 @@ async def test_the_cutover_switch_runs_on_the_migrated_postgres_schema(
     async with db() as session:
         again = await cutover.status(session, GUILD)
     assert again["owner"] == "coordinator" and again["generation"] == 1
+
+
+@needs_postgres
+async def test_the_policy_import_and_its_pickup_run_on_the_migrated_postgres_schema(
+    migrated, monkeypatch
+):
+    """#241: the import's read-only dry run and its write, a save on top, the
+    revision the bot reads with the ownership (a scalar subquery), and the
+    heartbeat's upsert and prune, on Postgres."""
+    from datetime import timedelta
+
+    from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
+    from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
+    from smarter_dev.shared import moderation_policy as mp
+    from smarter_dev.web import moderation_cutover as cutover
+    from smarter_dev.web import moderation_policy_import as policy_import
+    from smarter_dev.web import moderation_policy_store as store
+    from smarter_dev.web.models import ModerationConfig
+    from smarter_dev.web.models import ModerationFilterConfig
+    from smarter_dev.web.moderation_gateway import gateway as gateway_module
+
+    db = async_sessionmaker(migrated, expire_on_commit=False, autoflush=False)
+    monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", db)
+    async with db() as session:
+        session.add(
+            ModerationFilterConfig(
+                guild_id=GUILD,
+                spam_engine_enabled=True,
+                mod_alert_channel_id=REPORT_CHANNEL,
+                staff_exempt_role_ids=["644390354157568014"],
+            )
+        )
+        session.add(ModerationConfig(guild_id=GUILD, is_active=True, enabled_tools=[]))
+        await session.commit()
+    async with db() as session:
+        await cutover.switch(session, GUILD, by="test")
+    assert (await load_ownership(GUILD)).policy_revision is None
+
+    async with db() as session:
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        plan = await policy_import.plan(session, GUILD)
+        await session.rollback()
+    assert plan.document.mode(mp.SPAM_ENGINE) == mp.ENFORCE
+    assert plan.document.triage.enabled_tools == []
+
+    async with db() as session:
+        await policy_import.run(session, GUILD, by="test")
+    cache = PolicyCache(ownership=load_ownership)
+    assert (await cache.get(GUILD)).revision == 1
+    edited = plan.document.as_json()
+    edited["rules"]["spam_engine"]["mode"] = mp.EVALUATE
+    async with db() as session:
+        assert (
+            await store.save_policy(
+                session, GUILD, edited, base_revision=1, by="t", source="admin"
+            )
+            == 2
+        )
+    assert (await load_ownership(GUILD)).policy_revision == 2
+    policy = await cache.get(GUILD)
+    assert policy.revision == 2 and not policy.enforces(mp.SPAM_ENGINE)
+
+    now = datetime.now(UTC)
+    async with db() as session:
+        await store.record_loads(session, "bot/old", {GUILD: (1, now)}, now)
+    later = now + timedelta(days=2)
+    async with db() as session:
+        await store.record_loads(session, "bot/new", {GUILD: (2, later)}, later)
+    async with db() as session:
+        assert [(r.process, r.revision) for r in await store.loads(session, GUILD)] == [
+            ("bot/new", 2)
+        ]

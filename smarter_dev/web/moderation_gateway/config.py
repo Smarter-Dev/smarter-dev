@@ -12,6 +12,7 @@ from __future__ import annotations
 from smarter_dev.web.crud import ModerationConfigOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
 from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.web.moderation_policy_store import read_policy
 
 _filter_configs = ModerationFilterConfigOperations()
 _triage_configs = ModerationConfigOperations()
@@ -49,3 +50,18 @@ async def load_report_channel(
         return channel
     triage = await _triage_configs.get_config(session, guild_id)
     return first_channel(triage.response_channel_id if triage is not None else None)
+
+
+async def load_incident_report_channel(session, guild_id: str) -> str | None:
+    """The guild's incident report channel, as its moderation policy names it.
+
+    A guild with a policy (#241) has one ``destinations.report_channel_id``,
+    and none while the policy's reporting is switched off; the old columns
+    are not read then. Without a policy: :func:`load_report_channel`. The
+    legacy actors keep reading the old columns they always read.
+    """
+    stored = await read_policy(session, guild_id)
+    if stored is None:
+        return await load_report_channel(session, guild_id)
+    document = stored.document
+    return document.destinations.report_channel_id if document.controls.report else None

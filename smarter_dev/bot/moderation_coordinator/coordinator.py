@@ -39,11 +39,12 @@ from datetime import datetime
 from typing import Protocol
 
 from smarter_dev.bot.moderation_coordinator import rules
+from smarter_dev.bot.moderation_coordinator.classifier import BudgetLimits
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierRequest
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierResult
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
-from smarter_dev.bot.moderation_coordinator.decide import PROVISIONAL_SECONDS
 from smarter_dev.bot.moderation_coordinator.decide import decide
+from smarter_dev.bot.moderation_coordinator.decide import enforceable
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
@@ -329,7 +330,11 @@ class Coordinator:
 
         # 1. Deterministic rules.
         spam_obs = None
-        if policy.spam is not None and not facts.is_edit:
+        if (
+            policy.spam is not None
+            and not facts.is_edit
+            and in_scope(policy.spam_channel_ids, facts.channel_id)
+        ):
             spam_obs = self.spam.observe(
                 facts, policy.spam, now, mass_mention_rule=policy.mass_mention
             )
@@ -343,7 +348,9 @@ class Coordinator:
             # already see the mute (or the warning).
             if spam_obs.decision is not NO_SPAM_ACTION and not await author_is_staff():
                 self.spam.commit(facts, policy.spam, spam_obs.decision, now)
-        if policy.attachments is not None:
+        if policy.attachments is not None and in_scope(
+            policy.attachment_channel_ids, facts.channel_id
+        ):
             hits += rules.attachment_hits(facts, policy.attachments)
         if policy.edit_ping and in_scope(
             policy.edit_ping_channel_ids, facts.channel_id
@@ -351,8 +358,12 @@ class Coordinator:
             hits += rules.edit_ping_hits(facts)
         if policy.bump_channel_ids:
             hits += rules.bump_channel_hits(facts, policy.bump_channel_ids)
-        if policy.mass_mention:
-            hits += rules.mass_mention_hits(facts)
+        if policy.mass_mention and in_scope(
+            policy.mass_mention_channel_ids, facts.channel_id
+        ):
+            hits += rules.mass_mention_hits(
+                facts, warn=policy.document.rules.mass_mention.warn
+            )
 
         key = facts_hash(facts)
         early_hits = 0
@@ -369,7 +380,7 @@ class Coordinator:
             await author_is_staff()
             early_hits = len(hits)
             early = decide(
-                hits,
+                enforceable(hits, policy),
                 refusals=await self._refusals(
                     facts, hits, author_refusal, refusal_known, extra_roles
                 ),
@@ -398,7 +409,7 @@ class Coordinator:
             if hits and not refusal_known:
                 await author_is_staff()
             decision = decide(
-                hits,
+                enforceable(hits, policy),
                 refusals=await self._refusals(
                     facts, hits, author_refusal, refusal_known, extra_roles
                 ),
@@ -416,6 +427,12 @@ class Coordinator:
         await held.take()
 
         # 2. Rules that need labels, and what they read first.
+        risk = rules.RiskRules.from_policy(policy.document)
+        deadline = (
+            policy.document.classifier.deadline_seconds
+            if policy.revision is not None
+            else self.classifier.deadline
+        )
         scam_review = None
         history = None
         known_copy = False
@@ -436,7 +453,7 @@ class Coordinator:
                 facts,
                 metrics=spam_obs.metrics if spam_obs is not None else None,
                 suspect=rules.hold_reasons(
-                    suspect, rules.scam_risky_author(facts, history, now_dt)
+                    suspect, rules.scam_risky_author(facts, history, now_dt, risk)
                 ),
             )
             # A copy with a burst or other high-signal reason its post was not
@@ -454,6 +471,8 @@ class Coordinator:
                 high_signal=high_signal,
                 now=now_dt,
                 known_copy=known_copy,
+                risk=risk,
+                ladder=rules.ScamLadder.from_policy(policy.document),
             )
         claimed = None
         if scam_review is not None:
@@ -479,6 +498,7 @@ class Coordinator:
             ring is not None
             and not facts.is_edit
             and not facts.author_is_bot
+            and in_scope(policy.ring_channel_ids, facts.channel_id)
             and (
                 self.rings.busy(facts.guild_id, facts.channel_id)
                 or self.rings.active(facts.guild_id, facts.channel_id, now) is not None
@@ -534,7 +554,10 @@ class Coordinator:
                 window = None
                 if (
                     self.classifier.budget_refusal(
-                        facts.guild_id, facts.author_id, acting=policy.acting
+                        facts.guild_id,
+                        facts.author_id,
+                        acting=policy.acting,
+                        limits=budget_limits(policy),
                     )
                     is None
                 ):
@@ -573,12 +596,23 @@ class Coordinator:
         provisional = None
         provisional_ms = None
         # A copy of a post already judged (or being judged) is covered by
-        # that post's hold and verdict: it is not held again.
-        if scam_review is not None and scam_review.high_signal and not known_copy:
+        # that post's hold and verdict: it is not held again. The policy says
+        # which signals hold, for how long, and whether a hold may be placed
+        # at all (the shadow records the hold it would place).
+        held_for = (
+            rules.holding_signals(
+                scam_review.high_signal, policy.document.provisional.signals
+            )
+            if scam_review is not None
+            and policy.document.provisional.enabled
+            and (not policy.acting or policy.provisional_allowed())
+            else ()
+        )
+        if scam_review is not None and held_for and not known_copy:
             provisional = Provisional(
                 user_id=facts.author_id,
-                duration_seconds=PROVISIONAL_SECONDS,
-                reasons=scam_review.high_signal,
+                duration_seconds=policy.document.provisional.duration_seconds,
+                reasons=held_for,
             )
             if on_provisional is not None:
                 # Contain first: the verdict is up to 10 s away.
@@ -596,9 +630,7 @@ class Coordinator:
                 labels |= scam_review.labels
             else:
                 try:
-                    reused = await asyncio.wait_for(
-                        asyncio.shield(future), self.classifier.deadline
-                    )
+                    reused = await asyncio.wait_for(asyncio.shield(future), deadline)
                 except TimeoutError:
                     reused = {
                         label: LabelVerdict(label, TIMEOUT)
@@ -620,9 +652,14 @@ class Coordinator:
             ring_candidates=_ring_candidates(ring_pending),
             charge_author=not isinstance(ring_pending, rules.RingFollowup)
             or bool(labels & {SCAM, ABUSE}),
-            sampled_images=_image_sample(facts, scam_review),
+            sampled_images=_image_sample(
+                facts, scam_review, policy.document.rules.scam_gate.image_sample
+            ),
             acting=policy.acting,
             preloaded_images=preloaded,
+            limits=budget_limits(policy),
+            deadline=deadline if policy.revision is not None else None,
+            ring_only_backend=policy.document.classifier.ring_only_backend,
         )
         try:
             result = await self.classifier.classify(request)
@@ -660,7 +697,7 @@ class Coordinator:
             )
             scam_hits, scam_outcome, lines = scam_review.resolve(verdicts)
             scam_hits = await self._one_sanction(
-                facts, key, scam_hits, first_asker, now, held
+                facts, key, scam_hits, first_asker, now, held, deadline
             )
             hits += scam_hits
             review += lines
@@ -727,7 +764,7 @@ class Coordinator:
             facts, hits, author_refusal, refusal_known, extra_roles
         )
         decision = decide(
-            hits,
+            enforceable(hits, policy),
             refusals=refusals,
             provisional=provisional,
             scam_outcome=scam_outcome,
@@ -735,7 +772,7 @@ class Coordinator:
         )
         remaining = (
             decide(
-                hits[early_hits:],
+                enforceable(hits[early_hits:], policy),
                 refusals=refusals,
                 provisional=provisional,
                 scam_outcome=scam_outcome,
@@ -788,6 +825,7 @@ class Coordinator:
         asked: asyncio.Future | None,
         now: float,
         held: _Slot,
+        deadline: float | None = None,
     ) -> list[RuleHit]:
         """The ``scam:{key}`` claim: a post and its copies are sanctioned once,
         with the strongest sanction (#310 re-review item 2).
@@ -810,7 +848,9 @@ class Coordinator:
             # The post's own check is done: the wait holds no slot.
             held.give()
             with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(asyncio.shield(newer), self.classifier.deadline)
+                await asyncio.wait_for(
+                    asyncio.shield(newer), deadline or self.classifier.deadline
+                )
         if self.sanctions.claim(
             facts.guild_id, facts.author_id, key, sanctions[0], now
         ):
@@ -843,11 +883,30 @@ class Coordinator:
 MAX_RING_MESSAGES = 100
 
 
-#: Images an established member's unheld image post is checked on.
+#: Images an established member's unheld image post is checked on (the
+#: policy's ``scam_gate.image_sample``).
 SAMPLED_IMAGES = 1
 
 
-def _image_sample(facts: MessageFacts, review: rules.ScamReview | None) -> int | None:
+def budget_limits(policy: GuildPolicy) -> BudgetLimits | None:
+    """The guild's own classifier caps; None without a policy (the
+    classifier's own, from the environment)."""
+    if policy.revision is None:
+        return None
+    caps = policy.document.classifier
+    return BudgetLimits(
+        per_author=caps.per_author,
+        author_window=float(caps.author_window_seconds),
+        per_guild_minute=caps.per_guild_minute,
+        per_guild_day=caps.per_guild_day,
+    )
+
+
+def _image_sample(
+    facts: MessageFacts,
+    review: rules.ScamReview | None,
+    sample: int = SAMPLED_IMAGES,
+) -> int | None:
     """Zech, Oct 23: when a member who is not high risk posts four or more
     images and is not held, the review sees one of them at random. A
     high-risk author, a held post and everything else show up to four."""
@@ -858,7 +917,7 @@ def _image_sample(facts: MessageFacts, review: rules.ScamReview | None) -> int |
         or review.high_signal
     ):
         return None
-    return SAMPLED_IMAGES
+    return sample
 
 
 def _deletes(decision, message_id: str) -> bool:

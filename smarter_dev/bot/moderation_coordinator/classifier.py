@@ -155,12 +155,15 @@ def _is_timeout(error: BaseException) -> bool:
     return type(error).__name__ in ("APITimeoutError", "TypeSafeAPITimeoutError")
 
 
-def choose_backend(labels: frozenset[str], *, images: bool = False) -> str | None:
+def choose_backend(
+    labels: frozenset[str], *, images: bool = False, ring_only: str = JEV
+) -> str | None:
     """One backend for the union: Haiku when it alone can answer one of them,
-    or when there is an image to look at."""
+    or when there is an image to look at; otherwise ``ring_only`` (the
+    policy's ``classifier.ring_only_backend``, Jev by default)."""
     if not labels:
         return None
-    return HAIKU if images or labels & HAIKU_LABELS else JEV
+    return HAIKU if images or labels & HAIKU_LABELS else ring_only
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +185,17 @@ def daily_request_cap() -> int:
 
 def acting_daily_request_cap() -> int:
     return _cap(ACTING_DAILY_REQUESTS_ENV_VAR, DEFAULT_ACTING_DAILY_REQUESTS)
+
+
+@dataclass(frozen=True, slots=True)
+class BudgetLimits:
+    """A guild's own caps (its policy's ``classifier``), in place of the
+    process-wide ones."""
+
+    per_author: int
+    author_window: float
+    per_guild_minute: int
+    per_guild_day: int
 
 
 class ClassifierBudget:
@@ -227,8 +241,14 @@ class ClassifierBudget:
         while calls and calls[0] <= horizon:
             calls.popleft()
 
-    def day_cap(self, acting: bool) -> int:
-        return self.acting_per_guild_day if acting else self.per_guild_day
+    def day_cap(self, acting: bool, limits: BudgetLimits | None = None) -> int:
+        """The guild's daily ceiling: its policy's while the coordinator acts
+        for it, the shadow's otherwise (a policy never raises the shadow's)."""
+        if not acting:
+            return self.per_guild_day
+        if limits is not None:
+            return limits.per_guild_day
+        return self.acting_per_guild_day
 
     def refusal(
         self,
@@ -237,6 +257,7 @@ class ClassifierBudget:
         now: float,
         *,
         acting: bool = False,
+        limits: BudgetLimits | None = None,
     ) -> str | None:
         """The cap that would refuse a request now, or None; charges nothing.
 
@@ -246,18 +267,29 @@ class ClassifierBudget:
         """
         if not self.restored:
             return "not_restored"
-        if self._days.get((guild_id, int(now // 86400)), 0) >= self.day_cap(acting):
+        if self._days.get((guild_id, int(now // 86400)), 0) >= self.day_cap(
+            acting, limits
+        ):
             return "guild_day"
+        per_author = self.per_author if limits is None else limits.per_author
+        window = self.author_window if limits is None else limits.author_window
+        per_minute = (
+            self.per_guild_minute if limits is None else limits.per_guild_minute
+        )
         if author_id is not None:
+            if per_author <= 0:
+                return "author"
             author_calls = self._authors.get((guild_id, author_id))
             if author_calls is not None:
-                self._trim(author_calls, now - self.author_window)
-                if len(author_calls) >= self.per_author:
+                self._trim(author_calls, now - window)
+                if len(author_calls) >= per_author:
                     return "author"
+        if per_minute <= 0:
+            return "guild_minute"
         minute = self._minutes.get(guild_id)
         if minute is not None:
             self._trim(minute, now - 60)
-            if len(minute) >= self.per_guild_minute:
+            if len(minute) >= per_minute:
                 return "guild_minute"
         return None
 
@@ -268,9 +300,10 @@ class ClassifierBudget:
         now: float,
         *,
         acting: bool = False,
+        limits: BudgetLimits | None = None,
     ) -> str | None:
         """Charge one request and return None, or name the cap that refused it."""
-        refused = self.refusal(guild_id, author_id, now, acting=acting)
+        refused = self.refusal(guild_id, author_id, now, acting=acting, limits=limits)
         if refused is not None:
             return refused
         day = (guild_id, int(now // 86400))
@@ -340,6 +373,11 @@ class ClassifierRequest:
     #: Images loaded before the message was deleted (:func:`preload_images`),
     #: by attachment index: the CDN no longer serves a deleted message's files.
     preloaded_images: Mapping[int, bytes | None] | None = None
+    #: The guild's policy (#241): its budget caps, its deadline and where a
+    #: ring-only request goes. None: the classifier's own.
+    limits: BudgetLimits | None = None
+    deadline: float | None = None
+    ring_only_backend: str = JEV
 
 
 @dataclass(slots=True)
@@ -950,15 +988,24 @@ class ModerationClassifier:
         return await preload_images(attachments, self.fetch_image)
 
     def budget_refusal(
-        self, guild_id: str, author_id: str | None, *, acting: bool = False
+        self,
+        guild_id: str,
+        author_id: str | None,
+        *,
+        acting: bool = False,
+        limits: BudgetLimits | None = None,
     ) -> str | None:
         """The budget cap a request would meet now (:meth:`ClassifierBudget.refusal`)."""
-        return self.budget.refusal(guild_id, author_id, self._clock(), acting=acting)
+        return self.budget.refusal(
+            guild_id, author_id, self._clock(), acting=acting, limits=limits
+        )
 
     async def classify(self, request: ClassifierRequest) -> ClassifierResult:
         labels = sorted(request.labels)
         has_images = any(item.is_image for item in request.attachments)
-        backend = choose_backend(request.labels, images=has_images)
+        backend = choose_backend(
+            request.labels, images=has_images, ring_only=request.ring_only_backend
+        )
         if backend is None:
             return ClassifierResult()
         refused = self.budget.try_spend(
@@ -966,7 +1013,9 @@ class ModerationClassifier:
             request.author_id if request.charge_author else None,
             self._clock(),
             acting=request.acting,
+            limits=request.limits,
         )
+        deadline = request.deadline or self.deadline
         if refused is not None:
             return unknown_result(labels, BUDGET, backend=backend, refused_by=refused)
         model_name = HAIKU_MODEL_ID if backend == HAIKU else JEV_MODEL_ID
@@ -979,7 +1028,7 @@ class ModerationClassifier:
         ) as meter:
             try:
                 model = meter.wrap(self._model(backend), model_name=model_name)
-                async with asyncio.timeout(self.deadline):
+                async with asyncio.timeout(deadline):
                     if backend == HAIKU:
                         images = await load_images(
                             request.attachments,
@@ -989,9 +1038,11 @@ class ModerationClassifier:
                             preloaded=request.preloaded_images,
                         )
                         result.images = images.counts
-                        verdicts = await self._ask_haiku(model, request, images)
+                        verdicts = await self._ask_haiku(
+                            model, request, images, deadline
+                        )
                     else:
-                        verdicts = await self._ask_jev(model, request)
+                        verdicts = await self._ask_jev(model, request, deadline)
                 result.verdicts = verdicts
                 result.outcome = (
                     ANSWERED
@@ -1029,7 +1080,11 @@ class ModerationClassifier:
         result.cost_usd = cost
 
     async def _ask_haiku(
-        self, model: Model, request: ClassifierRequest, images: LoadedImages
+        self,
+        model: Model,
+        request: ClassifierRequest,
+        images: LoadedImages,
+        deadline: float | None = None,
     ) -> dict[str, LabelVerdict]:
         agent = Agent(
             model, output_type=str, instructions=HAIKU_INSTRUCTIONS, retries=0
@@ -1037,14 +1092,14 @@ class ModerationClassifier:
         prompt = haiku_prompt(request, images.notes)
         run = await agent.run(
             [prompt, *images.contents] if images.contents else prompt,
-            model_settings=HAIKU_SETTINGS,
+            model_settings={**HAIKU_SETTINGS, "timeout": deadline or self.deadline},
             usage_limits=UsageLimits(request_limit=1),
         )
         verdicts = parse_haiku_reply(run.output, request.labels)
         return unseen_is_unknown(verdicts, images.counts)
 
     async def _ask_jev(
-        self, model: Model, request: ClassifierRequest
+        self, model: Model, request: ClassifierRequest, deadline: float | None = None
     ) -> dict[str, LabelVerdict]:
         output_type, material, instructions, fields = jev_request(request)
         agent = Agent(model, output_type=output_type, retries=0)
@@ -1052,7 +1107,7 @@ class ModerationClassifier:
             material,
             instructions=instructions,
             model_settings={
-                "timeout": self.deadline,
+                "timeout": deadline or self.deadline,
                 "typesafe_boolean_threshold": JEV_BOOLEAN_THRESHOLD,
             },
             usage_limits=UsageLimits(request_limit=1),

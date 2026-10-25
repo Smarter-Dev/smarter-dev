@@ -1,0 +1,42 @@
+# One-off Job: scripts/moderation_policy_import.py (#241). Not applied by the
+# deploy workflow; run by hand with the deployed website tag, one command per Job:
+#   <ARGS> = "status --guild 644299523686006834"            (read only)
+#   <ARGS> = "dry-run --guild 644299523686006834"           (read only)
+#   <ARGS> = "import --guild 644299523686006834 --by <who>"
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<NAME>|dry-run|' -e 's|<ARGS>|dry-run --guild 644299523686006834|' \
+#     k8s/oneoff-moderation-policy-import.yaml | kubectl apply -f -
+#   kubectl -n smarter-dev wait --for=condition=complete --timeout=120s job/smarter-dev-moderation-policy-dry-run
+#   kubectl -n smarter-dev logs job/smarter-dev-moderation-policy-dry-run
+#   kubectl -n smarter-dev delete job smarter-dev-moderation-policy-dry-run
+# Exit status 2 (the Job fails) means refused: nothing was changed.
+# Undo an import: delete the guild's moderation_policies and
+# moderation_policy_revisions rows (a CRUD Job); the guild then runs on the old
+# config tables again, which the import never changes.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-moderation-policy-<NAME>
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-moderation-policy-import
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: moderation-policy-import
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/moderation_policy_import.py <ARGS>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url

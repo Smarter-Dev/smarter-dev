@@ -40,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import time
 from collections.abc import Iterable
 from datetime import UTC
@@ -62,6 +63,7 @@ from smarter_dev.bot.moderation_coordinator.classifier import ClassifierResult
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
 from smarter_dev.bot.moderation_coordinator.coordinator import Coordinator
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
+from smarter_dev.bot.moderation_coordinator.coordinator import budget_limits
 from smarter_dev.bot.moderation_coordinator.coordinator import facts_hash
 from smarter_dev.bot.moderation_coordinator.decide import PROVISIONAL_SECONDS
 from smarter_dev.bot.moderation_coordinator.model import ACTION_RANK
@@ -82,6 +84,7 @@ from smarter_dev.web.models import ModerationOperation
 from smarter_dev.web.models import ModerationShadowDecision
 from smarter_dev.web.moderation_gateway import types as gw
 from smarter_dev.web.moderation_gateway.gateway import default_session_factory
+from smarter_dev.web.moderation_policy_store import record_loads
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +103,8 @@ BUDGET_EXHAUSTED_TEXT = (
 #: window below, so nothing that window counts can still be on its way.
 LEGACY_SETTLE_SECONDS = 240.0
 SWEEP_SECONDS = 60.0
+#: The loads heartbeat's bound (it shares the comparison loop).
+REPORT_LOADS_SECONDS = 10.0
 #: Bounds on the ring's history read (see BotReads).
 WINDOW_READ_SECONDS = 5.0
 AUTHOR_FACTS_SECONDS = 600.0
@@ -830,6 +835,9 @@ class ModerationShadow:
         evaluation = None
         try:
             policy = await self.policies.get(facts.guild_id, facts.posted_at)
+            if policy.revision is not None and not policy.document.controls.evaluate:
+                # The policy switched evaluation off: nothing judged or kept.
+                return None
             acting = self.executor is not None and policy.acting
             if acting and await self._recorded(facts):
                 # A replayed event (a handover replays what the old pod may
@@ -965,7 +973,9 @@ class ModerationShadow:
         await self.executor.notify(
             evaluation.policy,
             BUDGET_EXHAUSTED_TEXT.format(
-                cap=self.coordinator.classifier.budget.day_cap(True)
+                cap=self.coordinator.classifier.budget.day_cap(
+                    True, budget_limits(evaluation.policy)
+                )
             ),
         )
 
@@ -1048,6 +1058,50 @@ class ModerationShadow:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
+async def heartbeat(policies: PolicyCache) -> None:
+    """:func:`report_loads`, bounded by :data:`REPORT_LOADS_SECONDS`: a slow
+    database must not hold up the comparison loop it shares. Never raises."""
+    try:
+        await asyncio.wait_for(report_loads(policies), REPORT_LOADS_SECONDS)
+    except TimeoutError:
+        logger.warning(
+            "Moderation shadow gave up recording its loaded policy revisions "
+            "after %.0f s",
+            REPORT_LOADS_SECONDS,
+        )
+
+
+def process_name() -> str:
+    """This process as ``moderation_policy_loads`` names it: the bot's pod."""
+    return f"bot/{os.getenv('HOSTNAME') or socket.gethostname()}"[:200]
+
+
+async def report_loads(
+    policies: PolicyCache, process: str | None = None, now: float | None = None
+) -> None:
+    """This process's loaded policy revisions, as its heartbeat (#241). Never
+    raises: a missed heartbeat only ages the row on the admin page."""
+    now = time.time() if now is None else now
+    loaded = {
+        guild_id: (revision, datetime.fromtimestamp(since, UTC))
+        for guild_id, (revision, since) in policies.loaded().items()
+    }
+    try:
+        async with default_session_factory()() as session:
+            await record_loads(
+                session,
+                process or process_name(),
+                loaded,
+                datetime.fromtimestamp(now, UTC),
+            )
+    except Exception:  # noqa: BLE001 — the next beat tries again
+        log_exception(
+            logger,
+            "Moderation shadow could not record its loaded policy revisions",
+            level=logging.WARNING,
+        )
+
+
 async def restore_budget(
     budget: ClassifierBudget, recorder: ShadowRecorder, guild_ids: Iterable[str]
 ) -> None:
@@ -1112,6 +1166,8 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
             if not budget.restored or budget.restore_pending:
                 await restore_budget(budget, shadow.recorder, guild_ids)
             await asyncio.sleep(SWEEP_SECONDS)
+            # Every process, acting or not: what it runs on is on the page.
+            await heartbeat(shadow.policies)
             if not leadership.is_acting():
                 continue
             try:

@@ -31,7 +31,7 @@ from smarter_dev.web.crud import GuildRulesConfigOperations
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.guild_rules import parse_guild_rules
 from smarter_dev.web.models import ModerationAction
-from smarter_dev.web.moderation_gateway.config import load_report_channel
+from smarter_dev.web.moderation_gateway.config import load_incident_report_channel
 
 if TYPE_CHECKING:
     from smarter_dev.web.admin_actions import AdminActor
@@ -130,7 +130,7 @@ class AdminScriptServices:
     async def incident_report_channel(self) -> str | None:
         """Where this guild's moderation incident reports go."""
         async with get_db_session_context() as session:
-            return await load_report_channel(session, self.guild_id)
+            return await load_incident_report_channel(session, self.guild_id)
 
     async def read_rules(self) -> list[dict]:
         """This guild's numbered rules, parsed exactly as ``/rule`` parses them.

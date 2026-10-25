@@ -9,6 +9,14 @@ tool stops a run that is already going.
 
 An empty ``enabled_tools`` means no destructive tools. Only the column default
 for a new row names all three.
+
+A guild with a moderation policy (#241) is read from its ``triage`` section
+instead (``moderation_configs`` is then not read): ``off`` does not run,
+``evaluate`` runs with no destructive tool, ``enforce`` with the policy's
+``enabled_tools``. Its report goes to ``triage.response_channel_id``, or to
+the channel the ping came from when that is empty, as before; the protected
+roles are the policy's. The caps on each
+tool (an hour, 50 messages, one delete) are in the tools, not the policy.
 """
 
 from __future__ import annotations
@@ -16,9 +24,11 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationConfigOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
+from smarter_dev.web.moderation_policy_store import read_policy
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +65,9 @@ def enabled_destructive_tools(raw) -> tuple[str, ...]:
 async def load_triage_config(guild_id: str) -> TriageConfig | None:
     """The guild's config when triage is active, else None. Raises on DB errors."""
     async with get_db_session_context() as session:
+        stored = await read_policy(session, str(guild_id))
+        if stored is not None:
+            return triage_from_policy(str(guild_id), stored.document)
         config = await _config_ops.get_config(session, str(guild_id))
         if config is None or not config.is_active:
             return None
@@ -69,6 +82,26 @@ async def load_triage_config(guild_id: str) -> TriageConfig | None:
             or DEFAULT_CONTEXT_MESSAGE_LIMIT,
             response_channel_id=config.response_channel_id,
         )
+
+
+def triage_from_policy(
+    guild_id: str, document: mp.PolicyDocument
+) -> TriageConfig | None:
+    """The triage config a policy describes; None when its triage is off."""
+    triage = document.triage
+    if triage.mode == mp.OFF or not document.controls.evaluate:
+        return None
+    enforcing = triage.mode == mp.ENFORCE and document.controls.enforce
+    return TriageConfig(
+        guild_id=guild_id,
+        monitored_role_ids=frozenset(triage.monitored_role_ids),
+        instructions=triage.instructions,
+        enabled_tools=enabled_destructive_tools(triage.enabled_tools)
+        if enforcing
+        else (),
+        context_message_limit=triage.context_message_limit,
+        response_channel_id=triage.response_channel_id,
+    )
 
 
 async def tool_refusal(guild_id: str, tool: str) -> str | None:
@@ -100,6 +133,9 @@ async def staff_exempt_role_ids(guild_id: str) -> tuple[str, ...]:
     ring read the same column), so triage protects the same people they do.
     """
     async with get_db_session_context() as session:
+        stored = await read_policy(session, str(guild_id))
+        if stored is not None:
+            return tuple(stored.document.protected_role_ids)
         config = await _filter_config_ops.get_config(session, str(guild_id))
         if config is None:
             return ()

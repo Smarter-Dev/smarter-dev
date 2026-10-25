@@ -60,6 +60,10 @@ GATEWAY_TABLES = [
     models.ModerationOwnership.__table__,
     models.ExtensionInstall.__table__,
     models.ModerationConfig.__table__,
+    # The versioned policy (#241).
+    models.ModerationPolicy.__table__,
+    models.ModerationPolicyRevision.__table__,
+    models.ModerationPolicyLoad.__table__,
 ]
 
 
