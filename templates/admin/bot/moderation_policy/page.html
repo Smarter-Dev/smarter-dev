@@ -1,0 +1,325 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Moderation - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% macro number(path, label, value, help_text, step="1", unit=None) %}
+<label for="{{ path }}">{{ label }}{% if unit %} ({{ unit }}){% endif %}</label>
+<input type="number" step="{{ step }}" id="{{ path }}" name="{{ path }}" value="{{ value }}" style="max-width:12rem; display:block;">
+<small class="sk-text-muted" style="display:block;">{{ help_text }}</small>
+{% endmacro %}
+
+{% macro check(path, label, value) %}
+<label><input type="checkbox" name="{{ path }}" {% if value %}checked{% endif %}> {{ label }}</label>
+{% endmacro %}
+
+{% macro ids(path, label, values, help_text, rows=3) %}
+<label for="{{ path }}">{{ label }}</label>
+<textarea id="{{ path }}" name="{{ path }}" rows="{{ rows }}" placeholder="One per line">{{ values | join('\n') }}</textarea>
+<small class="sk-text-muted">{{ help_text }}</small>
+{% endmacro %}
+
+{% macro channel(path, label, selected, channels, help_text, empty="None") %}
+<label for="{{ path }}">{{ label }}</label>
+<select id="{{ path }}" name="{{ path }}">
+    <option value="">{{ empty }}</option>
+    {% set ns = namespace(found=False) %}
+    {% for c in channels %}
+    <option value="{{ c.id }}" {% if selected == c.id %}selected{% set ns.found = True %}{% endif %}>#{{ c.name }}</option>
+    {% endfor %}
+    {% if selected and not ns.found %}<option value="{{ selected }}" selected>{{ selected }}</option>{% endif %}
+</select>
+<small class="sk-text-muted">{{ help_text }}</small>
+{% endmacro %}
+
+{% macro span(seconds) %}{% if seconds >= 86400 and seconds % 86400 == 0 %}{{ seconds // 86400 }} d{% elif seconds >= 3600 and seconds % 3600 == 0 %}{{ seconds // 3600 }} h{% elif seconds >= 60 and seconds % 60 == 0 %}{{ seconds // 60 }} min{% else %}{{ seconds }} s{% endif %}{% endmacro %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Moderation</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a> &middot; <a href="/admin/bot/guilds/{{ guild.id }}/moderation/incidents">Incidents</a> &middot; <a href="/admin/bot/guilds/{{ guild.id }}/moderation/policy.json">JSON</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Policy</div>
+            <div class="sk-panel-body">
+                {% if stored %}
+                <p><strong>Revision {{ stored.revision }}</strong>, saved {{ updated }}{% if stored.updated_by %} by <code>{{ stored.updated_by }}</code>{% endif %}.
+                Moderated by <strong>{{ ownership.owner }}</strong> (generation {{ ownership.generation }}; switched by the cutover Job only).</p>
+                {% else %}
+                <p><strong>No policy yet.</strong> This server still runs on the old settings pages. The import Job (<code>scripts/moderation_policy_import.py</code>) writes revision 1 from them; until then nothing here can be saved.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if stored %}
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Loaded by</div>
+            <div class="sk-panel-body">
+                {% if loads %}
+                <table class="sk-admin-table">
+                    <thead><tr><th>Process</th><th>Revision</th><th>Loaded</th><th>Last seen</th><th></th></tr></thead>
+                    <tbody>
+                        {% for row in loads %}
+                        <tr>
+                            <td><code>{{ row.process }}</code></td>
+                            <td>{{ row.revision }}</td>
+                            <td>{{ row.loaded }}</td>
+                            <td>{{ row.seen }}</td>
+                            <td>
+                                {% if row.behind %}<span class="sk-pill" style="background:#ffcdd2; color:#c62828;">behind</span>
+                                {% elif row.quiet %}<span class="sk-pill" style="background:#fff3cd; color:#856404;">not seen recently</span>
+                                {% else %}<span class="sk-pill sk-pill-published">current</span>{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-text-muted">No bot process has reported this revision yet. Each one reports within a minute of loading it.</p>
+                {% endif %}
+                <small class="sk-text-muted">A bot process picks a saved revision up on its next message and reports every minute. Staff-ping triage reads the policy fresh on every ping.</small>
+            </div>
+        </div>
+        {% endif %}
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/moderation">
+            {{ csrf_field() }}
+            <input type="hidden" name="base_revision" value="{{ stored.revision if stored else '' }}">
+            <fieldset {% if not stored %}disabled{% endif %} style="border:0; padding:0; margin:0;">
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Controls</div>
+                <div class="sk-panel-body" style="display:flex; flex-direction:column; gap:0.5rem;">
+                    {{ check("controls.evaluate", "Evaluate: rules judge messages (off: nothing is judged or recorded)", doc.controls.evaluate) }}
+                    {{ check("controls.enforce", "Enforce: automated actions are carried out (off: every rule only evaluates)", doc.controls.enforce) }}
+                    {{ check("controls.report", "Report: incidents are reported to the report channel", doc.controls.report) }}
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Rules</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted"><strong>Evaluate</strong> judges and records a rule's findings without acting on them; <strong>Enforce</strong> acts. A rule's channels limit it to those channels; none listed is every channel (the bump channel rule is the exception: its channels are the rule).</p>
+                    <table class="sk-admin-table">
+                        <thead><tr><th>Rule</th><th>Mode</th><th>Channels</th></tr></thead>
+                        <tbody>
+                        {% for rule in rules %}
+                        {% set r = doc.rules[rule] %}
+                        <tr>
+                            <td><strong>{{ rule_titles[rule] }}</strong><br><small class="sk-text-muted">{{ rule_help[rule] }}</small></td>
+                            <td>
+                                <select name="rules.{{ rule }}.mode" aria-label="{{ rule_titles[rule] }} mode" style="min-width:9rem;">
+                                    {% for mode in modes %}<option value="{{ mode }}" {% if r.mode == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}
+                                </select>
+                            </td>
+                            <td><textarea name="rules.{{ rule }}.channels" rows="2" placeholder="{% if rule == 'bump_channel' %}none{% else %}every channel{% endif %}" aria-label="{{ rule_titles[rule] }} channels">{{ r.channels | join('\n') }}</textarea></td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+
+                    <details style="margin-top:1rem;">
+                        <summary><strong>Spam engine settings</strong></summary>
+                        {% set s = doc.rules.spam_engine %}
+                        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(16rem, 1fr)); gap:1rem; margin-top:1rem;">
+                            <div>{{ number("rules.spam_engine.message_rate_threshold", "Message rate threshold", s.message_rate_threshold, "Messages inside the window before a violation.") }}</div>
+                            <div>{{ number("rules.spam_engine.message_rate_window_seconds", "Message rate window", s.message_rate_window_seconds, "", unit="seconds") }}</div>
+                            <div>{{ number("rules.spam_engine.channel_spread_threshold", "Channel spread threshold", s.channel_spread_threshold, "Distinct channels inside the window.") }}</div>
+                            <div>{{ number("rules.spam_engine.channel_spread_window_seconds", "Channel spread window", s.channel_spread_window_seconds, "", unit="seconds") }}</div>
+                            <div>{{ number("rules.spam_engine.duplicate_message_min_length", "Duplicate minimum length", s.duplicate_message_min_length, "Shorter messages are not compared.") }}</div>
+                            <div>{{ number("rules.spam_engine.duplicate_message_window_seconds", "Duplicate window", s.duplicate_message_window_seconds, "", unit="seconds") }}</div>
+                            <div>{{ number("rules.spam_engine.mass_mention_window_seconds", "Mass mention window", s.mass_mention_window_seconds, "", unit="seconds") }}</div>
+                            <div>{{ number("rules.spam_engine.warning_reoffense_window_seconds", "Re-offense window", s.warning_reoffense_window_seconds, "A second violation inside this after a warning is a mute.", unit="seconds") }}</div>
+                            <div>{{ number("rules.spam_engine.mute_duration_seconds", "Mute duration", s.mute_duration_seconds, "= " ~ span(s.mute_duration_seconds) ~ ". At most 28 days.", unit="seconds") }}</div>
+                        </div>
+                        <div style="margin-top:1rem;">{{ ids("rules.spam_engine.scam_link_domains", "Scam link domains", s.scam_link_domains, "Bare hostnames; a link matches its host or a subdomain. Empty: no domain matching (the .gift rule stays).", rows=5) }}</div>
+                        <div style="margin-top:1rem;">{{ channel("rules.spam_engine.scam_log_channel_id", "Scam log channel", s.scam_log_channel_id, text_channels, "Where defanged scam links the engine removed are archived.") }}</div>
+                    </details>
+
+                    <details style="margin-top:0.5rem;">
+                        <summary><strong>Attachment filter settings</strong></summary>
+                        {% set a = doc.rules.attachment_filter %}
+                        <div style="margin-top:1rem;">{{ ids("rules.attachment_filter.ignored_extensions", "Allowed file types", a.ignored_extensions, "No action.", rows=3) }}</div>
+                        <div style="margin-top:1rem;">{{ ids("rules.attachment_filter.warn_extensions", "Warned file types", a.warn_extensions, "A caution, the message stays. Every other type is removed.", rows=4) }}</div>
+                        <label for="rules.attachment_filter.warn_message" style="margin-top:1rem; display:block;">Warning notice</label>
+                        <input type="text" id="rules.attachment_filter.warn_message" name="rules.attachment_filter.warn_message" value="{{ a.warn_message or '' }}">
+                        <label for="rules.attachment_filter.delete_message" style="margin-top:1rem; display:block;">Removal notice</label>
+                        <input type="text" id="rules.attachment_filter.delete_message" name="rules.attachment_filter.delete_message" value="{{ a.delete_message or '' }}">
+                        <small class="sk-text-muted"><code>{user}</code>, <code>{extension}</code> and <code>{filename}</code> are filled in. Blank uses the built-in text.</small>
+                    </details>
+
+                    <details style="margin-top:0.5rem;">
+                        <summary><strong>Spam ring settings</strong></summary>
+                        {% set g = doc.rules.spam_ring %}
+                        <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(16rem, 1fr)); gap:1rem; margin-top:1rem;">
+                            <div>{{ number("rules.spam_ring.new_member_days", "New member window", g.new_member_days, "At most 90.", unit="days") }}</div>
+                            <div>{{ number("rules.spam_ring.timeout_seconds", "Participant timeout", g.timeout_seconds, "= " ~ span(g.timeout_seconds) ~ ".", unit="seconds") }}</div>
+                            <div>{{ number("rules.spam_ring.lookback_minutes", "Look-back", g.lookback_minutes, "Up to the channel's last 100 messages.", unit="minutes") }}</div>
+                            <div>{{ number("rules.spam_ring.followup_minutes", "Follow-up", g.followup_minutes, "Later ring messages are removed for this long.", unit="minutes") }}</div>
+                        </div>
+                    </details>
+
+                    <details style="margin-top:0.5rem;">
+                        <summary><strong>Scam check and @everyone settings</strong></summary>
+                        <div style="margin-top:1rem;">{{ number("rules.scam_gate.image_sample", "Images sampled", doc.rules.scam_gate.image_sample, "When a member who is not high risk posts four or more images (no hold), this many are checked, picked at random. 0 checks the text only.") }}</div>
+                        <div style="margin-top:1rem; display:flex; flex-direction:column; gap:0.5rem;">
+                            {{ check("rules.mass_mention.warn", "@everyone/@here: record a formal warning (off: the message is only removed)", doc.rules.mass_mention.warn) }}
+                            {{ check("rules.mass_mention.dm", "@everyone/@here: tell the member by DM", doc.rules.mass_mention.dm) }}
+                        </div>
+                    </details>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Protected roles</div>
+                <div class="sk-panel-body">
+                    {{ ids("protected_role_ids", "Extra protected role IDs", doc.protected_role_ids, "Holders are never acted on automatically.") }}
+                    {% if guild_roles %}
+                    <small class="sk-text-muted">Roles: {% for role in guild_roles %}<code>{{ role.id }}</code> {{ role.name }}{% if not loop.last %} &middot; {% endif %}{% endfor %}</small>
+                    {% endif %}
+                    <p class="sk-text-muted" style="margin-top:0.5rem;">Always protected, whatever is listed here: the server owner, bots, the staff roles ({% for r in staff_role_ids %}<code>{{ r }}</code>{% if not loop.last %}, {% endif %}{% endfor %}), anyone holding {{ staff_permissions | join(', ') }}, and anyone whose standing cannot be checked.</p>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Sanctions</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">What automation may do. Nothing ticked: it does nothing (findings are still recorded and reported). Kick is a moderator's call.</p>
+                    <div style="display:flex; gap:1.5rem; flex-wrap:wrap;">
+                        {% for kind in sanctions %}{{ check("sanctions.allowed." ~ kind, kind | capitalize, kind in doc.sanctions.allowed) }}{% endfor %}
+                    </div>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(16rem, 1fr)); gap:1rem; margin-top:1rem;">
+                        <div>{{ number("sanctions.max_timeout_seconds", "Longest timeout", doc.sanctions.max_timeout_seconds, "= " ~ span(doc.sanctions.max_timeout_seconds) ~ ". Longer ones are shortened to this.", unit="seconds") }}</div>
+                        <div>{{ number("sanctions.scam_ban_account_age_days", "Ban accounts younger than", doc.sanctions.scam_ban_account_age_days, "A confirmed scam from a newer account is a ban.", unit="days") }}</div>
+                        <div>{{ number("sanctions.scam_timeout_seconds", "Scam timeout", doc.sanctions.scam_timeout_seconds, "= " ~ span(doc.sanctions.scam_timeout_seconds) ~ ". A confirmed high-signal or repeat scam otherwise.", unit="seconds") }}</div>
+                        <div>{{ number("sanctions.repeat_window_seconds", "Repeat window", doc.sanctions.repeat_window_seconds, "= " ~ span(doc.sanctions.repeat_window_seconds) ~ ". A scam this soon after a sanction is a repeat.", unit="seconds") }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">High risk</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">Who the scam check treats as high risk. A review hold is never counted as an earlier action.</p>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(16rem, 1fr)); gap:1rem;">
+                        {% for kind in ["warn", "timeout", "kick", "ban"] %}
+                        <div>{{ number("risk.windows." ~ kind, "After a " ~ kind, doc.risk.windows[kind], "= " ~ span(doc.risk.windows[kind]) ~ ". 0: never.", unit="seconds") }}</div>
+                        {% endfor %}
+                        <div>{{ number("risk.joined_within_seconds", "Joined within", doc.risk.joined_within_seconds, "= " ~ span(doc.risk.joined_within_seconds) ~ ". 0: off.", unit="seconds") }}</div>
+                        <div>{{ number("risk.silent_days", "Silent for", doc.risk.silent_days, "No message for this long. 0: off.", unit="days") }}</div>
+                    </div>
+                    <div style="margin-top:1rem;">{{ check("risk.first_message", "A member's first message is high risk", doc.risk.first_message) }}</div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Provisional hold</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">A high-signal scam gets an immediate timeout while it is checked; the verdict then lifts it, upgrades it or leaves it to run out, in the same incident. Nothing ticked: no hold.</p>
+                    {{ check("provisional.enabled", "Hold high-signal scams while they are checked", doc.provisional.enabled) }}
+                    <div style="margin-top:1rem;">{{ number("provisional.duration_seconds", "Hold", doc.provisional.duration_seconds, "= " ~ span(doc.provisional.duration_seconds) ~ ". At most an hour.", unit="seconds") }}</div>
+                    <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:1rem;">
+                        {% for sig in signals %}{{ check("provisional.signals." ~ sig, signal_titles[sig], sig in doc.provisional.signals) }}{% endfor %}
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Classifier</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">One request per message for every question at once; Haiku 5.5 answers the scam and abuse questions and anything with an image. No retries; past a budget the answer is unknown, and nothing is done on an unknown alone.</p>
+                    <label for="classifier.ring_only_backend">Ring-only questions go to</label>
+                    <select id="classifier.ring_only_backend" name="classifier.ring_only_backend">
+                        <option value="jev" {% if doc.classifier.ring_only_backend == 'jev' %}selected{% endif %}>Jev (typesafe:jev-1.13.0)</option>
+                        <option value="haiku" {% if doc.classifier.ring_only_backend == 'haiku' %}selected{% endif %}>Haiku 5.5</option>
+                    </select>
+                    <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(16rem, 1fr)); gap:1rem; margin-top:1rem;">
+                        <div>{{ number("classifier.deadline_seconds", "Deadline", doc.classifier.deadline_seconds, "At most 10.", step="0.5", unit="seconds") }}</div>
+                        <div>{{ number("classifier.per_author", "Per author", doc.classifier.per_author, "Requests per author inside the window.") }}</div>
+                        <div>{{ number("classifier.author_window_seconds", "Author window", doc.classifier.author_window_seconds, "", unit="seconds") }}</div>
+                        <div>{{ number("classifier.per_guild_minute", "Per minute", doc.classifier.per_guild_minute, "Requests per minute for the server.") }}</div>
+                        <div>{{ number("classifier.per_guild_day", "Per day", doc.classifier.per_guild_day, "Requests per UTC day for the server.") }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Destinations</div>
+                <div class="sk-panel-body">
+                    {{ channel("destinations.report_channel_id", "Report channel", doc.destinations.report_channel_id, text_channels, "Every incident's one report. None: incidents are recorded, not reported.") }}
+                    <label for="destinations.mod_ping_role_id" style="margin-top:1rem; display:block;">Mod ping role</label>
+                    <select id="destinations.mod_ping_role_id" name="destinations.mod_ping_role_id">
+                        <option value="">No ping</option>
+                        {% set ns = namespace(found=False) %}
+                        {% for role in guild_roles %}<option value="{{ role.id }}" {% if doc.destinations.mod_ping_role_id == role.id %}selected{% set ns.found = True %}{% endif %}>@{{ role.name }}</option>{% endfor %}
+                        {% if doc.destinations.mod_ping_role_id and not ns.found %}<option value="{{ doc.destinations.mod_ping_role_id }}" selected>{{ doc.destinations.mod_ping_role_id }}</option>{% endif %}
+                    </select>
+                    <small class="sk-text-muted">The only role a spam mute's report may ping.</small>
+                    <div style="display:flex; flex-direction:column; gap:0.5rem; margin-top:1rem;">
+                        {{ check("destinations.channel_notices", "Post notices in the member's channel (a removed file, a warning)", doc.destinations.channel_notices) }}
+                        {{ check("destinations.member_dms", "Send members DMs (warnings, the hacked-account steps)", doc.destinations.member_dms) }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Staff-ping triage</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">When a member pings a monitored role, the AI review reads the channel and may freeze the situation until a moderator arrives. <strong>Evaluate</strong> runs it with no destructive tool. Its limits are fixed: a timeout of at most an hour, a purge of at most 50 messages, one delete.</p>
+                    <label for="triage.mode">Mode</label>
+                    <select id="triage.mode" name="triage.mode">
+                        {% for mode in modes %}<option value="{{ mode }}" {% if doc.triage.mode == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}
+                    </select>
+                    <div style="display:flex; gap:1.5rem; flex-wrap:wrap; margin-top:1rem;">
+                        {% for tool in triage_tools %}{{ check("triage.enabled_tools." ~ tool, tool | capitalize, tool in doc.triage.enabled_tools) }}{% endfor %}
+                    </div>
+                    <small class="sk-text-muted">Nothing ticked: no destructive tool.</small>
+                    <div style="margin-top:1rem;">{{ ids("triage.monitored_role_ids", "Monitored role IDs", doc.triage.monitored_role_ids, "A ping of any of these starts a review.") }}</div>
+                    <div style="margin-top:1rem;">{{ number("triage.context_message_limit", "Context", doc.triage.context_message_limit, "Recent messages read for context.", unit="messages") }}</div>
+                    <div style="margin-top:1rem;">{{ channel("triage.response_channel_id", "Report channel", doc.triage.response_channel_id, text_channels, "Where the review posts its report. None: in the channel the ping came from.", empty="The ping's own channel") }}</div>
+                    <label for="triage.instructions" style="margin-top:1rem; display:block;">Instructions</label>
+                    <textarea id="triage.instructions" name="triage.instructions" rows="8">{{ doc.triage.instructions }}</textarea>
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save as revision {{ (stored.revision + 1) if stored else 1 }}</button>
+            </div>
+            </fieldset>
+        </form>
+
+        {% if revisions %}
+        <div class="sk-panel" style="margin-top:1.5rem;">
+            <div class="sk-panel-head">Revisions</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <thead><tr><th>Revision</th><th>Saved</th><th>By</th><th>Source</th><th>Changed</th></tr></thead>
+                    <tbody>
+                        {% for rev in revisions %}
+                        <tr>
+                            <td>{{ rev.revision }}</td>
+                            <td style="white-space:nowrap;">{{ rev.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td><code>{{ rev.changed_by or '—' }}</code></td>
+                            <td>{{ rev.source }}</td>
+                            <td>{% if rev.source == 'import' %}imported from the old settings{% elif rev.changed_fields %}{% for f in rev.changed_fields %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}nothing{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

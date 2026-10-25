@@ -51,6 +51,15 @@
             </div>
         </div>
 
+        {% if policy_revision %}
+        <div class="sk-panel" style="margin-top:1rem; border-left:4px solid #e0a800;">
+            <div class="sk-panel-body">
+                <strong>Moderation runs on this server's <a href="/admin/bot/guilds/{{ guild.id }}/moderation">moderation policy</a> (revision {{ policy_revision }}).</strong>
+                Only the content filter is edited here. The spam engine, scam links, staff exemptions and the spam ring below are shown as they were before the policy and are read-only.
+            </div>
+        </div>
+        {% endif %}
+
         <form method="post" action="/admin/bot/guilds/{{ guild.id }}/moderation-filter">
             <div class="sk-panel" style="margin-top:1rem;">
                 <div class="sk-panel-head">Content Filters</div>
@@ -65,9 +74,11 @@
                     <textarea id="blocked_tlds" name="blocked_tlds" rows="5" placeholder=".gay&#10;.xxx&#10;.zip">{{ config.blocked_tlds | join('\n') if config.blocked_tlds else '' }}</textarea>
                     <small class="sk-text-muted">A leading dot is added automatically and entries are lower-cased.</small>
 
+                    <fieldset {% if policy_revision %}disabled{% endif %} style="border:0; padding:0; margin:0;">
                     <label for="scam_link_domains" style="margin-top:1rem; display:block;">Scam Link Domains (one per line or comma-separated)</label>
                     <textarea id="scam_link_domains" name="scam_link_domains" rows="6" placeholder="t.me&#10;chat.whatsapp.com">{{ config.scam_link_domains | join('\n') if config.scam_link_domains else '' }}</textarea>
                     <small class="sk-text-muted">Messaging platforms used as scam landing pages. Use bare hostnames &mdash; a pasted URL is trimmed to its host and entries are lower-cased. A link matches when its domain equals an entry or is a subdomain of one, so <code>t.me</code> also covers <code>x.t.me</code>. Clearing this box disables domain matching; the separate <code>.gift</code> rule is built into the bot.</small>
+                    </fieldset>
 
                     <label style="margin-top:1rem; display:block;">
                         <input type="checkbox" name="invite_filter_enabled" {% if config.invite_filter_enabled %}checked{% endif %}>
@@ -94,11 +105,13 @@
                         {{ channel_picker("mod_log_channel_id", "Mod Log Channel", config.mod_log_channel_id, text_channels, "Where content-filter hits are reported.") }}
                     </div>
 
-                    <div style="margin-top:1rem;">
+                    <fieldset {% if policy_revision %}disabled{% endif %} style="border:0; padding:0; margin:1rem 0 0;">
                         {{ channel_picker("scam_log_channel_id", "Scam Log Channel", config.scam_log_channel_id, text_channels, "Where sanitized scam links are archived.") }}
-                    </div>
+                    </fieldset>
                 </div>
             </div>
+
+            <fieldset {% if policy_revision %}disabled{% endif %} style="border:0; padding:0; margin:0;">
 
             <div class="sk-panel" style="margin-top:1rem;">
                 <div class="sk-panel-head">Staff Exemptions</div>
@@ -202,6 +215,8 @@
                     </div>
                 </div>
             </div>
+
+            </fieldset>
 
             <div style="margin-top:1rem;">
                 <button type="submit" class="sk-btn">Save Configuration</button>

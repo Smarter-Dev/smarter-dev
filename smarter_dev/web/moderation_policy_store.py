@@ -28,6 +28,7 @@ from smarter_dev.shared.moderation_policy import PolicyDocument
 from smarter_dev.shared.moderation_policy import changed_fields
 from smarter_dev.shared.moderation_policy import read_document
 from smarter_dev.shared.moderation_policy import validate
+from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.models import ModerationPolicy
 from smarter_dev.web.models import ModerationPolicyLoad
 from smarter_dev.web.models import ModerationPolicyRevision
@@ -76,6 +77,31 @@ async def read_policy(session, guild_id: str) -> StoredPolicy | None:
         updated_by=row.updated_by,
         updated_at=row.updated_at,
     )
+
+
+async def protected_role_ids(
+    session, guild_id: str, config: ModerationFilterConfig | None = None
+) -> tuple[str, ...]:
+    """The roles moderation never acts on, on top of the built-in staff rule.
+
+    A guild with a policy: its ``protected_role_ids`` (the old column is not
+    read then, and the old form no longer saves it). Otherwise
+    ``moderation_filter_configs.staff_exempt_role_ids``, as before, from
+    ``config`` when the caller has the row already. Raises on DB errors, and
+    ``PolicyError`` for a policy this code cannot read: a caller that cannot
+    tell who is protected must not act."""
+    stored = await read_policy(session, guild_id)
+    if stored is not None:
+        return tuple(str(role_id) for role_id in stored.document.protected_role_ids)
+    if config is not None:
+        exempt = config.staff_exempt_role_ids
+    else:
+        exempt = await session.scalar(
+            select(ModerationFilterConfig.staff_exempt_role_ids).where(
+                ModerationFilterConfig.guild_id == guild_id
+            )
+        )
+    return tuple(str(role_id) for role_id in exempt or [])
 
 
 async def save_policy(

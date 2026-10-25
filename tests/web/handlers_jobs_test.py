@@ -20,6 +20,7 @@ import smarter_dev.web.handler_recurrence as handler_recurrence
 import smarter_dev.web.handler_script_services as handler_script_services
 import smarter_dev.web.handlers_jobs as handlers_jobs
 import smarter_dev.web.handler_runtime as handler_runtime
+from smarter_dev.web.models import ModerationPolicy
 from smarter_dev.web.admin_actions import AdminActionError
 from smarter_dev.web.admin_actions import AdminActor
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
@@ -89,6 +90,8 @@ _USAGE = {
 
 class _FakeSession:
     async def get(self, model, id_, **options):
+        if model is ModerationPolicy:
+            return None  # no moderation policy: the filter config is read
         return _FakeSession.record
 
     def add(self, obj):

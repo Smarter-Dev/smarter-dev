@@ -48,6 +48,7 @@
                     <th>Reason</th>
                     <th>Source</th>
                     <th>Moderator</th>
+                    <th>Incident</th>
                 </tr>
             </thead>
             <tbody>
@@ -87,6 +88,7 @@
                         {% endif %}
                     </td>
                     <td>{{ action.moderator_username or 'AI Agent' }}</td>
+                    <td>{% if action.incident_id %}<a href="/admin/bot/guilds/{{ guild_id }}/moderation/incidents/{{ action.incident_id }}"><code>{{ (action.incident_id|string)[:8] }}</code></a>{% else %}—{% endif %}</td>
                 </tr>
                 {% endfor %}
             </tbody>

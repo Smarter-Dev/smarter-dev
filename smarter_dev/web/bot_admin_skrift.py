@@ -20,6 +20,7 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import auth_guard, Permission
 
 from smarter_dev.web.crud import ModerationConfigOperations
+from smarter_dev.web.moderation_policy_store import read_policy
 from smarter_dev.web.models import ModerationConfig
 
 mod_config_ops = ModerationConfigOperations()
@@ -84,8 +85,14 @@ class BotAdminController(Controller):
     )
     async def moderation_config(
         self, request: Request, db_session: AsyncSession, guild_id: str
-    ) -> TemplateResponse:
-        """Moderation config page for a specific guild."""
+    ) -> TemplateResponse | Redirect:
+        """Moderation config page for a specific guild.
+
+        A guild with a moderation policy (#241) is configured on its
+        Moderation page; this row is no longer read for it.
+        """
+        if await read_policy(db_session, guild_id) is not None:
+            return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")
         ctx = await get_admin_context(request, db_session)
 
         config = await mod_config_ops.get_config(db_session, guild_id)
@@ -111,7 +118,9 @@ class BotAdminController(Controller):
         guild_id: str,
         data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
     ) -> Redirect:
-        """Save moderation config for a guild."""
+        """Save moderation config for a guild (refused under a policy)."""
+        if await read_policy(db_session, guild_id) is not None:
+            return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")
         # Parse form data
         is_active = data.get("is_active") == "true"
         instructions = data.get("instructions", "").strip()

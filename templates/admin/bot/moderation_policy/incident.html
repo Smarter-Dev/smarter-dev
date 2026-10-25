@@ -1,0 +1,135 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Incident {{ incident_id[:8] }} - {{ site_name() }}{% endblock %}
+
+{% macro span(seconds) %}{% if seconds >= 86400 and seconds % 86400 == 0 %}{{ seconds // 86400 }} d{% elif seconds >= 3600 and seconds % 3600 == 0 %}{{ seconds // 3600 }} h{% elif seconds >= 60 and seconds % 60 == 0 %}{{ seconds // 60 }} min{% else %}{{ seconds }} s{% endif %}{% endmacro %}
+
+{% macro state_pill(state) %}
+{% set o = outcome(state) %}
+{% if o == 'confirmed' %}<span class="sk-pill sk-pill-published">{{ state }}</span>
+{% elif o == 'unknown' %}<span class="sk-pill" style="background:#fff3cd; color:#856404;">{{ state }}</span>
+{% else %}<span class="sk-pill" style="background:#eceff1; color:#37474f;">{{ state }}</span>{% endif %}
+{% endmacro %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Incident <code>{{ incident_id[:8] }}</code></h1>
+            <p><a href="/admin/bot/guilds/{{ guild_id }}/moderation/incidents">&larr; Incidents</a></p>
+        </hgroup>
+
+        {% if not detail %}
+        <p class="sk-no-items">No such incident in this guild.</p>
+        {% else %}
+        {% set s = detail.summary %}
+        {% set incident = s.incident %}
+        <div class="sk-panel">
+            <div class="sk-panel-head">Summary</div>
+            <div class="sk-panel-body" style="display:flex; gap:2rem; flex-wrap:wrap;">
+                <div>Opened <strong>{{ incident.opened_at.strftime('%Y-%m-%d %H:%M:%S') }}</strong></div>
+                <div>Subject {% if incident.subject_user_id %}<a href="/admin/bot/mod-actions/{{ guild_id }}/user/{{ incident.subject_user_id }}"><code>{{ incident.subject_user_id }}</code></a>{% else %}—{% endif %}</div>
+                <div><strong>{{ s.requested }}</strong> requested</div>
+                <div><strong>{{ s.counts['confirmed'] }}</strong> confirmed</div>
+                <div><strong>{{ s.counts['not_applied'] }}</strong> not applied</div>
+                <div><strong>{{ s.counts['unknown'] }}</strong> unknown</div>
+                <div>Report: {% if s.report_url %}<a href="{{ s.report_url }}" target="_blank" rel="noopener">Open in Discord</a> ({{ incident.report_state }}, revision {{ incident.report_revision }} of {{ incident.revision }}){% else %}{{ incident.report_state }}{% endif %}</div>
+            </div>
+            {% if s.summary %}<div class="sk-panel-body" style="padding-top:0;"><strong>{{ s.summary }}</strong></div>{% endif %}
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Effects</div>
+            <div class="sk-panel-body">
+                {% if detail.operations %}
+                <table class="sk-admin-table">
+                    <thead><tr><th>When</th><th>Effect</th><th>Target</th><th>Outcome</th><th>By</th><th>Reason</th><th>Detail</th></tr></thead>
+                    <tbody>
+                        {% for op in detail.operations %}
+                        <tr>
+                            <td style="white-space:nowrap;">{{ op.created_at.strftime('%H:%M:%S') }}</td>
+                            <td><span class="sk-pill">{{ op.kind }}</span>{% if op.requested and op.requested.get('duration_seconds') %} {{ span(op.requested.get('duration_seconds')) }}{% endif %}{% if op.message_ids %} ({{ op.message_ids|length }} message{{ 's' if op.message_ids|length != 1 else '' }}){% endif %}</td>
+                            <td><a href="/admin/bot/mod-actions/{{ guild_id }}/user/{{ op.target_user_id }}">{{ op.target_username or op.target_user_id }}</a></td>
+                            <td>{{ state_pill(op.state) }}</td>
+                            <td><code>{{ op.actor }}</code></td>
+                            <td style="max-width:280px;">{{ op.reason or '—' }}</td>
+                            <td style="max-width:220px;"><small class="sk-text-muted">{{ op.detail or '' }}</small></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-text-muted">No effect was requested (a report or a note only).</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Member messages</div>
+            <div class="sk-panel-body">
+                {% if detail.outbox %}
+                <table class="sk-admin-table">
+                    <thead><tr><th>When</th><th>Kind</th><th>Member</th><th>State</th><th>Detail</th></tr></thead>
+                    <tbody>
+                        {% for row in detail.outbox %}
+                        <tr>
+                            <td style="white-space:nowrap;">{{ row.created_at.strftime('%H:%M:%S') }}</td>
+                            <td>{{ row.kind }}</td>
+                            <td>{% if row.target_user_id %}<code>{{ row.target_user_id }}</code>{% else %}—{% endif %}</td>
+                            <td>{{ row.state }}</td>
+                            <td><small class="sk-text-muted">{{ row.detail or '' }}</small></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-text-muted">Nothing was sent to a member.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Record</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <thead><tr><th>When</th><th>Kind</th><th>From</th><th>Text</th></tr></thead>
+                    <tbody>
+                        {% for entry in detail.entries %}
+                        <tr>
+                            <td style="white-space:nowrap;">{{ entry.created_at.strftime('%H:%M:%S') }}</td>
+                            <td>{{ entry.kind }}</td>
+                            <td><code>{{ entry.source }}</code></td>
+                            <td style="max-width:480px;">{% if entry.kind in system_kinds %}{{ entry.rule or entry.content or '' }}{% elif entry.content %}<small class="sk-text-muted">{{ entry.kind }} kept {{ entry.content|length }} characters{% if entry.message_id %} of message <code>{{ entry.message_id }}</code>{% endif %} (shown in the Discord report; deleted after its retention)</small>{% else %}<small class="sk-text-muted">deleted after its retention</small>{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% if detail.actions %}
+        <div class="sk-panel" style="margin-top:1rem;">
+            <div class="sk-panel-head">Mod history rows</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <thead><tr><th>When</th><th>Type</th><th>Target</th><th>Duration</th><th>Audit log</th></tr></thead>
+                    <tbody>
+                        {% for action in detail.actions %}
+                        <tr>
+                            <td style="white-space:nowrap;">{{ action.created_at.strftime('%H:%M:%S') }}</td>
+                            <td><span class="sk-pill">{{ action.action_type }}</span></td>
+                            <td>{{ action.target_username }}</td>
+                            <td>{% set d = action.applied_duration_seconds or action.duration_seconds %}{% if d %}{{ span(d) }}{% else %}—{% endif %}</td>
+                            <td>{% if action.audit_entry_id %}<code>{{ action.audit_entry_id }}</code>{% else %}—{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

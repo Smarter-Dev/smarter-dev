@@ -35,6 +35,8 @@ from smarter_dev.bot.content_filter import find_webhook_url_candidates
 from smarter_dev.bot.content_filter import is_discord_webhook_url
 from smarter_dev.bot.content_filter import link_host
 from smarter_dev.bot.content_filter import parse_discord_webhook_url
+from smarter_dev.shared import moderation_policy as mp
+from smarter_dev.web import moderation_policy_store as store
 from smarter_dev.web.crud import DatabaseOperationError
 from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.models import ModerationFilterConfig
@@ -453,7 +455,8 @@ def _config(**overrides) -> ModerationFilterConfig:
 
 @pytest.fixture
 def filter_env(monkeypatch, moderation_gateway_db):
-    """Stubs the config read and the mod_action dispatch; the gateway is real."""
+    """Stubs the config read and the mod_action dispatch; the gateway is real,
+    and so is the moderation policy read (none unless a test saves one)."""
     from smarter_dev.bot import moderation_port
 
     state = SimpleNamespace(config=_config(), dispatched=[])
@@ -466,7 +469,8 @@ def filter_env(monkeypatch, moderation_gateway_db):
 
     @contextlib.asynccontextmanager
     async def fake_session_context():
-        yield SimpleNamespace()
+        async with moderation_gateway_db() as session:
+            yield session
 
     async def rows() -> list[ModerationAction]:
         async with moderation_gateway_db() as session:
@@ -478,6 +482,7 @@ def filter_env(monkeypatch, moderation_gateway_db):
     monkeypatch.setattr(moderation_port, "dispatch_mod_action", fake_dispatch)
     monkeypatch.setattr(content_filter, "get_db_session_context", fake_session_context)
     state.rows = rows
+    state.database = moderation_gateway_db
     return state
 
 
@@ -600,6 +605,76 @@ async def test_staff_role_author_is_exempt_from_every_filter(filter_env):
 
 
 EVERY_FILTER = f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}"
+
+
+#: In the guild's moderation policy only.
+POLICY_ROLE_ID = 1100000000000004242
+POLICY_REPORT_CHANNEL_ID = 1100000000000007777
+
+
+async def _save_policy(filter_env, **changes) -> None:
+    document = mp.default_document().as_json()
+    for section, values in changes.items():
+        if isinstance(values, dict):
+            document[section].update(values)
+        else:
+            document[section] = values
+    async with filter_env.database() as session:
+        await store.save_policy(
+            session,
+            str(GUILD_ID),
+            document,
+            base_revision=None,
+            by="test",
+            source=store.SOURCE_ADMIN,
+        )
+
+
+@pytest.mark.parametrize(
+    ("role_id", "protected"), [(POLICY_ROLE_ID, True), (STAFF_ROLE_ID, False)]
+)
+async def test_under_a_policy_its_protected_roles_are_staff_not_the_old_column(
+    filter_env, role_id, protected
+):
+    """#241: the filter form no longer saves ``staff_exempt_role_ids`` once a
+    guild has a policy, so the roles edited on the policy page must reach the
+    filter, and the stale column (``STAFF_ROLE_ID``) must not."""
+    await _save_policy(filter_env, protected_role_ids=[str(POLICY_ROLE_ID)])
+    rest = _FakeRest(roles={role_id: hikari.Permissions.SEND_MESSAGES})
+    event = _make_event(EVERY_FILTER, role_ids=(role_id,))
+
+    result = await check_content_filters(_bot(rest=rest), event)
+
+    if protected:
+        _untouched(result, rest, filter_env)
+    else:
+        assert result.message_deleted is True
+        assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
+
+
+@pytest.mark.parametrize("reporting", [True, False])
+async def test_under_a_policy_the_report_goes_to_its_channel_not_the_old_ones(
+    filter_env, reporting
+):
+    """#241: under a policy the incident report goes to the policy's
+    ``destinations.report_channel_id``, and nowhere while its reporting is
+    off; the filter row's ``mod_log_channel_id`` is no longer read for it."""
+    await _save_policy(
+        filter_env,
+        destinations={"report_channel_id": str(POLICY_REPORT_CHANNEL_ID)},
+        controls={"report": reporting},
+    )
+    rest = _FakeRest()
+
+    result = await check_content_filters(
+        _bot(rest=rest), _make_event("free stuff https://evil.gay/free")
+    )
+
+    assert result.message_deleted is True
+    posted_to = {m[0] for m in rest.created_messages}
+    assert MOD_LOG_CHANNEL_ID not in posted_to
+    assert (POLICY_REPORT_CHANNEL_ID in posted_to) is reporting
+    assert posted_to - {POLICY_REPORT_CHANNEL_ID} == {CHANNEL_ID}
 
 
 def _untouched(result: ContentFilterResult, rest: _FakeRest, filter_env) -> None:
