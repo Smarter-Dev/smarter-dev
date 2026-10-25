@@ -303,12 +303,37 @@ def _flatten(differences):
             yield difference
 
 
+# Old moderation_filter_configs columns the models no longer have (#242).
+# They are dropped by a separate migration, merged once no running pod reads
+# them; that migration removes this list.
+_PENDING_DROPS = frozenset({
+    "scam_link_domains", "staff_exempt_role_ids",
+    "spam_engine_enabled", "message_rate_threshold",
+    "message_rate_window_seconds", "channel_spread_threshold",
+    "channel_spread_window_seconds", "duplicate_message_min_length",
+    "duplicate_message_window_seconds", "mass_mention_window_seconds",
+    "warning_reoffense_window_seconds", "mute_duration_seconds",
+    "mod_alert_channel_id", "mod_ping_role_id", "scam_log_channel_id",
+    "spam_ring_enabled", "spam_ring_new_member_days",
+    "spam_ring_timeout_seconds", "spam_ring_lookback_minutes",
+    "spam_ring_followup_minutes", "spam_ring_report_channel_id",
+})
+
+
+def _pending_drop(difference) -> bool:
+    return (
+        difference[0] == "remove_column"
+        and difference[2] == "moderation_filter_configs"
+        and difference[3].name in _PENDING_DROPS
+    )
+
+
 def _column_differences(connection) -> list:
     main_tables = load_ownership_frozenset(MAIN_ENV_PATH, "MAIN_TABLES")
     return [
         difference
         for difference in _flatten(_differences(connection, main_tables))
-        if difference[0] in _COLUMN_CHANGES
+        if difference[0] in _COLUMN_CHANGES and not _pending_drop(difference)
     ]
 
 
