@@ -1520,7 +1520,7 @@ async def drain_accepted_work(gate: leadership.EventGate, budget: float) -> None
     logger.info(f"stopped acting: {gate.summary()}")
 
 
-DAILY_REWARD_EMOJI = "daily_bytes_received:1403748840477163642"
+DAILY_REWARD_EMOJI = "Bytes_Received:1563710345552334898"
 DAILY_REWARD_FALLBACK_EMOJI = "🎉"
 UNKNOWN_EMOJI_CODE = 10014
 # Set once Discord says the custom emoji is gone, so later claims skip the
