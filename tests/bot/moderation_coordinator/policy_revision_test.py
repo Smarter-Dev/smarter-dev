@@ -306,6 +306,7 @@ async def test_a_lower_longest_timeout_saved_before_dispatch_is_applied():
         document(
             sanctions__max_timeout_seconds=600,
             sanctions__scam_timeout_seconds=600,
+            sanctions__scam_high_signal_timeout_seconds=600,
         ),
         revision=2,
     )

@@ -17,11 +17,13 @@ import time
 from dataclasses import replace
 from datetime import timedelta
 
+import pytest
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import TextPart
 from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 
+from smarter_dev.bot.moderation_coordinator import act as act_module
 from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import PastAction
@@ -49,6 +51,7 @@ from tests.bot.moderation_coordinator.replay_cases import say
 INTRODUCTIONS = OTHER
 SCAMMER = Member("d1sc0n3ct", 376, NOW - timedelta(days=400), NOW - timedelta(days=300))
 BYSTANDER = Member("second", 377, NOW - timedelta(days=400), NOW - timedelta(days=300))
+NEW_ACCOUNT = Member("fresh", 378, NOW - timedelta(days=3), NOW - timedelta(hours=2))
 #: Checked but not held, as the member was: back after 60 days' silence.
 RETURNING = AuthorHistory(is_first_message=False, days_since_last_message=60)
 #: The four real timings, seconds after the first post (14:07:23.668).
@@ -178,9 +181,9 @@ async def test_the_1407_burst_is_one_incident_one_sanction_and_no_blind_copies()
     assert len(h.messenger.dms) == 1
     sanctions = await _sanctions(SCAMMER.id)
     # The burst is a high-signal scam from an established account: the
-    # policy's 24 h timeout (it would have been, had the copies been asked).
+    # policy's one-hour high-signal timeout (Zech, Oct 25).
     assert [s for s in sanctions if s[0] != gw.TIMEOUT or s[1] > 300] == [
-        (gw.TIMEOUT, 86400)
+        (gw.TIMEOUT, 3600)
     ]
     report = h.port.latest_report_text(REPORTS)
     print(report)
@@ -188,6 +191,43 @@ async def test_the_1407_burst_is_one_incident_one_sanction_and_no_blind_copies()
     assert "moderator should look" not in report
     assert "came back unknown" not in report
     assert "has been warned" not in "".join(text for _, text in h.messenger.posts)
+
+
+WARNED_LATELY = replace(
+    RETURNING, actions=(PastAction("warn", NOW - timedelta(days=3), "spam"),)
+)
+
+
+@pytest.mark.parametrize(
+    ("member", "history", "sanction", "secure_account_dm"),
+    [
+        # Zech, Oct 25: most hacked accounts spam in one burst and never
+        # again, so an established account's burst is an hour.
+        (SCAMMER, RETURNING, (gw.TIMEOUT, 3600), True),
+        # A warning in the last 30 days still makes it a repeat: a day.
+        (SCAMMER, WARNED_LATELY, (gw.TIMEOUT, 86400), True),
+        # An account under a week old is still banned, with no DM.
+        (NEW_ACCOUNT, RETURNING, (gw.BAN, None), False),
+    ],
+    ids=["established", "warned-lately", "new-account"],
+)
+async def test_a_confirmed_burst_is_an_hour_a_repeat_a_day_a_new_account_a_ban(
+    member, history, sanction, secure_account_dm
+):
+    release = asyncio.Event()
+    posts = _burst(member)
+    h = harness(_case(posts.values(), release, histories={member.id: history}))
+
+    await _run_burst(h, posts, release)
+
+    sanctions = await _sanctions(member.id)
+    assert [s for s in sanctions if s[0] != gw.TIMEOUT or s[1] > 300] == [sanction]
+    assert len(await _incident_ids()) == 1
+    dms = [text for user, text in h.messenger.dms if user == member.id]
+    if secure_account_dm:
+        assert len(dms) == 1 and act_module.SECURE_ACCOUNT_STEPS in dms[0]
+    else:
+        assert dms == []
 
 
 def _old_escalation(h):
@@ -274,7 +314,7 @@ async def test_two_members_in_the_same_burst_are_two_incidents_and_two_sanctions
     assert len(await _incident_ids()) == 2
     for member in (SCAMMER, BYSTANDER):
         sanctions = await _sanctions(member.id)
-        assert [s for s in sanctions if s[1] != 300] == [(gw.TIMEOUT, 86400)]
+        assert [s for s in sanctions if s[1] != 300] == [(gw.TIMEOUT, 3600)]
     assert sorted(user for user, _ in h.messenger.dms) == sorted(
         [SCAMMER.id, BYSTANDER.id]
     )

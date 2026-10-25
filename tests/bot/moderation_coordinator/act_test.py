@@ -939,8 +939,8 @@ async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_rep
     assert row.decision["targets"][PINGER.id]["sanction"]["kind"] == gw.TIMEOUT
     timeouts = [call[2] for call in h.port.calls if call[0] == "timeout"]
     assert h.port.calls[0][0] == "delete"  # removed before the hold
-    assert len(timeouts) == 2  # the 5-minute hold, then the 24 h timeout
-    assert timeouts[1] - timeouts[0] > 3600
+    assert len(timeouts) == 2  # the 5-minute hold, then the one-hour timeout
+    assert timeouts[1] - timeouts[0] > 1800
     async with default_session_factory()() as session:
         incidents = (
             await session.execute(select(ModerationIncidentLink.incident_id))
@@ -1564,7 +1564,7 @@ async def test_an_original_and_its_escalated_copy_are_sanctioned_once():
     """Re-review item 2: an established member's 4-image post (unheld, one
     sampled image) and its burst copy (held, every image) both come back as
     violations while running side by side. The post would warn and the copy
-    time out: one sanction for the post, the strongest (the copy's 24 h
+    time out: one sanction for the post, the strongest (the copy's one-hour
     timeout), and both messages go."""
     member = Member("desk", 97, NOW - timedelta(days=900), NOW - timedelta(days=800))
     first = say(member, "my desk setup", NOW, attachments=_shots(4))
@@ -1592,7 +1592,7 @@ async def test_an_original_and_its_escalated_copy_are_sanctioned_once():
     assert [s["kind"] for s in sanctions if s] == [gw.TIMEOUT]
     assert not any("has been warned" in text for _, text in h.messenger.posts)
     untils = [c[2] for c in h.port.calls if c[0] == "timeout" and c[2] is not None]
-    assert len([u for u in untils if u - time.time() > 3600]) == 1
+    assert len([u for u in untils if u - time.time() > 1800]) == 1
     assert {first.message_id, copy.message_id} <= h.deleted()
 
 
@@ -1677,7 +1677,7 @@ async def test_a_clean_original_does_not_lift_its_escalated_copys_hold():
     }
     assert outcomes == {first.message_id: "clean", copy.message_id: "violation"}
     untils = [c[2] for c in h.port.calls if c[0] == "timeout"]
-    assert untils[-1] - time.time() > 3600  # the copy's 24 h timeout stands
+    assert untils[-1] - time.time() > 1800  # the copy's one-hour timeout stands
     assert copy.message_id in h.deleted()
     assert h.executor._holds == {}
 
@@ -1744,7 +1744,7 @@ async def test_an_original_still_sanctions_when_its_copy_fails_after_its_verdict
     copy's check said yes, trusting the copy to sanction; a copy that failed
     after sharing its verdict (before claiming) left nobody sanctioned. The
     post always claims after waiting: the sanction is its own. Since #376
-    the post is judged as the burst its copy made of it: the burst's 24 h
+    the post is judged as the burst its copy made of it: the burst's one-hour
     timeout, not a warn."""
     member = Member("desk", 99, NOW - timedelta(days=900), NOW - timedelta(days=800))
     first = say(member, "my desk setup", NOW, attachments=_shots(4))
@@ -1782,7 +1782,7 @@ async def test_an_original_still_sanctions_when_its_copy_fails_after_its_verdict
     sanction = rows[first.message_id].decision["targets"][member.id]["sanction"]
     assert sanction is not None and sanction["kind"] == gw.TIMEOUT
     untils = [c[2] for c in h.port.calls if c[0] == "timeout" and c[2] is not None]
-    assert len([u for u in untils if u - time.time() > 3600]) == 1
+    assert len([u for u in untils if u - time.time() > 1800]) == 1
 
 
 @pytest.mark.parametrize("placed", [True, False], ids=["post held", "post holding"])
@@ -1879,7 +1879,7 @@ async def test_a_copy_whose_hold_failed_does_not_lift_its_posts_hold(placed):
     lifted = [c for c in h.port.calls if c[0] == "timeout" and c[2] is None]
     assert lifted == []
     untils = [c[2] for c in h.port.calls if c[0] == "timeout"]
-    assert untils[-1] - time.time() > 3600  # the post's 24 h timeout
+    assert untils[-1] - time.time() > 1800  # the post's one-hour timeout
     assert first.message_id in h.deleted()
     assert h.executor._holds == {}
 
@@ -1947,7 +1947,7 @@ async def test_a_clean_post_does_not_release_a_copy_still_reading_ownership():
     assert lifted == []
     assert [text for _, text in h.messenger.posts].count(INVESTIGATING) == 1
     untils = [c[2] for c in h.port.calls if c[0] == "timeout"]
-    assert untils[-1] - time.time() > 3600  # the copy's 24 h timeout stands
+    assert untils[-1] - time.time() > 1800  # the copy's one-hour timeout stands
     assert h.executor._holds == {}
 
 
@@ -1959,7 +1959,7 @@ HONEY = Member("luluhoney", 33, NOW - timedelta(days=760), NOW - timedelta(days=
 def _image_only_burst():
     """Incident 4d3f0c64 (Oct 24 13:42Z): the same four images with no text,
     posted in two channels 2 s apart, as a member's first message. Haiku
-    calls it a scam; the account is two years old, so a 24 h timeout."""
+    calls it a scam; the account is two years old, so a one-hour timeout."""
     files = tuple(
         Attachment(
             f"IMG_{i}.png",
@@ -2025,7 +2025,7 @@ async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
         return next(i for i, line in enumerate(lines) if text in line)
 
     held = at(f"Held <@{HONEY.id}> luluhoney for 5 minutes")
-    upgraded = at(f"Hold on <@{HONEY.id}> luluhoney upgraded to a 24-hour timeout")
+    upgraded = at(f"Hold on <@{HONEY.id}> luluhoney upgraded to a 1-hour timeout")
     deletes = [i for i, line in enumerate(lines) if "Deleted a message from" in line]
     told = at(f"DM to <@{HONEY.id}> delivered.")
     summary = at("**Summary:**")
@@ -2035,7 +2035,7 @@ async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
     assert all(lines[i].startswith("- <t:") for i in (held, upgraded, told))
     assert lines[summary] == (
         "**Summary:** Confirmed scam from a likely hacked account: 2 messages "
-        "removed, timed out for 24 hours, told by DM. No earlier actions."
+        "removed, timed out for 1 hour, told by DM. No earlier actions."
     )
     assert lines[summary + 1].startswith("To undo a timeout")
     assert "expired without a verdict" not in report
@@ -2190,7 +2190,7 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     report = h.port.latest_report_text(REPORTS)
     assert "expired without a verdict" not in report
     assert "No verdict" not in report
-    assert "upgraded to a 24-hour timeout" in report
-    assert "2 messages removed, timed out for 24 hours, told by DM" in report
+    assert "upgraded to a 1-hour timeout" in report
+    assert "2 messages removed, timed out for 1 hour, told by DM" in report
     [(_, dm)] = h.messenger.dms
     assert "we removed what it posted" in dm

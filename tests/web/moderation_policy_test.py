@@ -87,6 +87,10 @@ def test_the_defaults_are_the_values_the_code_ran_with():
     assert doc.risk.joined_within_seconds == rules.DAY
     assert doc.sanctions.scam_ban_account_age_days == rules.BAN_ACCOUNT_AGE.days
     assert doc.sanctions.scam_timeout_seconds == rules.REPEAT_TIMEOUT_SECONDS
+    assert (
+        doc.sanctions.scam_high_signal_timeout_seconds
+        == rules.HIGH_SIGNAL_TIMEOUT_SECONDS
+    )
     assert doc.sanctions.repeat_window_seconds == rules.RECENT_ACTION_SECONDS
     assert doc.provisional.duration_seconds == decide.PROVISIONAL_SECONDS
     assert set(doc.provisional.signals) == set(rules.SIGNAL_OF.values())
