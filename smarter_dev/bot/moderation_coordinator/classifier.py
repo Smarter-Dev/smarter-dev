@@ -242,9 +242,13 @@ class ClassifierBudget:
             calls.popleft()
 
     def day_cap(self, acting: bool, limits: BudgetLimits | None = None) -> int:
+        """The guild's daily ceiling: its policy's while the coordinator acts
+        for it, the shadow's otherwise (a policy never raises the shadow's)."""
+        if not acting:
+            return self.per_guild_day
         if limits is not None:
             return limits.per_guild_day
-        return self.acting_per_guild_day if acting else self.per_guild_day
+        return self.acting_per_guild_day
 
     def refusal(
         self,

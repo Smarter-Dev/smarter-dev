@@ -49,6 +49,7 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from typing import Any
 from uuid import UUID
 
@@ -130,7 +131,8 @@ def still_allowed(
 
     A target is carried out whole or not at all: every rule its decision
     acted on is still enforced, and its sanction and its removals are still
-    allowed."""
+    allowed. A timeout past the current revision's longest is shortened to
+    it, as :func:`~.decide.enforceable` does at decision time."""
     kept: list[TargetDecision] = []
     lines: list[tuple] = []
     for target in targets:
@@ -147,6 +149,16 @@ def still_allowed(
         elif target.cleanup and not current.allows(mp.DELETE):
             why = "removing messages no longer allowed"
         if why is None:
+            limit = current.document.sanctions.max_timeout_seconds
+            if (
+                current.revision is not None
+                and sanction is not None
+                and sanction.kind == gw.TIMEOUT
+                and (sanction.duration_seconds or 0) > limit
+            ):
+                target = replace(
+                    target, sanction=replace(sanction, duration_seconds=limit)
+                )
             kept.append(target)
             continue
         lines.append(

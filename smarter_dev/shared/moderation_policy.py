@@ -340,10 +340,12 @@ class Classifier(_Section):
     #: The one request's deadline. At most the brief's 10 s: the clients
     #: are built with that timeout.
     deadline_seconds: float = Field(10.0, ge=1.0, le=10.0)
-    per_author: int = Field(2, ge=0, le=100)
+    #: Each at least 1: a cap of 0 would switch judging off unannounced.
+    per_author: int = Field(2, ge=1, le=100)
     author_window_seconds: int = Field(600, ge=1, le=DAY)
-    per_guild_minute: int = Field(20, ge=0, le=1000)
-    per_guild_day: int = Field(1500, ge=0, le=100_000)
+    per_guild_minute: int = Field(20, ge=1, le=1000)
+    #: The acting guild's daily ceiling; a guild in shadow keeps the shadow's.
+    per_guild_day: int = Field(1500, ge=1, le=100_000)
 
 
 class Destinations(_Section):
@@ -376,6 +378,14 @@ class Triage(_Section):
         default_factory=list
     )
     context_message_limit: int = Field(25, ge=1, le=100)
+    #: Where the review posts its report; None posts it in the channel the
+    #: ping came from.
+    response_channel_id: str | None = None
+
+    @field_validator("response_channel_id", mode="before")
+    @classmethod
+    def _channel(cls, value):
+        return _optional_id(value)
 
     @field_validator("monitored_role_ids", mode="before")
     @classmethod
@@ -463,6 +473,39 @@ def validate(document: Any) -> PolicyDocument:
                 for item in error.errors()
             ]
         ) from None
+
+
+def read_document(document: Any) -> PolicyDocument:
+    """A stored document as this code reads it: settings it does not know
+    are ignored, as is a newer schema number.
+
+    A save (:func:`validate`) refuses unknown keys, so a misspelt setting
+    never looks saved; a read must not, or rolling the image back after a
+    newer one saved a setting this one lacks would stop moderation. A value
+    this code cannot accept still raises: the reader fails closed."""
+    if not isinstance(document, dict):
+        raise PolicyError(["the policy must be a JSON object"])
+    known = _known(PolicyDocument, document)
+    known["schema"] = SCHEMA_VERSION
+    return validate(known)
+
+
+def _known(model: type[BaseModel], data: dict[str, Any]) -> dict[str, Any]:
+    kept: dict[str, Any] = {}
+    for name, info in model.model_fields.items():
+        key = info.alias or name
+        if key not in data:
+            continue
+        value = data[key]
+        annotation = info.annotation
+        if (
+            isinstance(annotation, type)
+            and issubclass(annotation, BaseModel)
+            and isinstance(value, dict)
+        ):
+            value = _known(annotation, value)
+        kept[key] = value
+    return kept
 
 
 def default_document() -> PolicyDocument:

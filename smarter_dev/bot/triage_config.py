@@ -13,8 +13,9 @@ for a new row names all three.
 A guild with a moderation policy (#241) is read from its ``triage`` section
 instead (``moderation_configs`` is then not read): ``off`` does not run,
 ``evaluate`` runs with no destructive tool, ``enforce`` with the policy's
-``enabled_tools``. Reports go to the policy's report channel, none while its
-reporting is off; the protected roles are the policy's. The caps on each
+``enabled_tools``. Its report goes to ``triage.response_channel_id``, or to
+the channel the ping came from when that is empty, as before; the protected
+roles are the policy's. The caps on each
 tool (an hour, 50 messages, one delete) are in the tools, not the policy.
 """
 
@@ -99,9 +100,7 @@ def triage_from_policy(
         if enforcing
         else (),
         context_message_limit=triage.context_message_limit,
-        response_channel_id=document.destinations.report_channel_id
-        if document.controls.report
-        else None,
+        response_channel_id=triage.response_channel_id,
     )
 
 

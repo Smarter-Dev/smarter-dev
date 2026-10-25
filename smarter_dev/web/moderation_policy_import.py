@@ -21,8 +21,13 @@ Where each part comes from:
   the cutover disabled them; their scope is what the coordinator ported).
 * **The report channel**: the order the gateway already resolves it in
   (``moderation_gateway.config``).
-* **Staff-ping triage**: ``moderation_configs``. ``enabled_tools`` is copied
-  as it is: an empty list stays empty.
+* **Staff-ping triage**: ``moderation_configs``. ``enabled_tools`` and
+  ``response_channel_id`` are copied as they are: an empty list stays empty,
+  and no reply channel still means the ping's own channel.
+* **A missing source row** turns its rules ``off``, with a note: no
+  ``moderation_filter_configs`` row, no spam engine or spam ring; no
+  ``attachment_filter_configs`` row, no attachment filter. Defaults never
+  switch a rule on.
 * **Everything else** (risk windows, the scam ladder, the provisional hold
   and its signals, the classifier's budgets): the values the code runs with,
   with the acting daily ceiling from ``MODERATION_ACTING_DAILY_REQUESTS``.
@@ -141,11 +146,19 @@ async def plan(session, guild_id: str) -> ImportPlan:
     if unknown:
         notes.append(f"ownership rules not in the policy, left out: {unknown}")
     config = filters or ModerationFilterConfig.get_defaults(guild_id)
+    missing: set[str] = set()
     if filters is None:
-        notes.append("no moderation_filter_configs row: the models' defaults")
+        missing |= {mp.SPAM_ENGINE, mp.SPAM_RING}
+    if attachments is None:
+        missing.add(mp.ATTACHMENT_FILTER)
+    for rule in sorted(missing & running):
+        notes.append(
+            f"{rule} runs but its config row is missing: imported as off "
+            "(settings at their defaults)"
+        )
 
     def mode(rule: str) -> str:
-        return mp.ENFORCE if rule in running else mp.OFF
+        return mp.ENFORCE if rule in running and rule not in missing else mp.OFF
 
     def scope(name: str) -> list[str]:
         row = handlers.get(name)
@@ -233,6 +246,7 @@ async def plan(session, guild_id: str) -> ImportPlan:
             "context_message_limit": triage.context_message_limit
             if triage and triage.context_message_limit
             else 25,
+            "response_channel_id": triage.response_channel_id if triage else None,
         },
     }
     try:

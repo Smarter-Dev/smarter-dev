@@ -294,3 +294,29 @@ def test_the_policys_risk_windows_decide_who_is_high_risk():
     off = rules.RiskRules.from_policy(document(risk__first_message=False))
     assert "first message" in rules.scam_risky_author(facts, first, NOW, default)
     assert rules.scam_risky_author(facts, first, NOW, off) == ()
+
+
+async def test_a_lower_longest_timeout_saved_before_dispatch_is_applied():
+    """#364 fix 3: the re-check before dispatch shortens a timeout to the
+    current revision's longest, as the decision's gate does."""
+    case, _ = scam_1749(account_age_days=30)
+    case = replace(case, policy=policy_from(document()))
+    h = harness(case)
+    shorter = policy_from(
+        document(
+            sanctions__max_timeout_seconds=600,
+            sanctions__scam_timeout_seconds=600,
+        ),
+        revision=2,
+    )
+    on_revision(h, {"revision": 2, "policy": shorter})
+
+    await h.judge(case.messages[0])
+
+    import time
+
+    expiries = [call[2] for call in h.port.calls if call[0] == "timeout"]
+    assert expiries and all(expiry is not None for expiry in expiries)
+    # Every timeout ends within the current revision's 10 minutes (the
+    # spam mute asked for 24 h under revision 1).
+    assert max(expiries) - time.time() <= 600 + 5

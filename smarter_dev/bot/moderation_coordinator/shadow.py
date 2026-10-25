@@ -103,6 +103,8 @@ BUDGET_EXHAUSTED_TEXT = (
 #: window below, so nothing that window counts can still be on its way.
 LEGACY_SETTLE_SECONDS = 240.0
 SWEEP_SECONDS = 60.0
+#: The loads heartbeat's bound (it shares the comparison loop).
+REPORT_LOADS_SECONDS = 10.0
 #: Bounds on the ring's history read (see BotReads).
 WINDOW_READ_SECONDS = 5.0
 AUTHOR_FACTS_SECONDS = 600.0
@@ -1056,6 +1058,19 @@ class ModerationShadow:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
 
 
+async def heartbeat(policies: PolicyCache) -> None:
+    """:func:`report_loads`, bounded by :data:`REPORT_LOADS_SECONDS`: a slow
+    database must not hold up the comparison loop it shares. Never raises."""
+    try:
+        await asyncio.wait_for(report_loads(policies), REPORT_LOADS_SECONDS)
+    except TimeoutError:
+        logger.warning(
+            "Moderation shadow gave up recording its loaded policy revisions "
+            "after %.0f s",
+            REPORT_LOADS_SECONDS,
+        )
+
+
 def process_name() -> str:
     """This process as ``moderation_policy_loads`` names it: the bot's pod."""
     return f"bot/{os.getenv('HOSTNAME') or socket.gethostname()}"[:200]
@@ -1152,7 +1167,7 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
                 await restore_budget(budget, shadow.recorder, guild_ids)
             await asyncio.sleep(SWEEP_SECONDS)
             # Every process, acting or not: what it runs on is on the page.
-            await report_loads(shadow.policies)
+            await heartbeat(shadow.policies)
             if not leadership.is_acting():
                 continue
             try:

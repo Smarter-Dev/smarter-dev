@@ -26,6 +26,7 @@ from sqlalchemy import select
 
 from smarter_dev.shared.moderation_policy import PolicyDocument
 from smarter_dev.shared.moderation_policy import changed_fields
+from smarter_dev.shared.moderation_policy import read_document
 from smarter_dev.shared.moderation_policy import validate
 from smarter_dev.web.models import ModerationPolicy
 from smarter_dev.web.models import ModerationPolicyLoad
@@ -62,16 +63,16 @@ class StoredPolicy:
 async def read_policy(session, guild_id: str) -> StoredPolicy | None:
     """The guild's current revision, validated; None without a policy.
 
-    A stored document this module no longer accepts raises
-    :class:`~smarter_dev.shared.moderation_policy.PolicyError`: the reader
-    fails closed rather than guessing."""
+    Read leniently (:func:`~smarter_dev.shared.moderation_policy.
+    read_document`): a setting a newer image saved is ignored. A value this
+    code cannot accept raises ``PolicyError``: the reader fails closed."""
     row = await session.get(ModerationPolicy, guild_id)
     if row is None:
         return None
     return StoredPolicy(
         guild_id=guild_id,
         revision=int(row.revision),
-        document=validate(row.document),
+        document=read_document(row.document),
         updated_by=row.updated_by,
         updated_at=row.updated_at,
     )

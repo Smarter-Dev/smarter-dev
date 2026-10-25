@@ -345,9 +345,11 @@ async def test_without_a_policy_the_old_tables_are_read_as_before():
 def test_triage_follows_the_policys_mode():
     raw = mp.default_document().as_json()
     raw["triage"].update(
-        mode=mp.ENFORCE, monitored_role_ids=[MODS], enabled_tools=["timeout"]
+        mode=mp.ENFORCE,
+        monitored_role_ids=[MODS],
+        enabled_tools=["timeout"],
+        response_channel_id=REPORTS,
     )
-    raw["destinations"]["report_channel_id"] = REPORTS
     config = triage_config.triage_from_policy(GUILD, mp.validate(raw))
     assert config.enabled_tools == ("timeout",)
     assert config.response_channel_id == REPORTS
@@ -426,3 +428,111 @@ async def test_after_the_import_the_coordinator_runs_exactly_as_before():
     for name in PARITY_FIELDS:
         assert getattr(after, name) == getattr(before, name), name
     assert after.document.as_json() != mp.default_document().as_json()
+
+
+# -- review of 09f3f973 (#364) ----------------------------------------------------
+
+
+async def test_triage_keeps_its_own_reply_channel_and_its_fallback():
+    """Fix 1: triage replied in ``moderation_configs.response_channel_id``,
+    else in the ping's channel; the import keeps both, and the report
+    channel does not stand in for it."""
+    await _switched()
+    async with sessions() as session:
+        triage = await session.get(ModerationConfig, GUILD)
+        triage.response_channel_id = "702178352395580009"
+        await session.commit()
+    doc = (await _plan()).document
+    assert doc.triage.response_channel_id == "702178352395580009"
+    assert doc.destinations.report_channel_id == REPORTS
+    config = triage_config.triage_from_policy(GUILD, doc)
+    assert config.response_channel_id == "702178352395580009"
+
+    raw = doc.as_json()
+    raw["triage"]["response_channel_id"] = None
+    config = triage_config.triage_from_policy(GUILD, mp.validate(raw))
+    assert config.response_channel_id is None  # the ping's own channel
+
+
+async def test_a_missing_config_row_imports_its_rules_off():
+    """Fix 2: no row is no rule, whatever the ownership lists; defaults
+    never switch a rule on."""
+    from smarter_dev.web.models import AttachmentFilterConfig
+
+    await _switched()
+    async with sessions() as session:
+        await session.delete(await session.get(AttachmentFilterConfig, GUILD))
+        await session.delete(await session.get(ModerationFilterConfig, GUILD))
+        await session.commit()
+    plan = await _plan()
+    doc = plan.document
+    assert doc.rule(mp.ATTACHMENT_FILTER).mode == mp.OFF
+    assert doc.rule(mp.SPAM_ENGINE).mode == mp.OFF
+    assert doc.rule(mp.SPAM_RING).mode == mp.OFF
+    assert doc.rule(mp.SCAM_GATE).mode == mp.ENFORCE
+    assert sorted(n.split()[0] for n in plan.notes if "row is missing" in n) == [
+        mp.ATTACHMENT_FILTER,
+        mp.SPAM_ENGINE,
+        mp.SPAM_RING,
+    ]
+
+
+def test_classifier_budgets_of_zero_are_refused():
+    """Fix 5: a cap of 0 would switch judging off unannounced."""
+    for field_name in ("per_author", "per_guild_minute", "per_guild_day"):
+        raw = mp.default_document().as_json()
+        raw["classifier"][field_name] = 0
+        with pytest.raises(mp.PolicyError, match=field_name):
+            mp.validate(raw)
+
+
+def test_the_shadow_keeps_its_own_daily_ceiling_under_a_policy():
+    """Fix 6: the policy's daily ceiling is the acting guild's; a guild in
+    shadow keeps the shadow's."""
+    budget = classifier.ClassifierBudget(per_guild_day=300, acting_per_guild_day=1500)
+    limits = classifier.BudgetLimits(
+        per_author=2, author_window=600.0, per_guild_minute=20, per_guild_day=900
+    )
+    assert budget.day_cap(False, limits) == 300
+    assert budget.day_cap(True, limits) == 900
+    assert budget.day_cap(True) == 1500
+
+
+async def test_a_setting_saved_by_a_newer_image_does_not_stop_this_one():
+    """Fix 7: the bot reads a stored document leniently (an unknown setting,
+    a newer schema); a save still refuses unknown keys."""
+    from smarter_dev.web.models import ModerationPolicy
+
+    doc = await _imported()
+    newer = doc.as_json()
+    newer["schema"] = 2
+    newer["rules"]["spam_ring"]["new_setting"] = True
+    newer["future_section"] = {"x": 1}
+    async with sessions() as session:
+        row = await session.get(ModerationPolicy, GUILD)
+        row.document = newer
+        await session.commit()
+    async with sessions() as session:
+        stored = await store.read_policy(session, GUILD)
+    assert stored.document == doc
+    assert (await load_policy(GUILD)).revision == 1
+    with pytest.raises(mp.PolicyError):
+        mp.validate(newer)
+
+
+async def test_a_stalled_heartbeat_gives_up_and_never_raises(monkeypatch):
+    """Fix 4: the loads heartbeat shares the comparison loop; it is bounded."""
+    import asyncio
+
+    from smarter_dev.bot.moderation_coordinator import shadow
+
+    started = asyncio.Event()
+
+    async def stalled(_policies, *args, **kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(shadow, "report_loads", stalled)
+    monkeypatch.setattr(shadow, "REPORT_LOADS_SECONDS", 0.05)
+    await asyncio.wait_for(shadow.heartbeat(PolicyCache()), 5)
+    assert started.is_set()
