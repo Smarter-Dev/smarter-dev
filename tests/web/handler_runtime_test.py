@@ -1958,12 +1958,10 @@ async def test_claim_not_configured_errors_loudly():
 
 # -- report_for_review (admin: a review-only incident for the moderators) -------
 
-from smarter_dev.web.handler_caps import (  # noqa: E402
-    MAX_REVIEW_REPORTS_PER_FIRE,
-    REVIEW_REPORT_SUMMARY_MAX_LEN,
-    REVIEW_REPORT_WINDOW_SECONDS,
-    review_report_key,
-)
+from smarter_dev.web.handler_caps import MAX_REVIEW_REPORTS_PER_FIRE  # noqa: E402
+from smarter_dev.web.handler_caps import REVIEW_REPORT_SUMMARY_MAX_LEN  # noqa: E402
+from smarter_dev.web.handler_caps import REVIEW_REPORT_WINDOW_SECONDS  # noqa: E402
+from smarter_dev.web.handler_caps import review_report_key  # noqa: E402
 
 
 def _report_channel(channel="REPORTS"):
