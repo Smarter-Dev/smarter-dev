@@ -9,6 +9,11 @@
 * **Notices** are not sanctions: a notice rides along, deduplicated.
 * **Provisional timeout**: kept apart from the sanctions. Its resolution says
   what the verdict did with it.
+
+Before the decision is made, :func:`enforceable` takes out what the guild's
+policy (#241) does not let the coordinator do: a rule in ``evaluate`` keeps
+its finding and loses its effects, and a sanction the policy does not allow
+is dropped (a timeout past the policy's longest is shortened to it).
 """
 
 from __future__ import annotations
@@ -16,16 +21,32 @@ from __future__ import annotations
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 from smarter_dev.bot.moderation_coordinator.model import Decision
 from smarter_dev.bot.moderation_coordinator.model import Provisional
 from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import TargetDecision
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.web.moderation_gateway import types as gw
+
+if TYPE_CHECKING:
+    from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
 
 #: How long the provisional timeout holds: scam-banner's hold, ample for a
 #: verdict due within the 10 s deadline. Without a verdict it simply runs out.
 PROVISIONAL_SECONDS = 300
+
+#: How a finding the policy does not act on reads on the record.
+EVALUATE_ONLY = " (evaluate only: not acted on)"
+NOT_ALLOWED = " ({kind} not allowed by the policy)"
+#: The policy's name for each sanction the gateway knows.
+_POLICY_SANCTION = {
+    gw.WARN: mp.WARN,
+    gw.TIMEOUT: mp.TIMEOUT,
+    gw.BAN: mp.BAN,
+    gw.KICK: "kick",
+}
 
 UPGRADED = "upgraded"
 RELEASED = "released"
@@ -35,6 +56,50 @@ RELEASED = "released"
 #: "expire without a verdict" (#333).
 DECIDED = "decided"
 EXPIRED = "expired"
+
+
+def enforceable(hits: Sequence[RuleHit], policy: GuildPolicy) -> list[RuleHit]:
+    """What of ``hits`` the guild's policy lets the coordinator carry out.
+
+    Only a guild the coordinator acts for, under a policy, is changed: the
+    shadow records what each rule found, and a guild without a policy acts
+    as it always has."""
+    if not policy.acting or policy.revision is None:
+        return list(hits)
+    max_timeout = policy.document.sanctions.max_timeout_seconds
+    may_delete = policy.allows(mp.DELETE)
+    kept: list[RuleHit] = []
+    for hit in hits:
+        if not policy.enforces(hit.rule):
+            kept.append(
+                replace(
+                    hit,
+                    reason=hit.reason + EVALUATE_ONLY,
+                    sanction=None,
+                    cleanup=(),
+                    notice=None,
+                    high_signal=False,
+                )
+            )
+            continue
+        sanction = hit.sanction
+        reason = hit.reason
+        if sanction is not None:
+            name = _POLICY_SANCTION.get(sanction.kind, sanction.kind)
+            if not policy.allows(name):
+                reason += NOT_ALLOWED.format(kind=name)
+                sanction = None
+            elif (
+                sanction.kind == gw.TIMEOUT
+                and (sanction.duration_seconds or 0) > max_timeout
+            ):
+                sanction = replace(sanction, duration_seconds=max_timeout)
+        cleanup = hit.cleanup
+        if cleanup and not may_delete:
+            reason += NOT_ALLOWED.format(kind=mp.DELETE)
+            cleanup = ()
+        kept.append(replace(hit, reason=reason, sanction=sanction, cleanup=cleanup))
+    return kept
 
 
 def decide(

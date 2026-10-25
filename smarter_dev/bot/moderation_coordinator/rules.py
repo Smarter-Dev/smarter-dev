@@ -73,6 +73,7 @@ from smarter_dev.bot.spam_ring import is_new_member
 from smarter_dev.bot.spam_ring import joined_near_participant
 from smarter_dev.bot.spam_ring import passes_prefilter
 from smarter_dev.bot.spam_ring import select_candidates
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.web.moderation_gateway import types as gw
 
 DAY = 86400
@@ -224,7 +225,7 @@ def pings_everyone(content: str) -> bool:
     return _MASS_MENTION.search(_CODE.sub(" ", content)) is not None
 
 
-def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
+def mass_mention_hits(facts: MessageFacts, *, warn: bool = True) -> list[RuleHit]:
     """Zech, Oct 23 22:36: ``@everyone`` and ``@here`` are not for members.
 
     A message or an edit whose text carries either, outside inline code and
@@ -237,6 +238,8 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
     it). Nothing stronger: a hold or a timeout comes from the other rules (a
     link, nitro bait) when they fire. Like any warning, it leaves the author
     high risk for a day (:data:`RISK_SECONDS`).
+
+    ``warn=False`` (the policy's ``mass_mention.warn`` off): removed only.
     """
     if facts.is_webhook or facts.author_is_bot:
         return []
@@ -248,9 +251,9 @@ def mass_mention_hits(facts: MessageFacts) -> list[RuleHit]:
             reason=MASS_MENTION_REASON,
             target_user_id=facts.author_id,
             target_name=facts.author_name,
-            sanction=Sanction(gw.WARN),
+            sanction=Sanction(gw.WARN) if warn else None,
             cleanup=(Cleanup(facts.channel_id, facts.message_id),),
-            notice=NOTICE_MASS_MENTION,
+            notice=NOTICE_MASS_MENTION if warn else None,
         )
     ]
 
@@ -306,6 +309,20 @@ HIGH_SIGNAL_NITRO_SCAM = "mass mention with nitro bait"
 HIGH_SIGNAL_MENTION_LINK = "mass mention with a link"
 HIGH_SIGNAL_BURST = "same post in several channels within 10 s"
 HIGH_SIGNAL_IMAGES = "four or more images"
+#: The policy's name for each high-signal reason (``provisional.signals``).
+SIGNAL_OF = {
+    HIGH_SIGNAL_SCAM_LINK: mp.SIGNAL_SCAM_LINK,
+    HIGH_SIGNAL_NITRO_SCAM: mp.SIGNAL_NITRO_BAIT,
+    HIGH_SIGNAL_MENTION_LINK: mp.SIGNAL_MENTION_LINK,
+    HIGH_SIGNAL_BURST: mp.SIGNAL_BURST,
+    HIGH_SIGNAL_IMAGES: mp.SIGNAL_IMAGES_HIGH_RISK,
+}
+
+
+def holding_signals(reasons: Sequence[str], signals: Sequence[str]) -> tuple[str, ...]:
+    """The high-signal reasons the policy holds a member for."""
+    wanted = set(signals)
+    return tuple(reason for reason in reasons if SIGNAL_OF.get(reason) in wanted)
 
 
 def high_signal_reasons(
@@ -374,6 +391,51 @@ RECENTLY_MODERATED = (
 )
 
 
+@dataclass(frozen=True, slots=True)
+class RiskRules:
+    """Who counts as high risk (the policy's ``risk``; these defaults are
+    Zech's, Oct 24)."""
+
+    windows: Mapping[str, int] = field(default_factory=lambda: dict(RISK_SECONDS))
+    #: Joined less than this long ago; 0 is off.
+    joined_within_seconds: int = DAY
+    first_message: bool = True
+    #: This many days without a message; 0 is off.
+    silent_days: int = 30
+
+    @classmethod
+    def from_policy(cls, document: mp.PolicyDocument) -> RiskRules:
+        risk = document.risk
+        return cls(
+            windows=risk.windows.model_dump(),
+            joined_within_seconds=risk.joined_within_seconds,
+            first_message=risk.first_message,
+            silent_days=risk.silent_days,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ScamLadder:
+    """What a confirmed scam gets (the policy's ``sanctions``)."""
+
+    ban_account_age: timedelta = BAN_ACCOUNT_AGE
+    timeout_seconds: int = REPEAT_TIMEOUT_SECONDS
+    repeat_window_seconds: float = RECENT_ACTION_SECONDS
+
+    @classmethod
+    def from_policy(cls, document: mp.PolicyDocument) -> ScamLadder:
+        sanctions = document.sanctions
+        return cls(
+            ban_account_age=timedelta(days=sanctions.scam_ban_account_age_days),
+            timeout_seconds=sanctions.scam_timeout_seconds,
+            repeat_window_seconds=sanctions.repeat_window_seconds,
+        )
+
+
+DEFAULT_RISK = RiskRules()
+DEFAULT_LADDER = ScamLadder()
+
+
 def scam_gate_content(facts: MessageFacts) -> bool:
     """scam-banner's first gate: a link, a risky word, or any attachment."""
     return bool(
@@ -413,16 +475,16 @@ def actions_within(history: AuthorHistory, seconds: float, now: datetime) -> lis
     ]
 
 
-def recent_moderation(history: AuthorHistory, now: datetime) -> list:
+def recent_moderation(
+    history: AuthorHistory, now: datetime, windows: Mapping[str, int] = RISK_SECONDS
+) -> list:
     """The earlier actions that still make the author high risk: each within
-    its type's window (:data:`RISK_SECONDS`)."""
+    its type's window (:data:`RISK_SECONDS` unless the policy says)."""
     return [
         action
         for action in history.actions
-        if action.action_type in RISK_SECONDS
-        and 0
-        <= (now - action.created_at).total_seconds()
-        < RISK_SECONDS[action.action_type]
+        if action.action_type in windows
+        and 0 <= (now - action.created_at).total_seconds() < windows[action.action_type]
     ]
 
 
@@ -447,20 +509,44 @@ def hold_reasons(suspect: Sequence[str], risky: Sequence[str]) -> tuple[str, ...
 
 
 def scam_risky_author(
-    facts: MessageFacts, history: AuthorHistory, now: datetime
+    facts: MessageFacts,
+    history: AuthorHistory,
+    now: datetime,
+    risk: RiskRules = DEFAULT_RISK,
 ) -> tuple[str, ...]:
     """scam-banner's author gate: new, first-time, long-silent, recently
     moderated (by the action's type: :func:`recent_moderation`)."""
     reasons = []
-    if facts.joined_at is not None and (now - facts.joined_at).total_seconds() < DAY:
-        reasons.append("joined in the last day")
-    if history.is_first_message:
+    if (
+        risk.joined_within_seconds
+        and facts.joined_at is not None
+        and (now - facts.joined_at).total_seconds() < risk.joined_within_seconds
+    ):
+        reasons.append(
+            "joined in the last day"
+            if risk.joined_within_seconds == DAY
+            else f"joined in the last {_span(risk.joined_within_seconds)}"
+        )
+    if risk.first_message and history.is_first_message:
         reasons.append("first message")
-    if (history.days_since_last_message or 0) >= 30:
-        reasons.append("silent for 30 days or more")
-    if recent_moderation(history, now):
-        reasons.append(RECENTLY_MODERATED)
+    if risk.silent_days and (history.days_since_last_message or 0) >= risk.silent_days:
+        reasons.append(f"silent for {risk.silent_days} days or more")
+    if recent_moderation(history, now, risk.windows):
+        reasons.append(
+            RECENTLY_MODERATED
+            if dict(risk.windows) == RISK_SECONDS
+            else "moderated recently"
+        )
     return tuple(reasons)
+
+
+def _span(seconds: int) -> str:
+    if seconds % DAY == 0:
+        days = seconds // DAY
+        return "day" if days == 1 else f"{days} days"
+    if seconds % 3600 == 0:
+        return f"{seconds // 3600} h"
+    return f"{max(1, seconds // 60)} min"
 
 
 def scam_claim(key: str) -> str:
@@ -509,6 +595,7 @@ class ScamReview:
     #: The same author's same post was judged (or is being judged) lately:
     #: this message only reuses that verdict.
     copy: bool = False
+    ladder: ScamLadder = DEFAULT_LADDER
 
     labels: frozenset[str] = frozenset({SCAM, ABUSE})
 
@@ -546,26 +633,34 @@ class ScamReview:
             sanction = None
             reason += ", copy of a post already judged"
             notice = None
-        elif self.account_age < BAN_ACCOUNT_AGE:
+        elif self.account_age < self.ladder.ban_account_age:
             sanction = Sanction(gw.BAN)
-            reason += ", account under a week old"
+            reason += (
+                ", account under a week old"
+                if self.ladder.ban_account_age == BAN_ACCOUNT_AGE
+                else f", account under {self.ladder.ban_account_age.days} days old"
+            )
             notice = None
         elif self.high_signal:
             # Zech: a high-signal scam held while it was judged ends in a
             # timeout plus cleanup when the account is not new.
             sanction = Sanction(
                 gw.TIMEOUT,
-                duration_seconds=REPEAT_TIMEOUT_SECONDS,
+                duration_seconds=self.ladder.timeout_seconds,
                 claim=scam_claim(self.key),
             )
             notice = NOTICE_SECURE_ACCOUNT
         elif self.repeat:
             sanction = Sanction(
                 gw.TIMEOUT,
-                duration_seconds=REPEAT_TIMEOUT_SECONDS,
+                duration_seconds=self.ladder.timeout_seconds,
                 claim=scam_claim(self.key),
             )
-            reason += ", repeat within 30 days"
+            reason += (
+                ", repeat within 30 days"
+                if self.ladder.repeat_window_seconds == RECENT_ACTION_SECONDS
+                else f", repeat within {_span(int(self.ladder.repeat_window_seconds))}"
+            )
             notice = NOTICE_SECURE_ACCOUNT if compromised else NOTICE_SCAM_REMOVED
         else:
             sanction = Sanction(gw.WARN)
@@ -594,6 +689,8 @@ def scam_gate_review(
     high_signal: Sequence[str],
     now: datetime,
     known_copy: bool = False,
+    risk: RiskRules = DEFAULT_RISK,
+    ladder: ScamLadder = DEFAULT_LADDER,
 ) -> ScamReview | None:
     """Whether scam-banner would have reviewed this message, and with what.
 
@@ -614,7 +711,7 @@ def scam_gate_review(
         return None
     copies, burst = burst_copies(facts, key, recent)
     suspect = scam_suspect_reasons(facts, burst)
-    risky = scam_risky_author(facts, history, now)
+    risky = scam_risky_author(facts, history, now, risk)
     if not (suspect or risky or high_signal or known_copy):
         return None
     return ScamReview(
@@ -625,8 +722,9 @@ def scam_gate_review(
         risky_author=risky,
         high_signal=tuple(high_signal),
         account_age=now - facts.account_created_at,
-        repeat=bool(actions_within(history, RECENT_ACTION_SECONDS, now)),
+        repeat=bool(actions_within(history, ladder.repeat_window_seconds, now)),
         copy=known_copy,
+        ladder=ladder,
     )
 
 

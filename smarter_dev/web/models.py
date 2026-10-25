@@ -4380,6 +4380,63 @@ class ModerationShadowDecision(Base):
     )
 
 
+class ModerationPolicy(Base):
+    """A guild's moderation policy: the current revision (#241).
+
+    ``document`` is what :func:`smarter_dev.shared.moderation_policy.validate`
+    accepts. ``revision`` goes up by one on every save, and every revision is
+    kept in ``moderation_policy_revisions``. The bot reads ``revision`` with
+    every message (one primary-key read) and reloads when it moved, so a save
+    reaches the next message without a restart. No row: the guild runs on the
+    old config tables, as before the policy existed.
+    """
+
+    __tablename__ = "moderation_policies"
+
+    guild_id: Mapped[str] = mapped_column(String, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    document: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+
+class ModerationPolicyRevision(Base):
+    """Every saved revision of a guild's policy, for its history.
+
+    Settings, role and channel ids only: never a member's content. Kept as
+    the record of who changed moderation and when.
+    """
+
+    __tablename__ = "moderation_policy_revisions"
+
+    guild_id: Mapped[str] = mapped_column(String, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, primary_key=True)
+    document: Mapped[dict] = mapped_column(JSON, nullable=False)
+    changed_by: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    #: ``import`` (from the old config tables), ``admin`` or ``api``.
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+    #: The dotted paths this revision changed.
+    changed_fields: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+
+class ModerationPolicyLoad(Base):
+    """Which policy revision one process has loaded for a guild, and since when.
+
+    Upserted by the process when it loads a revision and on its heartbeat
+    (``seen_at``); rows not seen for a day are pruned. The admin page shows
+    them, so a process still on an old revision is visible.
+    """
+
+    __tablename__ = "moderation_policy_loads"
+
+    process: Mapped[str] = mapped_column(String(200), primary_key=True)
+    guild_id: Mapped[str] = mapped_column(String, primary_key=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (Index("ix_moderation_policy_loads_seen_at", "seen_at"),)
+
+
 class TrackedLinkCounter(Base):
     """Generic outbound-link click counter.
 

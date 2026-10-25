@@ -28,6 +28,17 @@ What this adds is the coordinator's side of the old actors' behaviour:
 while the coordinator still owns the guild at the generation the decision was
 made under. A rollback that lands mid-decision stops it; what already reached
 Discord stays and is reconciled by the gateway, never replayed.
+
+**The policy, again.** The same read carries the guild's policy revision
+(#241). When it moved after the decision was made, the current revision is
+loaded and each target's action is carried out only if that revision still
+enforces every rule behind it and allows its sanction and its removals;
+otherwise it is left out, and the report says so. A hold is placed only if
+the current revision still holds. A policy that cannot be read acts on
+nothing.
+
+**What the member is told** follows the policy's ``destinations``: no
+channel notices and no DMs when they are off (a warning is still recorded).
 """
 
 from __future__ import annotations
@@ -61,10 +72,12 @@ from smarter_dev.bot.moderation_coordinator.model import TargetDecision
 from smarter_dev.bot.moderation_coordinator.ownership import Ownership
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
+from smarter_dev.bot.moderation_coordinator.policy import load_policy
 from smarter_dev.bot.spam_engine import analyze_message_content
 from smarter_dev.bot.spam_engine import format_scam_log_entry
 from smarter_dev.bot.spam_engine import format_warning_message
 from smarter_dev.bot.spam_ring import transcript_filename
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.moderation_gateway import types as gw
 from smarter_dev.web.moderation_gateway.types import Evidence
@@ -104,6 +117,46 @@ EDIT_PING_TEXT = (
     "reach everyone."
 )
 HISTORY_LINES = 5
+
+
+_POLICY_SANCTION = {gw.WARN: mp.WARN, gw.TIMEOUT: mp.TIMEOUT, gw.BAN: mp.BAN}
+
+
+def still_allowed(
+    targets: list[TargetDecision], decided: GuildPolicy, current: GuildPolicy
+) -> tuple[list[TargetDecision], list[tuple]]:
+    """The targets whose action the current policy revision still allows,
+    and a report line for each one left out.
+
+    A target is carried out whole or not at all: every rule its decision
+    acted on is still enforced, and its sanction and its removals are still
+    allowed."""
+    kept: list[TargetDecision] = []
+    lines: list[tuple] = []
+    for target in targets:
+        acted = [rule for rule in dict.fromkeys(target.rules) if decided.enforces(rule)]
+        sanction = target.sanction
+        why = None
+        stopped = [rule for rule in acted if not current.enforces(rule)]
+        if stopped:
+            why = f"{', '.join(stopped)} no longer enforced"
+        elif sanction is not None and not current.allows(
+            _POLICY_SANCTION.get(sanction.kind, sanction.kind)
+        ):
+            why = f"{sanction.kind} no longer allowed"
+        elif target.cleanup and not current.allows(mp.DELETE):
+            why = "removing messages no longer allowed"
+        if why is None:
+            kept.append(target)
+            continue
+        lines.append(
+            (
+                gw.ENTRY_NOTE,
+                f"Not carried out for <@{target.user_id}>: the moderation policy "
+                f"changed to revision {current.revision} before it acted ({why}).",
+            )
+        )
+    return kept, lines
 
 
 def hold_reason(reasons) -> str:
@@ -230,10 +283,12 @@ class Executor:
         messenger: Any,
         *,
         ownership: Callable[[str], Awaitable[Ownership]] = load_ownership,
+        policies: Callable[[str], Awaitable[GuildPolicy]] = load_policy,
     ) -> None:
         self._gateway_for = gateway_for
         self.messenger = messenger
         self._ownership = ownership
+        self._policies = policies
         #: Holds placed and not yet resolved: (guild, author, post key).
         self._holds: dict[tuple[str, str, str], _Hold] = {}
 
@@ -255,8 +310,11 @@ class Executor:
     async def still_owner(self, policy: GuildPolicy) -> bool:
         """Whether the coordinator still owns the guild at the policy's
         generation. An unreadable ownership acts on nothing."""
+        return await self._owned(policy) is not None
+
+    async def _owned(self, policy: GuildPolicy) -> Ownership | None:
         if not policy.acting:
-            return False
+            return None
         try:
             current = await self._ownership(policy.guild_id)
         except Exception:  # noqa: BLE001 — fail closed
@@ -266,9 +324,9 @@ class Executor:
                 policy.guild_id,
                 level=logging.WARNING,
             )
-            return False
+            return None
         if current.coordinator_acts and current.generation == policy.generation:
-            return True
+            return current
         logger.warning(
             "Coordinator not acting in guild %s: owner is now %s, generation %d "
             "(decided under %d)",
@@ -277,7 +335,36 @@ class Executor:
             current.generation,
             policy.generation,
         )
-        return False
+        return None
+
+    async def current_policy(self, policy: GuildPolicy) -> GuildPolicy | None:
+        """The policy to act under now: ``policy`` while its revision is still
+        current, the current revision when it moved, None when the
+        coordinator no longer owns the guild or the policy cannot be read."""
+        owned = await self._owned(policy)
+        if owned is None:
+            return None
+        if owned.policy_revision == policy.revision:
+            return policy
+        try:
+            current = await self._policies(policy.guild_id)
+        except Exception:  # noqa: BLE001 — fail closed
+            log_exception(
+                logger,
+                "Coordinator could not read guild %s's moderation policy; not acting",
+                policy.guild_id,
+                level=logging.WARNING,
+            )
+            return None
+        if not current.acting or current.generation != policy.generation:
+            return None
+        logger.info(
+            "Coordinator in guild %s: policy revision %s -> %s before acting",
+            policy.guild_id,
+            policy.revision,
+            current.revision,
+        )
+        return current
 
     # ------------------------------------------------------------------
     # Provisional containment
@@ -307,7 +394,8 @@ class Executor:
             self._holds[hold_key] = hold
         hold.pending.add(facts.message_id)
         try:
-            if not await self.still_owner(policy):
+            current = await self.current_policy(policy)
+            if current is None or not current.provisional_allowed():
                 hold.pending.discard(facts.message_id)
                 if (
                     not hold.pending
@@ -534,8 +622,16 @@ class Executor:
                     review_text(lines),
                 )
             return None, False
-        if not await self.still_owner(policy):
+        current = await self.current_policy(policy)
+        if current is None:
             return None, False
+        if current is not policy:
+            targets, left_out = still_allowed(targets, policy, current)
+            lines += left_out
+            if not targets and provisional is None and hold is None and not lines:
+                return None, False
+            # Reported, told and protected as the current revision says.
+            policy = current
 
         gateway = self._gateway_for(policy)
         reportable = bool(lines) or any(
@@ -660,6 +756,9 @@ class Executor:
             else None
         )
         removed = _removed(target, result, deleted)
+        destinations = policy.document.destinations
+        dms = destinations.member_dms
+        channel_notices = destinations.channel_notices
         if target.sanction is not None and target.sanction.kind == gw.WARN:
             if scam_text is not None:
                 notice = (
@@ -672,15 +771,31 @@ class Executor:
                     if hacked
                     else _warning_dm(scam_text)
                 )
-                await self._warn(gateway, trigger, target, facts, notice, dm)
+                await self._warn(
+                    gateway,
+                    trigger,
+                    target,
+                    facts,
+                    notice,
+                    dm if dms else None,
+                    post=channel_notices,
+                )
             elif NOTICE_MASS_MENTION in notices:
                 await self._warn_by_dm(
-                    gateway, trigger, target, facts, policy, rules.MASS_MENTION_WARNING
+                    gateway,
+                    trigger,
+                    target,
+                    facts,
+                    policy,
+                    rules.MASS_MENTION_WARNING,
+                    send=dms and policy.document.rules.mass_mention.dm,
                 )
             else:
                 notice = format_warning_message(target.user_id, _spam_reasons(target))
-                await self._warn(gateway, trigger, target, facts, notice, None)
-        elif scam_text is not None and target.sanction is not None:
+                await self._warn(
+                    gateway, trigger, target, facts, notice, None, post=channel_notices
+                )
+        elif scam_text is not None and target.sanction is not None and dms:
             # A timeout (high-signal or repeat): the member is told by DM,
             # once it took effect (never after a staff refusal or a reversal).
             applied = next(
@@ -725,6 +840,8 @@ class Executor:
                 )
 
         user = f"<@{target.user_id}>"
+        if not channel_notices:
+            return
         if NOTICE_ATTACHMENT_BLOCKED in notices and facts.message_id in deleted:
             await self.messenger.post(
                 facts.channel_id,
@@ -783,10 +900,13 @@ class Executor:
         facts: MessageFacts,
         notice: str,
         dm: str | None,
+        *,
+        post: bool = True,
     ) -> None:
         """As the spam engine and the handlers warn: one row, one notice per
         incident (a warn the incident already covers still tells the member
-        once), and for a scam a best-effort DM."""
+        once), and for a scam a best-effort DM. ``post=False`` (the policy's
+        channel notices off): the warning is recorded, nothing is posted."""
         async with gateway.reserve(
             trigger,
             Proposal(
@@ -799,7 +919,11 @@ class Executor:
             ),
         ) as slot:
             send = slot.go
-            if not send:
+            if not post:
+                if slot.go:
+                    slot.confirm()
+                send = False
+            elif not send:
                 superseded = slot.outcome is not None and slot.outcome.superseded
                 send = superseded and await gateway.claim_member_message(
                     slot.incident_id,
@@ -888,6 +1012,8 @@ class Executor:
         facts: MessageFacts,
         policy: GuildPolicy,
         reason: str,
+        *,
+        send: bool = True,
     ) -> None:
         """A warning on mod history, told by DM only (Zech, Oct 24: the
         mass-mention warning). One per incident: the gateway's ``warn`` key
@@ -912,6 +1038,9 @@ class Executor:
                 return
             slot.confirm()
             incident_id = slot.incident_id
+        if not send:
+            # The policy sends no DM (``mass_mention.dm`` or member DMs off).
+            return
         if incident_id is None or not await gateway.claim_member_message(
             incident_id, kind=gw.MESSAGE_WARNING_DM, target_user_id=target.user_id
         ):
