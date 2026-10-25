@@ -317,6 +317,22 @@ async def test_without_a_policy_the_page_says_so_and_nothing_saves(db_session):
             None, request=request, db_session=db_session, guild_id=GUILD
         )
     assert "no moderation policy yet" in flash.error.call_args.args[1]
+    # Nor through the API: only the import creates a policy (it checks the
+    # guild is the coordinator's).
+    api = SimpleNamespace(
+        json=AsyncMock(
+            return_value={
+                "base_revision": None,
+                "document": imported_document().as_json(),
+            }
+        ),
+        session={},
+    )
+    with _patched():
+        created = await ModerationPolicyAdminController.put_policy_json.fn(
+            None, request=api, db_session=db_session, guild_id=GUILD
+        )
+    assert created.status_code == 404
     assert await store.read_policy(db_session, GUILD) is None
 
 
@@ -384,12 +400,14 @@ async def test_the_api_reads_and_writes_on_a_base_revision(db_session):
         stale = await put({"base_revision": 1, "document": document})
         bad = await put({"base_revision": 2, "document": {**document, "x": 1}})
         shapeless = await put({"document_is_missing": True})
+        baseless = await put({"base_revision": None, "document": document})
     assert ok.content == {"guild_id": GUILD, "revision": 2}
     assert stale.status_code == 409 and stale.content["revision"] == 2
     assert bad.status_code == 422 and bad.content["errors"] == [
         "x: Extra inputs are not permitted"
     ]
     assert shapeless.status_code == 400
+    assert baseless.status_code == 400
     assert (
         await store.read_policy(db_session, GUILD)
     ).document.rules.edit_ping.mode == mp.OFF

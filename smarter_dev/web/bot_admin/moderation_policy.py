@@ -11,6 +11,8 @@ revision each bot process has loaded, and since when.
 
 ``.../moderation/policy.json`` is the same thing as an API: ``GET`` the
 current revision, ``PUT`` ``{"base_revision": n, "document": {...}}``.
+Neither the page nor the API creates a policy: only the import does, and
+only for a guild the coordinator owns.
 
 ``.../moderation/incidents`` lists incidents with what was requested,
 confirmed, not applied and unknown, each linked to its one report.
@@ -376,10 +378,23 @@ class ModerationPolicyAdminController(Controller):
                 {"error": 'send {"base_revision": n, "document": {...}}'},
                 status_code=400,
             )
-        base = body.get("base_revision")
-        if base is not None and not isinstance(base, int):
+        # Only the import creates a policy: it refuses a guild the coordinator
+        # does not own, and a policy moves triage, the content filter and the
+        # handler scripts' staff roles off the old columns.
+        if await store.read_policy(db_session, guild_id) is None:
             return Response(
-                {"error": "base_revision must be a number"}, status_code=400
+                {
+                    "error": "this server has no moderation policy yet; it is "
+                    "imported from the current settings by the import Job",
+                    "revision": None,
+                },
+                status_code=404,
+            )
+        base = body.get("base_revision")
+        if not isinstance(base, int) or isinstance(base, bool):
+            return Response(
+                {"error": "base_revision must be the revision you edited"},
+                status_code=400,
             )
         try:
             revision = await store.save_policy(
