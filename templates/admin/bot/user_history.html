@@ -90,16 +90,13 @@
             <div class="sk-panel-head">Incidents</div>
             <div class="sk-panel-body">
                 <table class="sk-admin-table">
-                    <thead><tr><th>Opened</th><th>Incident</th><th>Requested</th><th>Confirmed</th><th>Not applied</th><th>Unknown</th><th>Report</th></tr></thead>
+                    <thead><tr><th>Opened</th><th>Incident</th><th>Outcomes</th><th>Report</th></tr></thead>
                     <tbody>
                         {% for item in incidents %}
                         <tr>
                             <td style="white-space:nowrap;">{{ item.incident.opened_at.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td><a href="/admin/bot/guilds/{{ guild_id }}/moderation/incidents/{{ item.incident.id }}"><code>{{ item.short_id }}</code></a>{% if item.summary %} <small class="sk-text-muted">{{ item.summary }}</small>{% endif %}</td>
-                            <td>{{ item.requested }}</td>
-                            <td>{{ item.counts['confirmed'] }}</td>
-                            <td>{{ item.counts['not_applied'] }}</td>
-                            <td>{{ item.counts['unknown'] }}</td>
+                            <td><a href="/admin/bot/guilds/{{ guild_id }}/moderation/incidents/{{ item.incident.id }}"><code>{{ item.short_id }}</code></a>{% if item.summary %}<br><small class="sk-text-muted">{{ item.summary }}</small>{% endif %}</td>
+                            <td>{{ item.requested }} requested: {{ item.counts['confirmed'] }} confirmed, {{ item.counts['not_applied'] }} not applied, {{ item.counts['unknown'] }} unknown</td>
                             <td>{% if item.report_url %}<a href="{{ item.report_url }}" target="_blank" rel="noopener">Open in Discord</a>{% else %}<span class="sk-text-muted">{{ item.incident.report_state }}</span>{% endif %}</td>
                         </tr>
                         {% endfor %}
