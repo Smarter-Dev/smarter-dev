@@ -49,6 +49,12 @@ def _script(name: str) -> str:
     return (FIXTURES / f"live-{name}.monty").read_text()
 
 
+def _patched_tracker() -> str:
+    """The live tracker after the after-deploy CRUD Job
+    (scripts/patch_bump_tracker_channel.py)."""
+    return (FIXTURES / "after-242" / "live-disboard-bump-tracker.monty").read_text()
+
+
 def test_the_snapshot_has_all_nine_live_handlers():
     assert LIVE_NAMES == [
         "disboard-bump-tracker",
@@ -176,6 +182,7 @@ async def _fire(
     emitter: _Emitter | None = None,
     discord: FakeModerationDiscord | None = None,
     mod_action_reader=None,
+    script: str | None = None,
 ):
     emitter = emitter or _Emitter()
     discord = discord or FakeModerationDiscord(guild_id=GUILD)
@@ -185,7 +192,7 @@ async def _fire(
     if mod_action_reader is not None:
         kwargs["mod_action_reader"] = mod_action_reader
     result = await run_handler_script(
-        _script(name),
+        script or _script(name),
         context,
         channel_id=channel_id,
         guild_id=GUILD,
@@ -313,6 +320,126 @@ async def test_disboard_reminder_timer_still_posts():
     )
     _ok(result)
     assert len(emitter.messages) == 1
+
+
+# -- the bump channel moved on the Moderation page -------------------------------
+# The tracker's scope is the policy's bump channels. The live script deletes in
+# its fixed BUMP_CHANNEL; the CRUD Job's patch makes it use the fire's channel.
+
+NEW_BUMP_CHANNEL = "702178352395583777"
+
+
+def _confirmed_bump(message_id: str) -> dict:
+    return _bump_message(
+        message_id,
+        embeds=[{"title": None, "description": "Bump done! :thumbsup:"}],
+        interaction_user_id="777000111222333444",
+    )
+
+
+async def _bump_in_the_new_channel(script: str):
+    discord = _bump_discord(
+        FakeMessage(NEW_BUMP_CHANNEL, "B3", DISBOARD, "", is_bot=True),
+        FakeMessage(BUMP_CHANNEL, "REM1", "1000", "reminder", is_bot=True),
+        FakeMessage(BUMP_CHANNEL, "CONF1", DISBOARD, "", is_bot=True),
+    )
+    discord.delete_channels = []
+    delete_messages = discord.delete_messages
+
+    async def recording_delete(channel_id, message_ids):
+        discord.delete_channels.append(str(channel_id))
+        return await delete_messages(channel_id, message_ids)
+
+    discord.delete_messages = recording_delete
+    return await _fire(
+        "disboard-bump-tracker",
+        _confirmed_bump("B3"),
+        trigger="message",
+        channel_id=NEW_BUMP_CHANNEL,
+        channel_ids=[NEW_BUMP_CHANNEL],
+        allowed_role_ids=[BUMP_KING_ROLE],
+        guild_memory={
+            "disboard_reminder_message_id": "REM1",
+            "disboard_confirmation_message_id": "CONF1",
+        },
+        discord=discord,
+        script=script,
+    )
+
+
+async def test_the_live_tracker_fails_a_bump_after_the_channel_moves():
+    """Why the live row needs the CRUD Job: its delete in the old channel is
+    out of scope, after the ledger write and before the crown and reminder."""
+    result, _, _, actor, timers = await _bump_in_the_new_channel(
+        _script("disboard-bump-tracker")
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert actor.role_calls == []
+    assert timers.armed == []
+
+
+async def test_the_patched_tracker_completes_a_bump_in_the_new_channel():
+    result, emitter, discord, actor, timers = await _bump_in_the_new_channel(
+        _patched_tracker()
+    )
+    _ok(result)
+    assert ("PUT", "777000111222333444", BUMP_KING_ROLE) in actor.role_calls
+    assert len(timers.armed) == 1
+    assert result.guild_memory_writes["disboard_confirmation_message_id"] == "B3"
+    assert any("Bump King" in content for _, content in emitter.messages)
+    # Both stale messages were asked for in the fire's channel, the only one
+    # in scope. (In Discord they are in the old channel, so the read there
+    # finds nothing and the delete reports "already deleted".)
+    assert discord.delete_channels == [NEW_BUMP_CHANNEL, NEW_BUMP_CHANNEL]
+
+
+async def test_the_patched_tracker_reminds_in_the_channel_the_bump_was_in():
+    result, emitter, _, _, _ = await _fire(
+        "disboard-bump-tracker",
+        {"trigger_type": "timer", "payload": {"bump_at": 100}},
+        trigger="message",
+        channel_id=NEW_BUMP_CHANNEL,
+        channel_ids=[NEW_BUMP_CHANNEL],
+        allowed_role_ids=[BUMP_KING_ROLE],
+        guild_memory={"disboard_last_bump_at": 100, "disboard_reminded": False},
+        script=_patched_tracker(),
+    )
+    _ok(result)
+    [(channel, content)] = emitter.messages
+    assert channel == NEW_BUMP_CHANNEL
+    assert content.startswith("<@&702177774315634788>")
+
+
+async def test_the_patched_tracker_still_handles_the_old_cases():
+    """The cooldown notice, a member's chatter and a bot's message in the
+    channel, as before the patch."""
+    discord = _bump_discord(
+        FakeMessage(BUMP_CHANNEL, "N1", DISBOARD, "wait", is_bot=True),
+        FakeMessage(BUMP_CHANNEL, "C1", MEMBER, "hi"),
+    )
+    for context in (
+        _bump_message("N1"),
+        {**_bump_message("C1"), "author_id": MEMBER, "author_is_bot": False},
+    ):
+        result, _, discord, _, _ = await _fire(
+            "disboard-bump-tracker",
+            context,
+            trigger="message",
+            channel_id=BUMP_CHANNEL,
+            channel_ids=[BUMP_CHANNEL],
+            allowed_role_ids=[BUMP_KING_ROLE],
+            discord=discord,
+            script=_patched_tracker(),
+        )
+        _ok(result)
+    assert "N1" not in discord.messages
+    assert "C1" in discord.messages
+
+
+def test_the_patched_tracker_passes_the_save_time_checks():
+    assert moderation_refusal(_patched_tracker()) is None
+    assert lint_script(_patched_tracker()) is None
 
 
 # -- the DM relay ---------------------------------------------------------------

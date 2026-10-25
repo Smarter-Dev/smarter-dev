@@ -6,9 +6,10 @@
 # one-shot 2-hour reminder. Any other message in the channel is deleted to keep
 # it clean. The armed timer re-fires THIS handler with trigger_type == "timer" to
 # post the reminder. Config values are baked in as literal constants at install.
+# Everything happens in the channel the fire came from: the moderation policy's
+# bump channels decide where the tracker runs (#242), so no channel is fixed here.
 import datetime
 
-BUMP_CHANNEL = {{cfg.bump_channel_id}}
 BUMP_KING_ANNOUNCEMENT_CHANNEL = {{cfg.bump_king_announcement_channel_id}}
 REMINDER_PING_ROLE = {{cfg.reminder_ping_role_id}}
 DISBOARD_ID = "302050872383242240"
@@ -43,7 +44,7 @@ def top_bumper(bumps):
 async def send_reminder():
     text = "It's been 2 hours since the last bump — run /bump to keep us at the top of Disboard!"
     return await send_message(
-        f"<@&{REMINDER_PING_ROLE}> {text}", BUMP_CHANNEL, REMINDER_PING_ROLE
+        f"<@&{REMINDER_PING_ROLE}> {text}", ping_role_id=REMINDER_PING_ROLE
     )
 
 
@@ -66,7 +67,7 @@ async def run():
     # Bot-message guard: only Disboard is ever acted on. The smarter-dev bot's
     # own messages never dispatch, so the standing reminder is spared here.
     if context["author_id"] != DISBOARD_ID:
-        await delete_message(context["message_id"], BUMP_CHANNEL)
+        await delete_message(context["message_id"])
         return
 
     # A real confirmation is a "Bump done" embed whose invoker Discord reports.
@@ -78,7 +79,7 @@ async def run():
     bumper_id = context.get("interaction_user_id")
     if not bump_confirmed or not bumper_id:
         # A cooldown / error notice from Disboard — remove it, credit nothing.
-        await delete_message(context["message_id"], BUMP_CHANNEL)
+        await delete_message(context["message_id"])
         return
 
     now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
@@ -94,11 +95,11 @@ async def run():
     # confirmation, then remember this confirmation so exactly one stays visible.
     previous_reminder = await guild_memory_get("disboard_reminder_message_id")
     if previous_reminder:
-        await delete_message(previous_reminder, BUMP_CHANNEL)
+        await delete_message(previous_reminder)
         await guild_memory_set("disboard_reminder_message_id", None)
     previous_confirmation = await guild_memory_get("disboard_confirmation_message_id")
     if previous_confirmation:
-        await delete_message(previous_confirmation, BUMP_CHANNEL)
+        await delete_message(previous_confirmation)
     await guild_memory_set("disboard_confirmation_message_id", context["message_id"])
 
     # Rotate the crown when the top bumper changes: revoke from the stored

@@ -1,0 +1,41 @@
+# One-off Job: scripts/patch_bump_tracker_channel.py (#242). Not applied by the
+# deploy workflow; run by hand with the deployed website tag, `check` first
+# (read only), then `update` with the script sha256 check printed:
+#   <ARGS> = "check --guild 644299523686006834"     (read only)
+#   <ARGS> = "update --guild 644299523686006834 --expect-sha <sha from check>"
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<NAME>|check|' -e 's|<ARGS>|check --guild 644299523686006834|' \
+#     k8s/oneoff-patch-bump-tracker-channel.yaml | kubectl apply -f -
+#   kubectl -n smarter-dev wait --for=condition=complete --timeout=120s job/smarter-dev-patch-bump-tracker-check
+#   kubectl -n smarter-dev logs job/smarter-dev-patch-bump-tracker-check
+#   kubectl -n smarter-dev delete job smarter-dev-patch-bump-tracker-check
+# Then the same four commands with <NAME> = update. Running `update` again
+# prints "already patched; nothing to update" and exits 0.
+# Exit status 2 (the Job fails) means refused: nothing was changed.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-patch-bump-tracker-<NAME>
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-patch-bump-tracker
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: patch-bump-tracker
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/patch_bump_tracker_channel.py <ARGS>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url
