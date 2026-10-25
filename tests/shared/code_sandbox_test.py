@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
 import signal
 import subprocess
@@ -376,3 +377,86 @@ async def test_a_cancelled_wait_still_waits_for_the_worker(monkeypatch, stuck):
     with pytest.raises(asyncio.CancelledError):
         await asyncio.wait_for(waiting, 10)
     assert process.poll() == -signal.SIGKILL
+
+
+@pytest.mark.skipif(not hasattr(os, "pidfd_open"), reason="needs pidfds")
+async def test_a_run_cancelled_while_it_starts_keeps_its_place_until_its_worker_has_gone(
+    monkeypatch,
+):
+    # The pool spawns its worker before the session's Configure turn, which
+    # a stopped worker never answers: the run is cancelled with its worker
+    # alive and no session yet.
+    workers: list[int] = []
+    at_release: list[list[int]] = []
+    stopped = asyncio.Event()
+    real = code_sandbox.monty.AsyncMonty
+    reserve = code_sandbox._Budget.reserve
+
+    class StoppedWorker:
+        def __init__(self, **options):
+            self.pool = real(**options)
+
+        async def __aenter__(self):
+            before = set(_monty_children())
+            pool = await self.pool.__aenter__()
+            workers.extend(set(_monty_children()) - before)
+            os.kill(workers[0], signal.SIGSTOP)
+            stopped.set()
+            return pool
+
+        async def __aexit__(self, *exc):
+            return await self.pool.__aexit__(*exc)
+
+    @contextlib.asynccontextmanager
+    async def watched(self, size):
+        async with reserve(self, size):
+            try:
+                yield
+            finally:
+                at_release.append([pid for pid in workers if _running(pid)])
+
+    monkeypatch.setattr(code_sandbox.monty, "AsyncMonty", StoppedWorker)
+    monkeypatch.setattr(code_sandbox._Budget, "reserve", watched)
+    # 0.5 s feeds: the pool's request_timeout, which bounds Configure, is 2.5 s.
+    run = asyncio.create_task(
+        code_sandbox.run_sandboxed(
+            "7", limits={"max_memory": 16 * MIB, "max_feed_duration_secs": 0.5}
+        )
+    )
+    await asyncio.wait_for(stopped.wait(), 10)
+    (worker,) = workers
+    watch = os.pidfd_open(worker)
+    try:
+        await asyncio.sleep(0.2)
+        assert _running(worker)
+        run.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(run, 15)
+        assert at_release == [[]]
+        assert code_sandbox._budget().used == 0
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            signal.pidfd_send_signal(watch, signal.SIGKILL)
+        os.close(watch)
+
+
+@pytest.mark.parametrize("refusal", [errno.ENOSYS, errno.EPERM])
+async def test_a_run_without_pidfds_still_runs(monkeypatch, refusal):
+    # An old kernel (ENOSYS) or a seccomp filter (EPERM) refuses the call.
+    def pidfd_open(pid, flags=0):
+        raise OSError(refusal, os.strerror(refusal))
+
+    monkeypatch.setattr(code_sandbox._os, "pidfd_open", pidfd_open)
+    assert await code_sandbox.run_sandboxed("6 * 7", limits=MONTY_LIMITS) == 42
+    assert code_sandbox._budget().used == 0
+
+
+async def test_running_out_of_descriptors_fails_the_run(monkeypatch):
+    def pidfd_open(pid, flags=0):
+        raise OSError(errno.EMFILE, os.strerror(errno.EMFILE))
+
+    monkeypatch.setattr(code_sandbox._os, "pidfd_open", pidfd_open)
+    with pytest.raises(OSError) as raised:
+        await code_sandbox.run_sandboxed("6 * 7", limits=MONTY_LIMITS)
+    assert raised.value.errno == errno.EMFILE
+    assert code_sandbox._budget().used == 0
