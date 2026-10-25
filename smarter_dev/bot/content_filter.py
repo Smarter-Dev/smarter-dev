@@ -57,6 +57,7 @@ from smarter_dev.web.moderation_gateway import Proposal
 from smarter_dev.web.moderation_gateway import Trigger
 from smarter_dev.web.moderation_gateway import types as gw
 from smarter_dev.web.moderation_gateway.config import report_channel_from
+from smarter_dev.web.moderation_policy_store import protected_role_ids
 from smarter_dev.web.webhook_urls import WEBHOOK_PATH_MARKER
 from smarter_dev.web.webhook_urls import is_discord_webhook_url
 from smarter_dev.web.webhook_urls import parse_discord_webhook_url
@@ -407,7 +408,8 @@ async def check_content_filters(
 
     if not (blocked_tld_links or invite_links or webhook_candidates):
         return ContentFilterResult()
-    if await _author_is_staff(bot, event, config):
+    protected_roles = await _load_protected_roles(guild_id, config)
+    if await _author_is_staff(bot, event, protected_roles):
         return ContentFilterResult()
 
     # One delete serves every filter that fired. A leaked webhook URL is removed
@@ -446,6 +448,7 @@ async def check_content_filters(
             bot,
             event,
             config,
+            protected_roles,
             "; ".join(reasons),
             delete=message_is_removable,
         )
@@ -487,10 +490,19 @@ async def _load_config(guild_id: str) -> ModerationFilterConfig | None:
         return await moderation_filter_config_ops.get_config(session, guild_id)
 
 
+async def _load_protected_roles(
+    guild_id: str, config: ModerationFilterConfig
+) -> tuple[str, ...]:
+    """The guild's extra staff roles: its moderation policy's protected roles,
+    or without one the filter config's ``staff_exempt_role_ids``."""
+    async with get_db_session_context() as session:
+        return await protected_role_ids(session, guild_id, config)
+
+
 async def _author_is_staff(
     bot: RESTAware,
     event: hikari.GuildMessageCreateEvent,
-    config: ModerationFilterConfig,
+    protected_roles: tuple[str, ...],
 ) -> bool:
     """True when the shared staff rule protects the author; staff skip every filter."""
     refusal = await staff_refusal(
@@ -499,7 +511,7 @@ async def _author_is_staff(
         event.author.id,
         member=event.member,
         user_is_bot=event.author.is_bot,
-        extra_role_ids=[str(role_id) for role_id in config.staff_exempt_role_ids or []],
+        extra_role_ids=list(protected_roles),
     )
     if refusal is not None:
         logger.debug(
@@ -612,6 +624,7 @@ async def _record_and_delete(
     bot: RESTAware,
     event: hikari.GuildMessageCreateEvent,
     config: ModerationFilterConfig,
+    protected_roles: tuple[str, ...],
     reason: str,
     *,
     delete: bool,
@@ -647,8 +660,6 @@ async def _record_and_delete(
         if delete
         else []
     )
-    gateway = bot_gateway(
-        bot, extra_role_ids=[str(role) for role in config.staff_exempt_role_ids or []]
-    )
+    gateway = bot_gateway(bot, extra_role_ids=list(protected_roles))
     result = await gateway.act(trigger, proposals)
     return result.first(gw.DELETE)

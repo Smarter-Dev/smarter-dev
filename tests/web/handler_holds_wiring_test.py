@@ -26,6 +26,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 import smarter_dev.web.admin_actions as admin_actions
 import smarter_dev.web.admin_handlers_jobs as admin_handlers_jobs
 import smarter_dev.web.handlers_jobs as handlers_jobs
+from smarter_dev.shared import moderation_policy as mp
+from smarter_dev.web import moderation_policy_store as store
 from smarter_dev.web.admin_actions import AdminActor
 from smarter_dev.web.admin_actions import HandlerFireFacts
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
@@ -468,6 +470,70 @@ async def test_admin_fire_job_hands_the_actor_the_guilds_staff_roles(
     )
 
     assert [kwargs["staff_exempt_role_ids"] for kwargs in built] == [("R9", "77")]
+
+
+#: Discord-shaped: the policy accepts only snowflakes.
+POLICY_ROLE_A = "1100000000000000001"
+POLICY_ROLE_B = "1100000000000000002"
+
+
+async def test_admin_fire_job_under_a_policy_hands_the_actor_its_protected_roles(
+    monkeypatch, test_engine, redis
+):
+    """#241: once a guild has a moderation policy its protected roles are the
+    staff roles; the filter config's old column is no longer saved, nor read."""
+    handler_id = uuid4()
+    document = mp.default_document().as_json()
+    document["protected_role_ids"] = [POLICY_ROLE_A, POLICY_ROLE_B]
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
+        session.add(
+            AdminHandler(
+                id=handler_id,
+                guild_id="G1",
+                name="role-probe",
+                trigger_type="message",
+                settings={},
+                channel_ids=[],
+                description="d",
+                script="x = 1\n",
+                created_by_admin="A1",
+            )
+        )
+        session.add(ModerationFilterConfig(guild_id="G1", staff_exempt_role_ids=["R9"]))
+        await session.commit()
+        await store.save_policy(
+            session, "G1", document, base_revision=None, by="t", source="admin"
+        )
+
+    built = []
+
+    def actor(**kwargs):
+        built.append(kwargs)
+        return AdminActor(**kwargs)
+
+    monkeypatch.setattr(
+        admin_handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        admin_handlers_jobs, "get_db_session_context", _SessionCtx(test_engine)
+    )
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(admin_actions, "AdminActor", actor)
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=str(handler_id),
+            channel_id="C2",
+            trigger_context={"trigger_type": "message", "author_id": "U7"},
+        ),
+        _job(),
+    )
+
+    assert [kwargs["staff_exempt_role_ids"] for kwargs in built] == [
+        (POLICY_ROLE_A, POLICY_ROLE_B)
+    ]
 
 
 async def test_standard_fire_job_gives_a_script_claimed(
