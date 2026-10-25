@@ -240,6 +240,13 @@ async def test_admin_fire_job_gives_a_script_claims_and_no_sanctions(
 
     monkeypatch.setattr(guild_event_recorder, "record_guild_event", drop_event)
     monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", drop_event)
+    # The fire errors on purpose; its error notice would post to Discord.
+    notices: list = []
+
+    async def capture_notice(*args, **kwargs) -> None:
+        notices.append(kwargs)
+
+    monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", capture_notice)
 
     outcome = await admin_handlers_jobs.run_admin_handler_fire(
         AdminHandlerFirePayload(
@@ -252,6 +259,7 @@ async def test_admin_fire_job_gives_a_script_claims_and_no_sanctions(
 
     async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
         handler = await session.get(AdminHandler, handler_id)
+    assert len(notices) == 1
     # Not claimed, claimed by this call, claimed.
     assert handler.memory["seen"] == [False, True, True]
     assert await redis.exists(f"hclaim:{handler_id}:bad:k") == 1
