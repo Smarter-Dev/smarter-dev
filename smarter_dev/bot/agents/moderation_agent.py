@@ -52,6 +52,7 @@ hand off to human mods via a report. Your available actions are:
 ## WORKFLOW
 
 1. Use get_user_info() and get_user_history() to understand the context
+   (trigger_author_id is the ID to pass for the member who pinged)
 2. Decide if immediate action is needed (timeout, purge, or both)
 3. Use flag_users() to mark users that need human mod review
 4. ALWAYS use send_mod_message() to post a channel message at the end
@@ -85,6 +86,8 @@ You MUST call send_mod_message() with a message that:
 - conversation_context: Recent channel messages providing context for the moderation review
 - trigger_message: The message that mentioned the moderator role, triggering this review
 - trigger_author: Username of who sent the trigger message
+- trigger_author_display_name: Their display name in this server, if known
+- trigger_author_id: Their Discord user ID, for get_user_info and get_user_history
 - guild_instructions: Guild-specific moderation instructions and rules to follow
 """
 
@@ -194,6 +197,8 @@ async def run_moderation_agent(
     enabled_tools: list[str],
     trigger_message_id: str | None = None,
     trigger: Trigger | None = None,
+    trigger_author_id: str | None = None,
+    trigger_author_display_name: str | None = None,
 ) -> tuple[str, ActionTracker]:
     """Run the moderation triage agent to evaluate a situation and take action.
 
@@ -208,6 +213,8 @@ async def run_moderation_agent(
         enabled_tools: Destructive tools enabled for this guild; empty means none
         trigger_message_id: ID of the trigger message
         trigger: The ping as the moderation gateway's trigger (its incident)
+        trigger_author_id: Discord user ID of the trigger message author
+        trigger_author_display_name: Their display name, if known
 
     Returns:
         Tuple of (assessment string, ActionTracker with all actions taken)
@@ -236,6 +243,9 @@ async def run_moderation_agent(
                     conversation_context=context_text,
                     trigger_message=trigger_message_content,
                     trigger_author=trigger_author,
+                    trigger_author_display_name=trigger_author_display_name
+                    or trigger_author,
+                    trigger_author_id=trigger_author_id or "unknown",
                     guild_instructions=guild_instructions
                     or "Use your best judgment to moderate fairly.",
                 ),

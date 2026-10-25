@@ -220,6 +220,7 @@ class TestModMonitorTriggerLog:
             return config if guild_id == "777" else None
 
         monkeypatch.setattr(mod_monitor, "load_triage_config", load)
+        monkeypatch.setattr(mod_monitor, "_bursts", {})
         return "777"
 
     def _event(self, content: str | None) -> SimpleNamespace:
