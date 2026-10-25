@@ -418,6 +418,38 @@ def test_the_summary_prompts_say_what_a_summary_must_not_repeat():
     assert '"summary"' not in haiku_prompt(replace(request, summarize=False))
 
 
+async def test_kept_images_stay_under_the_byte_limit_oldest_dropped_first():
+    """A Haiku outage keeps every checked post's images for a separate
+    request: the book holds at most its byte limit, drops the oldest posts'
+    images first, keeps their descriptions' claims, and never keeps a post
+    whose images alone exceed the limit."""
+    from smarter_dev.bot.moderation_coordinator.summary import SummaryBook
+
+    assert summary_module.MAX_IMAGE_BYTES == 32 * 1024 * 1024
+    book = SummaryBook(max_image_bytes=1000)
+    claims = {}
+    for n in range(12):
+        claims[n], first = book.claim("G", "A", f"post-{n}")
+        assert first
+        book.keep_images("G", "A", f"post-{n}", {0: b"x" * 150, 1: None})
+        assert book.image_bytes <= 1000
+    held = [n for n in range(12) if book.images("G", "A", f"post-{n}")]
+    assert held == [6, 7, 8, 9, 10, 11]
+    assert book.image_bytes == 900
+    # The dropped posts' claims still stand: their copies wait on them.
+    future, first = book.claim("G", "A", "post-0")
+    assert future is claims[0] and not first
+
+    book.keep_images("G", "A", "huge", {0: b"x" * 1001})
+    assert book.images("G", "A", "huge") == {}
+    assert book.image_bytes == 900
+
+    # A written description frees its post's images.
+    book.settle("G", "A", "post-11", claims[11], "a line")
+    assert book.images("G", "A", "post-11") == {}
+    assert book.image_bytes == 750
+
+
 # -- the report -------------------------------------------------------------
 
 

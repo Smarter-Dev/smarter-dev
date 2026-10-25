@@ -87,6 +87,12 @@ DEFAULT_DAILY_REQUESTS = 100
 #: copies, and how many posts it keeps at most.
 BOOK_SECONDS = 900.0
 MAX_BOOK = 512
+#: The most image bytes the book holds across all its posts. Images are kept
+#: after every Haiku check that wrote no description, so a Haiku outage
+#: fills the book: past this the oldest posts' images go first (their
+#: descriptions' futures stay), and a post whose images alone exceed it
+#: keeps none. The bot's pod has 612Mi.
+MAX_IMAGE_BYTES = 32 * 1024 * 1024
 
 SUMMARY_INSTRUCTIONS = (
     "You write one line of a Discord server's moderation report: what a "
@@ -157,19 +163,36 @@ class SummaryBook:
     classifier's request, or a separate one) and settles the claim; the rest
     wait for it. A claim settled with nothing (no request, a failure) can be
     claimed again. The images loaded before the delete are kept with the
-    post until its description is written, then dropped.
+    post until its description is written, then dropped, and never more than
+    ``max_image_bytes`` of them across the book.
     """
 
-    def __init__(self, *, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        max_image_bytes: int = MAX_IMAGE_BYTES,
+    ) -> None:
         self._pages: dict[tuple[str, str, str], _Page] = {}
         self._clock = clock
+        self.max_image_bytes = max_image_bytes
+        #: Bytes of the images the book holds now.
+        self.image_bytes = 0
+
+    def _drop_images(self, page: _Page) -> None:
+        if page.images is not None:
+            self.image_bytes -= _size(page.images)
+            page.images = None
+
+    def _remove(self, key: tuple[str, str, str]) -> None:
+        self._drop_images(self._pages.pop(key))
 
     def _trim(self, now: float) -> None:
         for key, page in list(self._pages.items()):
             if page.at <= now - BOOK_SECONDS:
-                del self._pages[key]
+                self._remove(key)
         while len(self._pages) > MAX_BOOK:
-            del self._pages[next(iter(self._pages))]
+            self._remove(next(iter(self._pages)))
 
     def _page(self, guild_id: str, author_id: str, key: str) -> _Page:
         now = self._clock()
@@ -196,7 +219,7 @@ class SummaryBook:
             future.set_result(text)
         page = self._pages.get((guild_id, author_id, key))
         if text is not None and page is not None and page.future is future:
-            page.images = None
+            self._drop_images(page)
 
     def keep_images(
         self,
@@ -209,14 +232,28 @@ class SummaryBook:
         if not images:
             return
         page = self._page(guild_id, author_id, key)
-        if page.images is None:
-            page.images = dict(images)
+        if page.images is not None:
+            return
+        size = _size(images)
+        if size > self.max_image_bytes:
+            return
+        # Oldest posts first (the book keeps them in arrival order).
+        for other in self._pages.values():
+            if self.image_bytes + size <= self.max_image_bytes:
+                break
+            self._drop_images(other)
+        page.images = dict(images)
+        self.image_bytes += size
 
     def images(
         self, guild_id: str, author_id: str, key: str
     ) -> Mapping[int, bytes | None]:
         page = self._pages.get((guild_id, author_id, key))
         return dict(page.images or {}) if page is not None else {}
+
+
+def _size(images: Mapping[int, bytes | None]) -> int:
+    return sum(len(data) for data in images.values() if data)
 
 
 async def _never_fetch(url: str, limit: int) -> bytes:
