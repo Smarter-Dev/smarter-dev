@@ -24,6 +24,8 @@ from skrift.workers import RetryPolicy, WorkerContext, handler
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
+from smarter_dev.web.bump_channel_scope import bump_channel_ids
+from smarter_dev.web.bump_channel_scope import is_bump_tracker
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import (
     DM_USER_WINDOW_SECONDS,
@@ -112,6 +114,14 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         handler_name = record.name
         trigger_type = record.trigger_type
         channel_ids = list(record.channel_ids or [])
+        if is_bump_tracker(record):
+            # Its channels are the policy's; none is no bump channel, so the
+            # tracker does nothing (a reminder armed before that included).
+            channel_ids = await bump_channel_ids(session, record.guild_id)
+            if not channel_ids or (
+                payload.channel_id and payload.channel_id not in channel_ids
+            ):
+                return {"status": "out_of_scope"}
         handler_settings = dict(record.settings or {})
         memory = dict(record.memory or {})
         # Guild-shared store: snapshotted before the fire so guild_memory_* reads

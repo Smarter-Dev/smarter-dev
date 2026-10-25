@@ -21,6 +21,8 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import auth_guard, Permission
 from skrift.flash import flash_error, flash_success, get_flash_messages
 
+from smarter_dev.web.bump_channel_scope import admin_scope
+from smarter_dev.web.bump_channel_scope import is_bump_tracker
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
 from smarter_dev.web.handler_schedule import ScheduleError, next_fire_at
 from smarter_dev.web.handler_sweep import is_stalled
@@ -217,10 +219,17 @@ class HandlersAdminController(Controller):
                 ).scalars().all()
             )
 
-            def _scope_label(ids: list) -> str:
+            def _scope_label(ids: list, empty_means_all: bool = True) -> str:
                 if not ids:
-                    return "All channels"
+                    return "All channels" if empty_means_all else "No channels"
                 return ", ".join("#" + name_map.get(c, c) for c in ids)
+
+            async def _admin_scope_label(row) -> str:
+                ids, empty_means_all = await admin_scope(db_session, row)
+                label = _scope_label(ids, empty_means_all)
+                if is_bump_tracker(row):
+                    return f"{label} (the moderation policy's bump channels)"
+                return label
 
             admin_handlers = [
                 {
@@ -230,7 +239,7 @@ class HandlersAdminController(Controller):
                     "enabled": r.enabled,
                     "settings": r.settings or {},
                     "script": r.script,
-                    "scope": _scope_label(list(r.channel_ids or [])),
+                    "scope": await _admin_scope_label(r),
                     "memory": r.memory or {},
                 }
                 for r in admin_rows
