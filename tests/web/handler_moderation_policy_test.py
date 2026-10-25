@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_REFERENCE_SHA256
 from smarter_dev.web.handler_moderation_policy import moderation_refusal
 from smarter_dev.web.handler_moderation_policy import rename_refusal
 from smarter_dev.web.handler_moderation_policy import sanction_calls
-from smarter_dev.web.handler_moderation_policy import script_sha256
 
+#: Another sanctioning script, standing in for scam-banner's old reference copy.
 REFERENCE = (
-    Path(__file__).resolve().parents[2] / "scripts/handler_scripts/scam-banner.monty"
-).read_text()
+    'if "gift" in context["content"]:\n'
+    '    await timeout_user(context["author_id"], 300, "review")\n'
+)
 LIVE = 'if "nitro" in context["content"]:\n    await ban_user(context["author_id"], "scam")\n'
 
 
@@ -93,20 +91,14 @@ def test_a_live_punisher_may_be_saved_unchanged_or_disarmed():
     assert moderation_refusal(disarmed, existing_script=LIVE) is None
 
 
-def test_scam_banner_may_be_put_back_to_its_reference_copy_only():
-    assert script_sha256(REFERENCE) == SCAM_BANNER_REFERENCE_SHA256
-    assert (
-        moderation_refusal(REFERENCE, existing_script=LIVE, handler_name="scam-banner")
-        is None
+def test_scam_banner_has_no_reference_copy_exception_any_more():
+    """#240: the exception went with the scam-banner script; a frozen
+    scam-banner is frozen like every other punisher."""
+    reason = moderation_refusal(
+        REFERENCE, existing_script=LIVE, handler_name="scam-banner"
     )
-    # Another handler, a new handler, or one character off: refused.
-    assert moderation_refusal(
-        REFERENCE, existing_script=LIVE, handler_name="keyword-watch"
-    )
+    assert reason is not None and "can no longer be changed" in reason
     assert moderation_refusal(REFERENCE)
-    assert moderation_refusal(
-        REFERENCE + "\n", existing_script=LIVE, handler_name="scam-banner"
-    )
 
 
 def test_a_handler_without_a_sanction_may_not_take_up_the_reference_copy():

@@ -1,5 +1,5 @@
 """The moderation cutover (#240): one guild from the legacy actors to the
-coordinator, and back, each in one transaction.
+coordinator, in one transaction.
 
 ``switch`` does all of this or none of it:
 
@@ -18,17 +18,19 @@ coordinator, and back, each in one transaction.
   the switch refuses if the restriction is not found exactly once.
 
 The bot reads the ownership row with every message, so the coordinator acts on
-the next message after the commit, and the legacy actors, which read their
-switches per message, stand down on that same message. A legacy decision
-already under way finishes (a handler fire within its 120 s wall clock); a
-disabled handler's pending timers are skipped when they fire.
+the next message after the commit. The bot-core legacy actors (spam engine,
+spam ring, attachment filter) and the scam-banner script and edit-ping-catch
+template were removed after the cutover, so the switches above are now only
+the record of which rules the guild had on; a disabled handler's pending
+timers are skipped when they fire.
 
-``rollback`` refuses unless a switch saved what it changed, and then restores
-exactly that, at the next generation: the coordinator stops acting on new
-events (a decision under way finds the generation moved and does not act),
-and what it already did stays with the gateway's reconciliation.
+There is no rollback any more: the legacy actors it would restore no longer
+exist. ``legacy_state`` is still saved on the ownership row, as a record of
+what the switch changed.
 
-``status`` only reads.
+``status`` only reads; once the retired rows are deleted
+(``scripts/delete_retired_moderation_rows.py``) its handler and install
+entries for them are simply absent.
 """
 
 from __future__ import annotations
@@ -41,13 +43,13 @@ from typing import Any
 from sqlalchemy import select
 
 from smarter_dev.bot.moderation_coordinator import ownership as own
-from smarter_dev.web.handler_moderation_policy import SCAM_BANNER_HANDLER
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import AttachmentFilterConfig
 from smarter_dev.web.models import ExtensionInstall
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.models import ModerationOwnership
 
+SCAM_BANNER_HANDLER = "scam-banner"
 EDIT_PING_HANDLER = "edit-ping-catch"
 BUMP_HANDLER = "disboard-bump-tracker"
 EDIT_PING_SLUG = "edit-ping-catch"
@@ -57,7 +59,7 @@ RETIRED_HANDLERS = (SCAM_BANNER_HANDLER, EDIT_PING_HANDLER)
 
 
 class CutoverRefused(Exception):
-    """The switch or rollback was refused; nothing was changed."""
+    """The switch was refused; nothing was changed."""
 
 
 def _sha(text: str | None) -> str | None:
@@ -189,7 +191,7 @@ async def switch(session, guild_id: str, *, by: str) -> dict[str, Any]:
         )
     if ownership is not None and ownership.legacy_state:
         raise CutoverRefused(
-            "a saved rollback is still on the ownership row; nothing changed"
+            "saved legacy state is still on the ownership row; nothing changed"
         )
     config = await _row(session, ModerationFilterConfig, guild_id=guild_id)
     if config is None:
@@ -273,54 +275,3 @@ async def switch(session, guild_id: str, *, by: str) -> dict[str, Any]:
     ownership.changed_at = now
     await session.commit()
     return await status(session, guild_id)
-
-
-async def rollback(session, guild_id: str, *, by: str) -> dict[str, Any]:
-    """Give the guild back to the legacy actors, exactly as the switch found
-    them. Commits, or raises CutoverRefused."""
-    ownership = await _row(session, ModerationOwnership, guild_id=guild_id)
-    if ownership is None or not ownership.legacy_state:
-        raise CutoverRefused(
-            f"nothing saved to roll back in guild {guild_id}; nothing changed"
-        )
-    saved = ownership.legacy_state
-    config = await _row(session, ModerationFilterConfig, guild_id=guild_id)
-    attachments = await _row(session, AttachmentFilterConfig, guild_id=guild_id)
-    handlers = await _handlers(session, guild_id)
-    edit_install = await _row(
-        session, ExtensionInstall, guild_id=guild_id, extension_slug=EDIT_PING_SLUG
-    )
-    notes: list[str] = []
-
-    if config is not None:
-        config.spam_engine_enabled = bool(saved.get("spam_engine_enabled"))
-        config.spam_ring_enabled = bool(saved.get("spam_ring_enabled"))
-    if attachments is not None and saved.get("attachment_filter_active") is not None:
-        attachments.is_active = bool(saved["attachment_filter_active"])
-    for name, enabled in (saved.get("handlers") or {}).items():
-        if name in handlers:
-            handlers[name].enabled = bool(enabled)
-    if edit_install is not None and saved.get("edit_ping_install_enabled") is not None:
-        edit_install.enabled = bool(saved["edit_ping_install_enabled"])
-    disboard = saved.get("disboard")
-    bump = handlers.get(BUMP_HANDLER)
-    if disboard and bump is not None:
-        if _sha(bump.script) == disboard.get("new_script_sha256"):
-            bump.script = disboard["script"]
-        else:
-            # Edited since the switch: an admin's change is not overwritten.
-            notes.append(
-                "the Disboard script changed since the switch and was left as it "
-                "is; members' chatter in the bump channel is not removed until it "
-                "is restored"
-            )
-
-    ownership.owner = own.LEGACY
-    ownership.generation = int(ownership.generation or 0) + 1
-    ownership.legacy_state = None
-    ownership.changed_by = by[:100]
-    ownership.changed_at = datetime.now(UTC)
-    await session.commit()
-    result = await status(session, guild_id)
-    result["notes"] = notes
-    return result

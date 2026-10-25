@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from pathlib import Path
 
 import pytest
 
@@ -23,9 +22,7 @@ from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.model import Verdicts
 from smarter_dev.bot.moderation_coordinator.model import settle
-from smarter_dev.bot.moderation_coordinator.policy import SCAM_BANNER_REFERENCE_SHA256
 from smarter_dev.bot.moderation_coordinator.policy import AttachmentPolicy
-from smarter_dev.bot.moderation_coordinator.policy import script_sha256
 from smarter_dev.bot.spam_engine import SpamDecision
 from smarter_dev.web.moderation_gateway import types as gw
 from tests.bot.moderation_coordinator.replay_cases import NOW
@@ -41,17 +38,6 @@ SETTLED = AuthorHistory(is_first_message=False, days_since_last_message=0)
 
 def verdicts(**answers) -> Verdicts:
     return Verdicts({k: settle(k, *v) for k, v in answers.items()})
-
-
-# -- the scam-banner reference ------------------------------------------------
-
-
-def test_the_scam_gate_is_pinned_to_the_reference_script():
-    """The scam gate is a port of this file. Changing the script without
-    porting the change (and updating the pin) fails here."""
-    repo = Path(__file__).resolve().parents[3]
-    script = (repo / "scripts/handler_scripts/scam-banner.monty").read_text()
-    assert script_sha256(script) == SCAM_BANNER_REFERENCE_SHA256
 
 
 # -- spam engine, attachments, edit-ping, bump channel -----------------------

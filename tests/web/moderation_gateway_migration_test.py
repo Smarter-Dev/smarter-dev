@@ -521,8 +521,8 @@ async def test_the_coordinator_shadow_runs_on_the_migrated_postgres_schema(
 async def test_the_cutover_switch_runs_on_the_migrated_postgres_schema(
     migrated, monkeypatch
 ):
-    """#240: the switch and its rollback in one transaction each on Postgres
-    (row locks, JSON columns), and the policy and the fence read the row."""
+    """#240: the switch in one transaction on Postgres (row locks, JSON
+    columns), and the policy and the fence read the row."""
     from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
     from smarter_dev.bot.moderation_coordinator.policy import load_policy
     from smarter_dev.web import moderation_cutover as cutover
@@ -564,8 +564,5 @@ async def test_the_cutover_switch_runs_on_the_migrated_postgres_schema(
             await cutover.switch(session, GUILD, by="again")
         await session.rollback()
     async with db() as session:
-        back = await cutover.rollback(session, GUILD, by="test")
-    assert back["owner"] == "legacy" and back["generation"] == 2
-    assert back["spam_engine_enabled"] is True
-    assert back["attachment_filter_active"] is True
-    assert back["handlers"]["scam-banner"]["enabled"] is True
+        again = await cutover.status(session, GUILD)
+    assert again["owner"] == "coordinator" and again["generation"] == 1

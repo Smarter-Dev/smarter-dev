@@ -108,9 +108,4 @@ SELECT model_id, count(*) AS operations, sum(input_tokens) AS input_tokens,
  WHERE operation_type = 'moderation_shadow_classifier' AND created_at >= :since
  GROUP BY 1;
 
--- 12. Was the live scam-banner the script the scam gate was ported from?
-SELECT policy ->> 'scam_banner_matches_reference' AS matches_reference, count(*)
-  FROM moderation_shadow_decisions WHERE created_at >= :since
- GROUP BY 1;
-
 ROLLBACK;

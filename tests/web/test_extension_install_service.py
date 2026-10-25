@@ -250,7 +250,7 @@ async def test_unknown_slug_rejected(db_session, worker_stub, monkeypatch):
         )
 
 
-@pytest.mark.parametrize("slug", ["newcomer-watch", "keyword-watch", "edit-ping-catch"])
+@pytest.mark.parametrize("slug", ["newcomer-watch", "keyword-watch"])
 async def test_a_template_moved_into_moderation_is_not_installed(
     db_session, worker_stub, slug
 ):

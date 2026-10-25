@@ -18,8 +18,8 @@ nothing else (a disabled handler stays disabled, and the script says so) and
 refuses if the script moved since it was read — then reads it back:
 
     BOT_API_KEY=… .venv/bin/python scripts/apply_handler_script.py \
-        --guild-id <guild> --handler scam-banner \
-        --file scripts/handler_scripts/scam-banner.monty --apply
+        --guild-id <guild> --handler <name> \
+        --file scripts/handler_scripts/<name>.monty --apply
 
 Run it from a machine with the bot's key, never from inside a production pod.
 The judge does not run on this path; a review of the change stands in for it.
@@ -28,6 +28,11 @@ Then confirm the next fire's `HandlerRun` outcome is `ok` on
 detects drift — if a handler is edited through `/adminhandler`, update the copy
 here in the same change, or it silently becomes stale.
 
+There are no reference copies here at the moment. The one that was,
+`scam-banner.monty`, was removed after the #240 cutover: the moderation
+coordinator (`smarter_dev/bot/moderation_coordinator/`) now does what that
+handler did, and the disabled `scam-banner` rows are deleted by
+`scripts/delete_retired_moderation_rows.py`. Add a row here for each copy:
+
 | File | Handler |
 |---|---|
-| `scam-banner.monty` | `scam-banner`, a guild-wide admin message handler |
