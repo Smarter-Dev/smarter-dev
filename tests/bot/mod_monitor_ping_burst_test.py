@@ -174,6 +174,8 @@ async def test_a_ping_after_the_run_finished_still_joins_within_the_window(
     assert list((await incidents(world)).values()) == [["101", "102"]]
     assert len(world.triage.runs) == 1
     assert len(notices(world)) == 1
+    # The report was already final; the late ping still shows in it.
+    assert "> <@&31337> mods" in world.discord.latest_report_text()
 
 
 async def test_pings_from_two_members_are_two_incidents(world) -> None:
