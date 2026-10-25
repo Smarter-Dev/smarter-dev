@@ -615,7 +615,8 @@ class HandlerExecution:
         return await self.emitter.get_guild_member_count()
 
     async def _admin_channel_in_scope(self, channel_id: str) -> bool:
-        """Whether an admin handler may read ``channel_id``'s threads.
+        """Whether an admin handler may act in ``channel_id`` (list its
+        threads, rename it, delete or edit a message in it).
 
         A non-empty ``channel_ids`` scope is an exact allow-list (pure check). An
         empty scope is guild-wide, so the channel is verified to belong to this
@@ -680,9 +681,16 @@ class HandlerExecution:
         cleaner that meets member chatter (which the moderation coordinator
         removes) does not error. ``channel_id`` defaults to the home channel.
         """
+        target = str(channel_id) if channel_id else self.channel_id
+        if target != self.channel_id and not await self._admin_channel_in_scope(
+            target
+        ):
+            raise CapExceeded(
+                "out_of_scope_channel",
+                "delete_message target is outside the handler's channel scope / guild",
+            )
         self.budget.spend_mod_action()
         self.budget.spend_discord_read()
-        target = str(channel_id) if channel_id else self.channel_id
         return await self.actor.delete_bot_message(target, str(message_id))
 
     async def _report_for_review(self, user_id: str, summary: str) -> str | None:
@@ -725,18 +733,31 @@ class HandlerExecution:
             )
         self.review_reports_made += 1
         self.budget.spend_mod_action()
+        window_key = review_report_key(self.guild_id, target_user)
         first_in_window = await self.limiter.hit(
-            review_report_key(self.guild_id, target_user),
-            1,
-            REVIEW_REPORT_WINDOW_SECONDS,
+            window_key, 1, REVIEW_REPORT_WINDOW_SECONDS
         )
         if not first_in_window:
             return None
-        if self._report_channel is _UNREAD:
-            self._report_channel = await self.report_channel_reader()
-        return await self.actor.report_for_review(
-            target_user, summary.strip(), report_channel_id=self._report_channel or None
-        )
+        try:
+            if self._report_channel is _UNREAD:
+                self._report_channel = await self.report_channel_reader()
+            return await self.actor.report_for_review(
+                target_user,
+                summary.strip(),
+                report_channel_id=self._report_channel or None,
+            )
+        except BaseException:
+            # Nothing was reported, and fires are not retried: give the
+            # window back so this member's next report is not swallowed.
+            try:
+                await self.limiter.forget(window_key)
+            except Exception:
+                logger.warning(
+                    "Could not release the review-report window %s", window_key,
+                    exc_info=True,
+                )
+            raise
 
     # -- admin-only mod-audit reads (each spends a lookup) --
 
@@ -800,8 +821,15 @@ class HandlerExecution:
         Editing a message the bot doesn't own is a REST 403 that errors the fire
         loudly (bot-authored-only is enforced by Discord, not our bookkeeping).
         """
-        self.budget.spend_message()
         target = str(channel_id) if channel_id else self.channel_id
+        if target != self.channel_id and not await self._admin_channel_in_scope(
+            target
+        ):
+            raise CapExceeded(
+                "out_of_scope_channel",
+                "edit_message target is outside the handler's channel scope / guild",
+            )
+        self.budget.spend_message()
         return await self.emitter.edit_message(target, str(message_id), str(content))
 
     async def _rename_channel(self, channel_id: str, name: str) -> bool:

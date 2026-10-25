@@ -46,8 +46,10 @@ DEFAULT_MAX_TIMERS = 2
 DEFAULT_MAX_LOOKUPS = 0
 
 # Admin handlers are admin-created and trusted: looser per-fire caps, and a
-# budget of upkeep actions (bot-message deletes, renames, review reports), e.g.
-# clearing a bump channel's stale notices = several deletes in one fire.
+# budget of upkeep actions (bot-message deletes, renames, review reports). A
+# delete also spends a discord read (it reads who posted the message first),
+# so ADMIN_MAX_DISCORD_READS caps deletes at 5 per fire; the Disboard tracker
+# clears at most 2 stale notices per fire.
 ADMIN_MAX_MESSAGES = 5
 ADMIN_MAX_AGENT_CALLS = 3
 ADMIN_MAX_MOD_ACTIONS = 25

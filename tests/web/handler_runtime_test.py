@@ -439,6 +439,48 @@ async def test_admin_delete_message_refuses_a_members_message_without_erroring()
     ]
 
 
+async def test_admin_delete_message_refuses_a_channel_in_another_guild():
+    actor = _FakeActor()
+    emitter = _FakeEmitter(guild_by_channel={"OTHER": "OTHER_GUILD"})
+    result, _, _ = await _run(
+        'await delete_message("M1", "OTHER")\n',
+        budget=admin_budget("message"),
+        actor=actor,
+        emitter=emitter,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert actor.calls == []
+    assert result.usage["mod_actions"] == 0
+    assert result.usage["discord_reads"] == 0
+
+
+async def test_admin_delete_message_in_another_channel_of_the_guild():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        'await delete_message("M1", "C2")\n',
+        budget=admin_budget("message"),
+        actor=actor,
+        emitter=_FakeEmitter(guild_by_channel={"C2": "G1"}),
+    )
+    assert result.outcome == "ok", result.error
+    assert actor.calls == [("delete", "C2", "M1")]
+
+
+async def test_admin_delete_message_refuses_a_channel_outside_the_scope():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        'await delete_message("M1", "C2")\n',
+        budget=admin_budget("message"),
+        actor=actor,
+        emitter=_FakeEmitter(guild_by_channel={"C2": "G1"}),
+        channel_ids=["C1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert actor.calls == []
+
+
 async def test_delete_message_budget_is_spent_before_the_actor_call():
     # A mod_action-triggered fire runs with max_mod_actions=0: the delete
     # breaches before anything reaches Discord.
@@ -1011,9 +1053,38 @@ async def test_edit_message_targets_explicit_channel():
         'await edit_message("M9", "text", "C2")\n',
         budget=admin_budget("message"),
         actor=actor,
+        emitter=_FakeEmitter(guild_by_channel={"C2": "G1"}),
     )
     assert result.outcome == "ok", result.error
     assert emitter.edits == [("C2", "M9", "text")]
+
+
+async def test_edit_message_refuses_a_channel_in_another_guild():
+    emitter = _FakeEmitter(guild_by_channel={"OTHER": "OTHER_GUILD"})
+    result, emitter, _ = await _run(
+        'await edit_message("M9", "text", "OTHER")\n',
+        budget=admin_budget("message"),
+        actor=_FakeActor(),
+        emitter=emitter,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert emitter.edits == []
+    assert result.usage["messages_sent"] == 0
+
+
+async def test_edit_message_refuses_a_channel_outside_the_scope():
+    emitter = _FakeEmitter(guild_by_channel={"C2": "G1"})
+    result, emitter, _ = await _run(
+        'await edit_message("M9", "text", "C2")\n',
+        budget=admin_budget("message"),
+        actor=_FakeActor(),
+        emitter=emitter,
+        channel_ids=["C1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert emitter.edits == []
 
 
 async def test_edit_message_spends_message_budget_and_breaches_at_sixth():
@@ -2023,6 +2094,88 @@ async def test_a_second_report_in_the_window_returns_none_and_records_nothing():
     assert result.outcome == "ok", result.error
     assert actor.calls == []
     assert result.memory == {"r": None}
+
+
+class _FailingReportActor(_FakeActor):
+    """The gateway write fails on the first report, then works."""
+
+    failures: int = 1
+
+    async def report_for_review(self, user_id, summary, *, report_channel_id):
+        self.calls.append(("report", user_id, summary, report_channel_id))
+        if self.failures:
+            self.failures -= 1
+            raise RuntimeError("gateway write failed")
+        return self.report_id
+
+
+def _redis_limiter():
+    from fakeredis import aioredis as fakeredis_aioredis
+
+    from smarter_dev.web.handler_caps import WindowedLimiter
+
+    return WindowedLimiter(redis=fakeredis_aioredis.FakeRedis(decode_responses=True))
+
+
+async def test_a_failed_report_gives_the_window_back():
+    """Fires are not retried: a report that raised must not use up the
+    member's window, or the next report about them is swallowed for 30 min."""
+    actor = _FailingReportActor()
+    limiter = _redis_limiter()
+    script = "await memory_set('r', await report_for_review('900', 'x'))\n"
+    first, _, _ = await _run(
+        script,
+        budget=admin_budget("member_join"),
+        actor=actor,
+        limiter=limiter,
+        report_channel_reader=_report_channel(),
+    )
+    assert first.outcome == "error"
+    assert await limiter.redis.exists(review_report_key("G1", "900")) == 0
+
+    second, _, _ = await _run(
+        script,
+        budget=admin_budget("member_join"),
+        actor=actor,
+        limiter=limiter,
+        report_channel_reader=_report_channel(),
+    )
+    assert second.outcome == "ok", second.error
+    assert second.memory == {"r": "R-MSG"}
+    assert len(actor.calls) == 2
+
+
+async def test_a_failed_report_channel_read_gives_the_window_back():
+    async def broken_reader():
+        raise RuntimeError("db down")
+
+    limiter = _redis_limiter()
+    result, _, _ = await _run(
+        "await report_for_review('900', 'x')\n",
+        budget=admin_budget("member_join"),
+        actor=_FakeActor(),
+        limiter=limiter,
+        report_channel_reader=broken_reader,
+    )
+    assert result.outcome == "error"
+    assert await limiter.redis.exists(review_report_key("G1", "900")) == 0
+
+
+async def test_a_successful_report_keeps_the_window():
+    actor = _FakeActor()
+    limiter = _redis_limiter()
+    script = "await memory_set('r', await report_for_review('900', 'x'))\n"
+    for _ in range(2):
+        result, _, _ = await _run(
+            script,
+            budget=admin_budget("member_join"),
+            actor=actor,
+            limiter=limiter,
+            report_channel_reader=_report_channel(),
+        )
+        assert result.outcome == "ok", result.error
+    assert result.memory == {"r": None}
+    assert len(actor.calls) == 1
 
 
 async def test_report_for_review_per_fire_cap():

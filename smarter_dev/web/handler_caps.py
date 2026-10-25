@@ -292,3 +292,10 @@ class WindowedLimiter:
             pipe.expire(key, window_seconds or self.window_seconds, nx=True)
             count, _ = await pipe.execute()
         return int(count) <= limit
+
+    async def forget(self, key: str) -> None:
+        """Drop ``key``'s window, so the next ``hit`` starts a fresh one.
+
+        For a limit of one whose counted event then failed: the window was
+        taken but nothing happened in it."""
+        await self.redis.delete(key)
