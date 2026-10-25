@@ -46,9 +46,14 @@ MAX_RECENT_POSTS = 30
 VERDICT_TTL_SECONDS = 120.0
 #: How long a post's scam sanction is remembered against its copies.
 SANCTION_TTL_SECONDS = 600.0
-#: How long after a member's last scam-gate post the next one still joins
-#: its burst (one incident, one sanction): the verdict cache's reach.
-BURST_GAP_SECONDS = 120.0
+#: How long after a burst's first scam-gate post a member's next one still
+#: joins it (one incident, one sanction). Measured from the first post, so
+#: a member posting every minute starts a new burst every two minutes
+#: instead of staying in one for good. The 14:07Z burst took 1.9 s; 120 s
+#: is the verdict cache's reach (VERDICT_TTL_SECONDS) and the scam-banner
+#: window (RECENT_POST_SECONDS), so a burst's posts are those its first
+#: verdict can still answer.
+BURST_MAX_SECONDS = 120.0
 MAX_TRACKED_AUTHORS = 4096
 
 
@@ -391,27 +396,25 @@ class ScamBursts:
     as two posts: two incidents, two warnings, two DMs. Every post of the
     burst now shares its first message as the burst's anchor: one incident
     (the gateway alias) and one sanction (:class:`ScamSanctions`). A post
-    more than :data:`BURST_GAP_SECONDS` after the burst's last one starts a
-    new burst."""
+    more than :data:`BURST_MAX_SECONDS` after the burst's first one starts a
+    new burst, however steadily the member kept posting."""
 
     def __init__(self) -> None:
-        #: (guild, author) -> (the burst's first message, its last post at).
+        #: (guild, author) -> (the burst's first message, when it was posted).
         self._bursts: dict[tuple[str, str], tuple[str, float]] = {}
 
     def join(self, guild_id: str, author_id: str, message_id: str, now: float) -> str:
         """The anchor of the burst this post belongs to (its own id when it
         starts one)."""
         entry = self._bursts.get((guild_id, author_id))
-        if entry is not None and now - entry[1] <= BURST_GAP_SECONDS:
-            anchor, last = entry[0], max(entry[1], now)
-        else:
-            anchor, last = message_id, now
-        self._bursts[(guild_id, author_id)] = (anchor, last)
+        if entry is not None and now - entry[1] <= BURST_MAX_SECONDS:
+            return entry[0]
+        self._bursts[(guild_id, author_id)] = (message_id, now)
         if len(self._bursts) > MAX_TRACKED_AUTHORS:
             for stale, (_, at) in list(self._bursts.items()):
-                if now - at > BURST_GAP_SECONDS:
+                if now - at > BURST_MAX_SECONDS:
                     del self._bursts[stale]
-        return anchor
+        return message_id
 
 
 class ScamSanctions:

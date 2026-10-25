@@ -326,7 +326,7 @@ async def test_an_equal_sanction_for_a_second_post_of_the_burst_is_not_given():
     assert len(await _incident_ids()) == 2
 
 
-def test_the_burst_key_keeps_the_strongest_and_ends_after_its_gap():
+def test_the_burst_key_keeps_the_strongest_and_ends_with_its_burst():
     sanctions = ScamSanctions()
     bursts = ScamBursts()
     t = time.time()
@@ -340,6 +340,18 @@ def test_the_burst_key_keeps_the_strongest_and_ends_after_its_gap():
     later = bursts.join("g", "u", "m4", t + 500)
     assert later == "m4"
     assert sanctions.claim("g", "u", "post-c", warn, t + 500, burst=later)
+
+
+def test_a_member_posting_every_minute_starts_a_new_burst_every_two_minutes():
+    # Each post is within 120 s of the one before, so a gap measured from the
+    # last post would keep all six in the first burst (and its incident and
+    # sanction) for good. Measured from the burst's first post, they split.
+    bursts = ScamBursts()
+    t = time.time()
+    anchors = [
+        bursts.join("g", "u", f"m{minute}", t + 60 * minute) for minute in range(6)
+    ]
+    assert anchors == ["m0", "m0", "m0", "m3", "m3", "m3"]
 
 
 async def test_a_blind_post_of_a_confirmed_burst_asks_no_moderator():
