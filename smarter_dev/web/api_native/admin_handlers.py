@@ -146,8 +146,16 @@ def _to_response(record: AdminHandler) -> AdminHandlerResponse:
 
 def _reject_bump_tracker_scope(record: AdminHandler, data) -> None:
     """The bump tracker's channels are the policy's (``bump_channel_scope``):
-    an edit may not change its stored ``channel_ids`` or its name."""
+    an edit may not change its stored ``channel_ids`` or its name. Nor may
+    another handler be renamed to the tracker's name, which would silently
+    give it the policy's bump channels as its scope."""
     if not is_bump_tracker(record):
+        if data.name is not None and _normalized_name(data.name) == BUMP_TRACKER_HANDLER:
+            raise plain_error(
+                422,
+                f"{BUMP_TRACKER_HANDLER!r} is the Disboard bump tracker's name; "
+                "another handler cannot be renamed to it",
+            )
         return
     if list(data.channel_ids or []) != list(record.channel_ids or []):
         raise plain_error(422, CHANNELS_REFUSAL)

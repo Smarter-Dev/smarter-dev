@@ -380,6 +380,26 @@ async def test_the_api_refuses_to_rename_the_tracker(session, admin_client):
     assert response.status_code == 422
 
 
+async def test_the_api_refuses_renaming_another_handler_to_the_tracker(
+    session, admin_client
+):
+    # No tracker exists, so the name is free: the rename alone would make
+    # this handler the tracker and hand it the policy's bump channels.
+    other = _tracker(name="bumps", extension_handler_key=None, channel_ids=[])
+    session.add(other)
+    await session.commit()
+
+    response = admin_client.put(
+        f"/api/admin/handlers/{other.id}",
+        json=_update(other, name=" disboard-bump-tracker "),
+    )
+
+    assert response.status_code == 422
+    assert "renamed" in response.json()["detail"]
+    await session.refresh(other)
+    assert other.name == "bumps"
+
+
 async def test_the_api_saves_the_tracker_with_its_channels_unchanged(
     session, admin_client
 ):
