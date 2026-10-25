@@ -158,3 +158,13 @@ async def test_refused_when_the_kept_warning_is_gone(script):
         await session.commit()
     assert await script.main(["delete"]) == 2
     assert await _left() == [(False, "delete"), (True, "warn")]
+
+
+async def test_refused_when_the_kept_warning_is_not_the_bursts_first(script):
+    await _burst(script)
+    async with sessions() as session:
+        kept = await session.get(ModerationAction, script.KEPT)
+        kept.incident_id = script.DUPLICATE_INCIDENT
+        await session.commit()
+    assert await script.main(["delete"]) == 2
+    assert len(await _left()) == 3
