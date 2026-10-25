@@ -6,7 +6,8 @@ reason and note entries, operations and ``moderation_actions`` stay. What a
 request removes is what the person posted and what a model or a pending
 delivery says about them:
 
-* evidence entries quoting their messages;
+* evidence entries quoting their messages, and the one-line descriptions of
+  their deleted messages (#378);
 * transcripts and model assessments that name them (by id);
 * outbox rows about them (a notice or DM not yet settled);
 * the moderation coordinator's shadow decisions about their messages or
@@ -34,7 +35,12 @@ from smarter_dev.web.models import ModerationShadowDecision
 from smarter_dev.web.moderation_gateway import types as t
 
 #: Entry kinds that can hold what the person wrote or a model wrote about them.
-CONTENT_KINDS = (t.ENTRY_EVIDENCE, t.ENTRY_TRANSCRIPT, t.ENTRY_ASSESSMENT)
+CONTENT_KINDS = (
+    t.ENTRY_EVIDENCE,
+    t.ENTRY_TRANSCRIPT,
+    t.ENTRY_ASSESSMENT,
+    t.ENTRY_DELETED_SUMMARY,
+)
 
 
 @dataclass(frozen=True, slots=True)

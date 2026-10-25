@@ -4111,6 +4111,9 @@ class ModerationIncidentEntry(Base):
     * ``assessment`` is a model's retelling (the triage agent's assessment, a
       handler's report). Deleted after ``CONTENT_RETENTION_WINDOW`` (5 hours),
       like ``moderation_actions.ai_context_summary``.
+    * ``deleted_summary`` is a model's one line on what a deleted message was
+      (#378), written to be shown in the report. Kept with the incident; a
+      deletion request removes it with the person's evidence.
     """
 
     __tablename__ = "moderation_incident_entries"

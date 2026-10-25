@@ -566,6 +566,19 @@ async def test_the_incident_pages_render_with_their_outcomes(db_session):
         db_session,
         states=[(gw.TIMEOUT, gw.CONFIRMED, MEMBER), (gw.BAN, gw.UNKNOWN, MEMBER)],
     )
+    # What a deleted message was (#378) is shown, not counted away.
+    db_session.add(
+        ModerationIncidentEntry(
+            incident_id=incident.id,
+            guild_id=GUILD,
+            kind=gw.ENTRY_DELETED_SUMMARY,
+            source="coordinator",
+            target_user_id=MEMBER,
+            content="Fake Steam gift-card giveaway <b>",
+            details={"key": "k", "message_ids": ["1"], "status": "ok"},
+        )
+    )
+    await db_session.commit()
     request = SimpleNamespace(query_params={})
     with _patched():
         listing = await ModerationPolicyAdminController.incidents.fn(
@@ -590,6 +603,7 @@ async def test_the_incident_pages_render_with_their_outcomes(db_session):
     html = render_admin_template(detail.template_name, **detail.context)
     assert 'sk-pill-published">confirmed</span>' in html
     assert "unknown" in html and "Confirmed scam" in html
+    assert "Fake Steam gift-card giveaway &lt;b&gt;" in html
     assert missing.status_code == 404
 
 

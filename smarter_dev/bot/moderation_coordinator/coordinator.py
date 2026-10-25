@@ -39,10 +39,12 @@ from datetime import datetime
 from typing import Protocol
 
 from smarter_dev.bot.moderation_coordinator import rules
+from smarter_dev.bot.moderation_coordinator.classifier import HAIKU
 from smarter_dev.bot.moderation_coordinator.classifier import BudgetLimits
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierRequest
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierResult
 from smarter_dev.bot.moderation_coordinator.classifier import ModerationClassifier
+from smarter_dev.bot.moderation_coordinator.classifier import choose_backend
 from smarter_dev.bot.moderation_coordinator.decide import decide
 from smarter_dev.bot.moderation_coordinator.decide import enforceable
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
@@ -64,6 +66,7 @@ from smarter_dev.bot.moderation_coordinator.state import ScamBursts
 from smarter_dev.bot.moderation_coordinator.state import ScamSanctions
 from smarter_dev.bot.moderation_coordinator.state import SpamTracker
 from smarter_dev.bot.moderation_coordinator.state import VerdictCache
+from smarter_dev.bot.moderation_coordinator.summary import SummaryBook
 from smarter_dev.bot.spam_engine import NO_SPAM_ACTION
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import TranscriptMessage
@@ -149,6 +152,9 @@ class Evaluation:
     #: classifier wait), what is left to carry out; ``decision`` stays the
     #: whole decision, for the record.
     remaining: Decision | None = None
+    #: The post's copies the scam gate removes with it (the same content
+    #: hash): one description covers them all in the report (#378).
+    copy_ids: tuple[str, ...] = ()
 
     @property
     def to_carry_out(self) -> Decision:
@@ -202,6 +208,7 @@ class Coordinator:
         verdicts: VerdictCache | None = None,
         sanctions: ScamSanctions | None = None,
         bursts: ScamBursts | None = None,
+        summaries: SummaryBook | None = None,
     ) -> None:
         self.reads = reads
         self.classifier = classifier
@@ -211,6 +218,9 @@ class Coordinator:
         self.verdict_cache = verdicts or VerdictCache()
         self.sanctions = sanctions or ScamSanctions()
         self.bursts = bursts or ScamBursts()
+        #: Each post's one description for the report, shared with the
+        #: executor's deletion lines (:mod:`.summary`).
+        self.summaries = summaries or SummaryBook()
 
     async def evaluate(
         self,
@@ -378,6 +388,7 @@ class Coordinator:
         key = facts_hash(facts)
         early_hits = 0
         preloaded = None
+        summary_claim = None
         scam_candidate = (
             policy.scam_gate
             and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
@@ -398,13 +409,21 @@ class Coordinator:
             if (
                 judge_labels
                 and scam_candidate
-                and facts.images
                 and author_refusal is None
                 and _deletes(early, facts.message_id)
             ):
-                # The CDN stops serving a deleted message's files: the scam
-                # check's images are loaded before the removal, or it is blind.
-                preloaded = await self.classifier.preload(facts.attachments)
+                # The scam check that follows describes the message for the
+                # report (#378): claimed before the removal, so the removal's
+                # line waits for that answer instead of asking again.
+                summary_claim = self._claim_summary(facts, key, stack)
+                if facts.images:
+                    # The CDN stops serving a deleted message's files: the
+                    # scam check's images are loaded before the removal, or
+                    # it is blind.
+                    preloaded = await self.classifier.preload(facts.attachments)
+                    self.summaries.keep_images(
+                        facts.guild_id, facts.author_id, key, preloaded
+                    )
             await on_deterministic(facts, early, key)
         earlier_posts = self.recent.read(facts.guild_id, facts.author_id, now)
         if not facts.is_edit:
@@ -674,6 +693,18 @@ class Coordinator:
                     }
         if ring_pending is not None:
             labels |= ring_pending.labels
+        # A Haiku request also describes the message, in case it is deleted
+        # (#378): the description is free there, and copies share it.
+        summarize = (
+            choose_backend(
+                frozenset(labels),
+                images=bool(facts.images),
+                ring_only=policy.document.classifier.ring_only_backend,
+            )
+            == HAIKU
+        )
+        if summarize and summary_claim is None:
+            summary_claim = self._claim_summary(facts, key, stack)
         request = ClassifierRequest(
             guild_id=facts.guild_id,
             channel_id=facts.channel_id,
@@ -696,6 +727,7 @@ class Coordinator:
             limits=budget_limits(policy),
             deadline=deadline if policy.revision is not None else None,
             ring_only_backend=policy.document.classifier.ring_only_backend,
+            summarize=summarize,
         )
         try:
             result = await self.classifier.classify(request)
@@ -704,6 +736,15 @@ class Coordinator:
                 # Copies waiting on this check get no answer: unknown.
                 self._settle(facts, key, first_asker, {})
             raise
+        if result.summary is None:
+            # A separate request may still describe it, from these images.
+            self.summaries.keep_images(
+                facts.guild_id, facts.author_id, key, result.images_loaded
+            )
+        if summary_claim is not None:
+            self.summaries.settle(
+                facts.guild_id, facts.author_id, key, summary_claim, result.summary
+            )
         verdicts = Verdicts(result.verdicts).merged(reused)
         if earlier is not None and scam_review is not None:
             # An escalated copy whose own check found nothing (a spent
@@ -876,7 +917,26 @@ class Coordinator:
                 facts.guild_id, facts.author_id, burst=burst_anchor, now=now
             ),
             remaining=remaining,
+            copy_ids=tuple(post.message_id for post in scam_review.copies)
+            if scam_review is not None
+            else (),
         )
+
+    def _claim_summary(
+        self, facts: MessageFacts, key: str, stack: contextlib.AsyncExitStack
+    ) -> asyncio.Future | None:
+        """Claim the post's description for this evaluation's request; None
+        when another message of the post already has it (or is writing it).
+        A claim this evaluation never settles (no request, a raise) is
+        settled with nothing on the way out, so a deletion's line can ask
+        for itself."""
+        future, first = self.summaries.claim(facts.guild_id, facts.author_id, key)
+        if not first:
+            return None
+        stack.callback(
+            self.summaries.settle, facts.guild_id, facts.author_id, key, future, None
+        )
+        return future
 
     def _settle(
         self,

@@ -75,6 +75,8 @@ from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import load_ownership
 from smarter_dev.bot.moderation_coordinator.policy import PolicyCache
 from smarter_dev.bot.moderation_coordinator.rules import SANCTION_ACTIONS
+from smarter_dev.bot.moderation_coordinator.summary import DeletionSummaries
+from smarter_dev.bot.moderation_coordinator.summary import DeletionSummarizer
 from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.models import MemberActivity
@@ -1059,6 +1061,8 @@ class ModerationShadow:
     async def drain(self) -> None:
         while self._tasks:
             await asyncio.gather(*list(self._tasks), return_exceptions=True)
+        if self.executor is not None:
+            await self.executor.drain_summaries()
 
 
 async def heartbeat(policies: PolicyCache) -> None:
@@ -1143,11 +1147,22 @@ def register_moderation_shadow(bot: Any) -> ModerationShadow | None:
     if not guild_ids:
         return None
     budget = ClassifierBudget(restored=False)
+    classifier = ModerationClassifier(budget=budget)
+    coordinator = Coordinator(BotReads(bot), classifier)
     shadow = ModerationShadow(
-        Coordinator(BotReads(bot), ModerationClassifier(budget=budget)),
+        coordinator,
         guild_ids=guild_ids,
         # Acts only in a guild whose ownership row names the coordinator.
-        executor=Executor.for_bot(bot),
+        executor=Executor.for_bot(
+            bot,
+            # The report's line for each deletion (#378), from the
+            # classifier's own Haiku; a handover waits for lines in flight.
+            summaries=DeletionSummaries(
+                coordinator.summaries,
+                DeletionSummarizer(model=classifier.haiku_model),
+                track=leadership.track,
+            ),
+        ),
     )
 
     @bot.listen()
