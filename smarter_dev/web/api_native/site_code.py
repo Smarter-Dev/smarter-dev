@@ -10,6 +10,10 @@ Errors: 404 for an unknown member, 429 while the member or the service has
 too many runs going (with ``Retry-After``), 504 when no result came back in
 time, 503 when the run couldn't be admitted or queued, or its worker stopped
 without a result. Each is a plain sentence.
+
+A caller that hangs up stops its run: Hypercorn doesn't cancel the route when
+the connection closes, it only says so on the request's ``receive``, so the
+route watches for that while it waits (``_unless_gone``).
 """
 
 from __future__ import annotations
@@ -18,10 +22,13 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Coroutine
+from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
 from litestar import Controller
+from litestar import Request
 from litestar import post
 from litestar.exceptions import HTTPException
 from litestar.status_codes import HTTP_200_OK
@@ -45,6 +52,8 @@ logger = logging.getLogger(__name__)
 SITE_CODE_GUARDS = [*SITE_API_GUARDS, Permission("site-code")]
 
 START_FAILED = "Code running is unavailable right now."
+# The caller closed its connection; nobody reads this reply.
+HUNG_UP = "The request was closed before the run finished."
 
 
 class RunCode(BaseModel):
@@ -70,7 +79,7 @@ class SiteCodeController(Controller):
         status_code=HTTP_200_OK,
     )
     async def run(
-        self, db_session: AsyncSession, user_id: str, data: RunCode
+        self, request: Request, db_session: AsyncSession, user_id: str, data: RunCode
     ) -> dict[str, str]:
         user = await _member(db_session, user_id)
         member: UUID = user.id
@@ -108,12 +117,13 @@ class SiteCodeController(Controller):
                     "Site code run couldn't be queued (%s)", type(error).__name__
                 )
                 raise plain_error(503, START_FAILED) from None
-            text = await _result(redis, run_id)
+            text = await _unless_gone(request, _result(redis, run_id))
             finished = True
             return {"result": text}
         finally:
             # Given up for any reason (504, a dead worker, an error, the
-            # request cancelled): the job must not run it, or stops it.
+            # caller gone, the request cancelled): the job must not run it,
+            # or stops it.
             if not finished:
                 with contextlib.suppress(Exception):
                     await asyncio.shield(site_code.abandon(redis, run_id))
@@ -136,3 +146,27 @@ async def _result(redis, run_id: str) -> str:
         if await site_code.worker_gone(redis, run_id):
             logger.error("Site code run's worker stopped without a result")
             raise plain_error(503, site_code.STOPPED)
+
+
+async def _gone(request: Request) -> None:
+    """Return once the caller has closed its connection.
+
+    The body is already read, so the next message is ``http.disconnect``.
+    """
+    while (await request.receive())["type"] != "http.disconnect":
+        pass
+
+
+async def _unless_gone(request: Request, waiting: Coroutine[Any, Any, str]) -> str:
+    """``waiting``'s text; a 499 if the caller hangs up first."""
+    result = asyncio.ensure_future(waiting)
+    gone = asyncio.ensure_future(_gone(request))
+    try:
+        await asyncio.wait({result, gone}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        gone.cancel()
+        if not result.done():
+            result.cancel()
+    if result.done() and not result.cancelled():
+        return result.result()
+    raise plain_error(499, HUNG_UP)

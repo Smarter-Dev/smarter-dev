@@ -8,16 +8,21 @@ was running, the sandbox stops. Real Monty, fakeredis, one event loop.
 
 import asyncio
 import contextlib
+import json
 import os
+import socket
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import fakeredis
+import fakeredis.aioredis
 import httpx
 import pydantic_monty
 import pytest
+from hypercorn.asyncio import serve
+from hypercorn.config import Config
 from litestar import Litestar
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
@@ -50,9 +55,27 @@ def _live_monty_children() -> list[int]:
     return live
 
 
+class _DropsOnCancel(fakeredis.aioredis.FakeAsyncRedisConnection):
+    """A fake connection that, like redis-py's, drops itself when a read is
+    cut off (``redis.asyncio.connection.Connection.read_response``).
+
+    fakeredis 2.37 keeps the cut-off command's reply queued, so every later
+    call on that connection reads the reply before its own: a route
+    cancelled in its BLPOP then sees ``keys`` answer ``None``."""
+
+    async def read_response(self, **kwargs):
+        try:
+            return await super().read_response(**kwargs)
+        except BaseException:
+            await self.disconnect()
+            raise
+
+
 @pytest.fixture
 def redis(monkeypatch):
-    client = fakeredis.FakeAsyncRedis(decode_responses=True)
+    client = fakeredis.FakeAsyncRedis(
+        decode_responses=True, connection_class=_DropsOnCancel
+    )
     monkeypatch.setattr(site_code_jobs, "get_redis_client", lambda: client)
     monkeypatch.setattr(site_code_api, "get_redis_client", lambda: client)
     return client
@@ -164,7 +187,11 @@ async def test_a_wanted_run_still_runs(redis, started):
 
 
 @pytest.fixture
-async def app(test_engine, db_session, monkeypatch, redis):
+async def site(test_engine, db_session, monkeypatch, redis):
+    """The route in a Litestar app, with every run it queues recorded.
+
+    Queued runs wait (the worker is busy) unless ``start_jobs`` is set, when
+    each one's job starts at once."""
     async with test_engine.begin() as conn:
         await conn.run_sync(SkriftBase.metadata.create_all)
     maker = async_sessionmaker(test_engine, expire_on_commit=False)
@@ -186,9 +213,20 @@ async def app(test_engine, db_session, monkeypatch, redis):
         site_guards, "resolve_request_api_key", AsyncMock(return_value=key)
     )
     queued: list[str] = []
+    jobs: list[asyncio.Task] = []
+    parts = SimpleNamespace(member=member.id, queued=queued, jobs=jobs)
+    parts.start_jobs = False
 
     async def submit(job_type, payload, **options):
-        queued.append(payload["run_id"])  # the worker is busy: it runs later
+        queued.append(payload["run_id"])
+        if parts.start_jobs:
+            jobs.append(
+                asyncio.create_task(
+                    site_code_jobs.run_site_code_job(
+                        site_code_jobs.SiteCodePayload(**payload)
+                    )
+                )
+            )
 
     import skrift.workers
 
@@ -196,16 +234,83 @@ async def app(test_engine, db_session, monkeypatch, redis):
     monkeypatch.setattr(
         "smarter_dev.web.chat.dispatch.ensure_submission_handler", lambda job_type: None
     )
-    litestar = Litestar(
+    parts.litestar = Litestar(
         route_handlers=[SiteCodeController],
         plugins=[PydanticPlugin()],
         dependencies={"db_session": Provide(session)},
     )
+    yield parts
+    for job in jobs:
+        job.cancel()
+    await asyncio.gather(*jobs, return_exceptions=True)
+
+
+@pytest.fixture
+async def app(site):
     # httpx's ASGI transport runs the app in the request's own task, so
-    # cancelling the request cancels the route, as a dropped connection does.
-    transport = httpx.ASGITransport(app=litestar)
+    # cancelling the request cancels the route.
+    transport = httpx.ASGITransport(app=site.litestar)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        yield SimpleNamespace(client=client, member=member.id, queued=queued)
+        yield SimpleNamespace(client=client, member=site.member, queued=site.queued)
+
+
+@pytest.fixture
+async def served(site):
+    """The route behind a real Hypercorn server, as on the web pod.
+
+    Hypercorn doesn't cancel a route whose client went away, as httpx's ASGI
+    transport does: it only says so on the request's ``receive``."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen()
+    site.port = listener.getsockname()[1]
+    config = Config()
+    config.bind = [f"fd://{listener.detach()}"]  # Hypercorn closes it
+    config.accesslog = None
+    config.graceful_timeout = 1
+    stop = asyncio.Event()
+    server = asyncio.create_task(
+        serve(site.litestar, config, shutdown_trigger=stop.wait)
+    )
+    yield site
+    stop.set()
+    # Shutdown waits for open connections: one whose route never noticed
+    # its caller leave holds it until the 45 s wait ends. The test has
+    # already failed on that.
+    with contextlib.suppress(TimeoutError):
+        await asyncio.wait_for(server, 5)
+
+
+async def _post_then_hang_up(site, code: str, ready) -> None:
+    """POST a run over TCP, wait for ``ready()``, then close the socket
+    without reading the reply, as the site Worker does when it aborts."""
+    reader, writer = await asyncio.open_connection("127.0.0.1", site.port)
+    body = json.dumps({"reason": "checking", "code": code}).encode()
+    head = (
+        f"POST /api/site/code/users/{site.member}/runs HTTP/1.1\r\n"
+        "Host: test\r\nContent-Type: application/json\r\n"
+        f"Content-Length: {len(body)}\r\n\r\n"
+    )
+    writer.write(head.encode() + body)
+    await writer.drain()
+    for _ in range(500):
+        await asyncio.sleep(0.01)
+        if ready():
+            break
+    else:
+        raise AssertionError("the run never got that far")
+    await asyncio.sleep(0.2)  # the route waits on the result
+    assert not reader.at_eof()  # no reply yet: the route is still waiting
+    writer.close()
+    await writer.wait_closed()
+
+
+async def _settled(check, seconds: float = 3.0) -> bool:
+    for _ in range(int(seconds / 0.02)):
+        if await check():
+            return True
+        await asyncio.sleep(0.02)
+    return False
 
 
 async def test_a_request_cancelled_at_its_wait_leaves_nothing_to_run(
@@ -258,3 +363,36 @@ async def test_a_finished_run_is_never_read_as_a_dead_worker(redis, monkeypatch)
     assert await asyncio.wait_for(job, 10) == {"status": "complete"}
     assert await site_code.wait_for_result(redis, run_id, 1) == "return value: 42"
     assert not await redis.exists(site_code.running_key(run_id))
+
+
+async def test_a_caller_that_hangs_up_while_its_run_waits_leaves_nothing_to_run(
+    served, redis, started
+):
+    await _post_then_hang_up(served, "print('sekrit')\n7", lambda: served.queued)
+    (run_id,) = served.queued
+
+    async def only_the_abandon_mark() -> bool:
+        return await redis.keys("*") == [site_code.abandoned_key(run_id)]
+
+    # Within moments, not at the 45 s wait: no code, no leases, the mark.
+    assert await _settled(only_the_abandon_mark), await redis.keys("*")
+    outcome = await site_code_jobs.run_site_code_job(
+        site_code_jobs.SiteCodePayload(run_id=run_id)
+    )
+    assert outcome == {"status": "expired"}
+    assert started == []
+
+
+async def test_a_caller_that_hangs_up_while_its_run_runs_stops_it(
+    served, redis, started, monkeypatch
+):
+    monkeypatch.setattr(site_code, "HEARTBEAT_SECONDS", 0.1)
+    served.start_jobs = True
+    await _post_then_hang_up(served, "while True:\n    pass\n", lambda: started)
+    (run_id,) = served.queued
+    (job,) = served.jobs
+    # Stopped at its next heartbeat, long before its 10 s limit.
+    assert await asyncio.wait_for(job, 3) == {"status": "abandoned"}
+    assert await redis.zcard(site_code.ALL_LEASES_KEY) == 0
+    assert await redis.zcard(site_code.user_leases_key(served.member)) == 0
+    assert await redis.llen(site_code.result_key(run_id)) == 0
