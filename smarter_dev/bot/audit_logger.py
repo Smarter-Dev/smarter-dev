@@ -16,6 +16,7 @@ from __future__ import annotations
 import difflib
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC
@@ -53,6 +54,43 @@ DIFF_OPEN = "```diff\n"
 DIFF_CLOSE = "\n```"
 UNCACHED_OPEN = "**New Content:**\n"
 UNCACHED_CLOSE = "\n\n*Original content not available (message not cached)*"
+
+
+#: How many recent bot and webhook message ids are remembered, so a delete of
+#: one that left hikari's message cache is still recognised and skipped.
+AUTOMATED_MESSAGE_MEMORY = 10_000
+
+_automated_message_ids: OrderedDict[int, None] = OrderedDict()
+
+
+def is_automated(message) -> bool:
+    """Whether ``message`` was posted by a bot account or a webhook.
+
+    The activity log is for what members do; Disboard, the bump tracker, our
+    own notices and webhook posts are noise there. Fields hikari leaves
+    UNDEFINED on a partial message are falsy, so they read as "not automated".
+    """
+    author = getattr(message, "author", None)
+    return bool(getattr(message, "webhook_id", None)) or bool(
+        author and getattr(author, "is_bot", False)
+    )
+
+
+def remember_message(message) -> None:
+    """Note ``message``'s id when it is automated; called on message create."""
+    if not is_automated(message):
+        return
+    _automated_message_ids[int(message.id)] = None
+    _automated_message_ids.move_to_end(int(message.id))
+    while len(_automated_message_ids) > AUTOMATED_MESSAGE_MEMORY:
+        _automated_message_ids.popitem(last=False)
+
+
+def _was_automated(message_id, message) -> bool:
+    """``message`` (when known) is automated, or its id was remembered as such."""
+    if message is not None and is_automated(message):
+        return True
+    return int(message_id) in _automated_message_ids
 
 
 def clip(text: str, limit: int = FIELD_VALUE_LIMIT) -> str:
@@ -529,6 +567,11 @@ async def log_message_edit(
         bot: Discord bot instance
         event: Message update event
     """
+    if _was_automated(event.message.id, event.message) or (
+        event.old_message is not None and is_automated(event.old_message)
+    ):
+        return
+
     if not await should_log_event(event.guild_id, "log_message_edit"):
         return
 
@@ -586,11 +629,17 @@ async def log_message_delete(
         bot: Discord bot instance
         event: Message delete event
     """
-    if not await should_log_event(event.guild_id, "log_message_delete"):
-        return
-
     # Get message from event (if cached)
     old_message = event.old_message
+
+    # An uncached delete is still skipped when the id was seen as automated on
+    # create; one older than that memory logs as before, author unknown.
+    if _was_automated(event.message_id, old_message):
+        _automated_message_ids.pop(int(event.message_id), None)
+        return
+
+    if not await should_log_event(event.guild_id, "log_message_delete"):
+        return
 
     embed = hikari.Embed(
         title="Message Deleted",

@@ -24,6 +24,7 @@ from smarter_dev.bot.audit_logger import log_member_unban
 from smarter_dev.bot.audit_logger import log_member_update
 from smarter_dev.bot.audit_logger import log_message_delete
 from smarter_dev.bot.audit_logger import log_message_edit
+from smarter_dev.bot.audit_logger import remember_message
 from smarter_dev.bot.content_filter import check_content_filters
 from smarter_dev.bot.forum_posts import resolve_forum_tag_names
 from smarter_dev.bot.moderation_coordinator.shadow import register_moderation_shadow
@@ -2004,6 +2005,11 @@ async def run_bot() -> None:
             await log_member_unban(bot, event)
         except Exception as e:
             logger.error(f"Failed to log member unban to audit log: {e}")
+
+    @bot.listen()
+    async def on_message_remember(event: hikari.GuildMessageCreateEvent) -> None:
+        """Remember bot and webhook message ids so their deletes are not logged."""
+        remember_message(event.message)
 
     @bot.listen()
     async def on_message_update(event: hikari.GuildMessageUpdateEvent) -> None:
