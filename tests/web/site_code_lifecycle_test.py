@@ -281,9 +281,8 @@ async def served(site):
         await asyncio.wait_for(server, 5)
 
 
-async def _post_then_hang_up(site, code: str, ready) -> None:
-    """POST a run over TCP, wait for ``ready()``, then close the socket
-    without reading the reply, as the site Worker does when it aborts."""
+async def _post(site, code: str):
+    """POST a run over TCP; the open connection."""
     reader, writer = await asyncio.open_connection("127.0.0.1", site.port)
     body = json.dumps({"reason": "checking", "code": code}).encode()
     head = (
@@ -293,6 +292,13 @@ async def _post_then_hang_up(site, code: str, ready) -> None:
     )
     writer.write(head.encode() + body)
     await writer.drain()
+    return reader, writer
+
+
+async def _post_then_hang_up(site, code: str, ready) -> None:
+    """POST a run over TCP, wait for ``ready()``, then close the socket
+    without reading the reply, as the site Worker does when it aborts."""
+    reader, writer = await _post(site, code)
     for _ in range(500):
         await asyncio.sleep(0.01)
         if ready():
@@ -436,3 +442,57 @@ async def test_a_caller_that_hangs_up_while_its_run_is_queued_never_starts_it(
     assert await _settled(only_the_abandon_mark), await redis.keys("*")
     assert job == {"outcome": {"status": "expired"}}
     assert started == []  # Monty never started
+
+
+async def test_a_cancelled_route_gives_its_places_back_once_its_queueing_has_unwound(
+    served, redis, monkeypatch
+):
+    # The route is cancelled (the server shutting down) while its job is
+    # being queued. The queueing has async cleanup left, as skrift's SQL queue
+    # does: its AsyncSession closes in a shielded task.
+    import skrift.workers
+
+    seen: dict = {}
+    entered, closing, close, closed = (asyncio.Event() for _ in range(4))
+    store = site_code.store_request
+
+    async def storing(*args, **kwargs):
+        seen["route"] = asyncio.current_task()
+        await store(*args, **kwargs)
+
+    async def submitting(job_type, payload, **options):
+        seen["run_id"] = payload["run_id"]
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            closing.set()
+            await close.wait()
+            closed.set()
+
+    monkeypatch.setattr(site_code, "store_request", storing)
+    monkeypatch.setattr(skrift.workers, "submit", submitting)
+    reader, writer = await _post(served, "42")
+    try:
+        await asyncio.wait_for(entered.wait(), 6)
+        route, run_id = seen["route"], seen["run_id"]
+        route.cancel()
+        await asyncio.wait_for(closing.wait(), 6)
+        await asyncio.sleep(0.2)
+        route.cancel()  # cancelled again: it still waits
+        await asyncio.sleep(0.2)
+        # Dropped at once; its places stay taken while the queueing unwinds.
+        assert not route.done()
+        assert await redis.exists(site_code.abandoned_key(run_id))
+        assert not await redis.exists(site_code.request_key(run_id))
+        assert await redis.zcard(site_code.ALL_LEASES_KEY) == 1
+        assert await redis.zcard(site_code.user_leases_key(served.member)) == 1
+        close.set()
+        await asyncio.wait({route}, timeout=6)
+        assert closed.is_set()
+        assert route.cancelled()
+        assert await redis.keys("*") == [site_code.abandoned_key(run_id)]
+    finally:
+        close.set()
+        writer.close()
+        await writer.wait_closed()

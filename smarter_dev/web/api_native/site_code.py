@@ -23,6 +23,8 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import Coroutine
+from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
@@ -128,10 +130,39 @@ class SiteCodeController(Controller):
             # Given up for any reason (504, a dead worker, an error, the
             # caller gone, the request cancelled): the job must not run it,
             # or stops it.
-            if not finished:
-                await _drop(redis, run_id)
-            with contextlib.suppress(Exception):
-                await asyncio.shield(site_code.release(redis, member, run_id))
+            await _held(_unwind(redis, member, run_id, tasks, drop=not finished))
+
+
+async def _unwind(
+    redis, member: UUID, run_id: str, tasks: list[asyncio.Future], *, drop: bool
+) -> None:
+    """Drop the run if it was given up, wait for the route's own tasks to
+    end, then give both places back.
+
+    The places are given back last: a cancelled queueing still unwinding
+    (its database session closing) has not settled whether a job exists,
+    and its place stays taken until it has. A run dropped first leaves that
+    job nothing to run."""
+    if drop:
+        await _drop(redis, run_id)
+    await asyncio.gather(*tasks, return_exceptions=True)
+    with contextlib.suppress(Exception):
+        await site_code.release(redis, member, run_id)
+
+
+async def _held(work: Coroutine[Any, Any, None]) -> None:
+    """Run ``work`` to its end even if the route is cancelled meanwhile;
+    that cancellation is raised once it has."""
+    task = asyncio.ensure_future(work)
+    cancelled = None
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as error:
+            cancelled = error
+    if cancelled is not None:
+        raise cancelled
+    task.result()
 
 
 async def _submit(run_id: str) -> None:
