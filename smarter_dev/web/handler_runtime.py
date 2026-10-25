@@ -45,7 +45,7 @@ Script-facing surface (Monty external functions):
   (memory is read at fire start and written at fire end, so two fires racing the
   same author both read "not actioned yet" and both act). A script gates a
   per-user/per-message side effect on it: ``if await claim("actioned:" + author_id,
-  86400): await warn_user(...)``. ``key`` must be a non-empty str ≤128 chars and
+  86400): await send_dm(...)``. ``key`` must be a non-empty str ≤128 chars and
   ``ttl_seconds`` an int in ``[1, 30*86400]`` (out of bounds raises, failing the
   fire, like ``schedule_timer``'s delay); at most 10 claims per fire
   (``CapExceeded("claims_per_fire")``). The key is namespaced by handler id
@@ -58,67 +58,58 @@ Script-facing surface (Monty external functions):
 Admin handlers (``actor`` set) additionally get ``edit_message(message_id,
 content, channel_id=None)`` -> message id (edits a bot-authored message in place,
 spending the message budget like ``add_reaction`` but not the channel window; a
-non-bot message is a REST 403 that errors the fire) and ``rename_channel(
-channel_id, name)`` -> bool (spends a mod_action, checks the same channel scope
-as admin ``list_threads``, and charges a per-channel 2-per-600s rename window —
-Discord's hard limit — before the REST call), plus ``close_thread`` /
-``lock_thread`` / ``reopen_thread`` / ``delete_thread`` -> bool (each spends the
-thread_ops budget + guild thread-op window before the REST call; a gone thread
-yields ``False`` without erroring the fire), plus ``add_role(user_id, role_id,
+non-bot message is a REST 403 that errors the fire), ``delete_message(message_id,
+channel_id=None)`` -> str (channel upkeep, for bots' messages only: spends a
+mod_action and a discord_read, reads the message, and deletes it only when a bot
+or a webhook posted it — ``"deleted message <id>"``, or ``"message <id> already
+deleted"`` when it is gone. A member's message is never deleted: the call
+returns ``"not deleted: ..."`` without erroring the fire, the same shape the
+staff-protection refusals always had, because removing members' messages is the
+moderation coordinator's job), ``rename_channel(channel_id, name)`` -> bool
+(spends a mod_action, checks the same channel scope as admin ``list_threads``,
+and charges a per-channel 2-per-600s rename window — Discord's hard limit —
+before the REST call), ``close_thread`` / ``reopen_thread`` -> bool (each spends
+the thread_ops budget + guild thread-op window before the REST call; a gone
+thread yields ``False`` without erroring the fire), ``add_role(user_id, role_id,
 reason=None)`` / ``remove_role(user_id, role_id, reason=None)`` -> bool (the
 role_id must be in the handler's host-owned ``allowed_role_ids`` allowlist —
 otherwise ``CapExceeded("role_not_allowed")`` before any budget/window/REST; then
 spends the role_changes budget + guild role-change window before the REST call; a
-gone member yields ``False`` without erroring the fire), plus ``ban_user(user_id,
-reason=None, delete_message_seconds=0)`` which can purge the banned member's
-recent messages, plus ``send_dm(user_id, content)`` -> bool (DM a user — the most
-abuse-sensitive emit, so its own cap family: spends the shared per-fire message
-pool, a per-recipient 30/hour window, and a global 10/min window before the REST
-call; returns ``False`` on closed DMs / no mutual guild / unknown user without
-erroring the fire, so a relay script branches to ❌), plus ``guild_memory_get`` /
-``guild_memory_set`` / ``guild_memory_all`` / ``guild_memory_delete`` — a
-guild-scoped key/value store SHARED by every admin handler in the guild (for
-state that must cross handler rows, e.g. a DM-relay bind target), bounded by the
-same 16KB cap as per-handler ``memory_*`` and DB-only (spends nothing), plus
-``delete_webhook(webhook_url)`` -> bool (DELETE a leaked Discord webhook URL —
-the actor rejects any non-Discord URL host-side before the REST call; spends a
-mod_action; False on 404), plus the mod-audit reads ``list_mod_actions(user_id,
-limit=10)`` -> list[dict] (this guild's recent actions for a member, newest
-first, via an injected DB reader), ``get_member_info(user_id)`` -> dict (member
-profile; a departed user comes back with ``in_guild=False``), and
-``search_guild_members(query, limit=10)`` -> dict (prefix name/nick search with a
-per-row top role and an overflow count), ``list_rules()`` -> list[dict] of
-the guild's configured rules (``{"number", "title", "text"}``, parsed by
-``guild_rules.parse_guild_rules`` — the same parse ``/rule`` uses — via an
-injected DB reader; ``[]`` when the guild has none), and
+gone member yields ``False`` without erroring the fire), ``send_dm(user_id,
+content)`` -> bool (DM a user — the most abuse-sensitive emit, so its own cap
+family: spends the shared per-fire message pool, a per-recipient 30/hour window,
+and a global 10/min window before the REST call; returns ``False`` on closed DMs
+/ no mutual guild / unknown user without erroring the fire, so a relay script
+branches to ❌), ``guild_memory_get`` / ``guild_memory_set`` /
+``guild_memory_all`` / ``guild_memory_delete`` — a guild-scoped key/value store
+SHARED by every admin handler in the guild (for state that must cross handler
+rows, e.g. a DM-relay bind target), bounded by the same 16KB cap as per-handler
+``memory_*`` and DB-only (spends nothing), the mod-audit reads
+``list_mod_actions(user_id, limit=10)`` -> list[dict] (this guild's recent
+actions for a member, newest first, via an injected DB reader),
+``get_member_info(user_id)`` -> dict (member profile; a departed user comes back
+with ``in_guild=False``), ``search_guild_members(query, limit=10)`` -> dict
+(prefix name/nick search with a per-row top role and an overflow count),
+``list_rules()`` -> list[dict] of the guild's configured rules (``{"number",
+"title", "text"}``, parsed by ``guild_rules.parse_guild_rules`` — the same parse
+``/rule`` uses — via an injected DB reader; ``[]`` when the guild has none), and
 ``list_recent_messages(user_id)`` -> list[dict] (where a member posted in this
 guild in the last two minutes, newest first: ``{"channel_id", "message_id",
 "age_seconds", "attachment_count", "has_link", "content_hash"}`` — ids, shape
 and a hash that copies of one post share, never the text — via an injected Redis
-reader; what lets a script see a cross-channel burst and find every copy of it
-once a review confirms it) — each of the
-five spends the lookups budget, plus ``hold_member(user_id, key, seconds=300)``
--> bool and ``release_hold(user_id, key)`` -> bool (time a member out while
-``key`` is under review, and end that hold; see
-:mod:`smarter_dev.web.handler_holds` — the member has one timeout and several
-fires share it, so both run under the member's lock; a hold is a timeout
-claim in the moderation gateway, which never shortens a longer timeout, and a
-release drops the timeout to the longest claim still held or lifts it, never
-touching a moderator's; each spends a mod_action;
-``timeout_user`` and ``remove_timeout`` take the same lock), plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
-dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
-spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
-mod actions, structurally cannot warn in response to a warn; then asks the
-moderation gateway, which skips a warn the incident already covers (a ban, a
-timeout, an earlier warn: ``"skipped"`` in the result, no notice, row or DM);
-then posts the notice through ``send_message``'s budget/window, the gateway
-records the audit row and fires the ``mod_action`` trigger, and only THEN the
-target is best-effort DMed (``dm_sent=False`` on closed DMs, not an error) —
-recording before the DM so a DM-window breach can never leave a public warning
-with no record), plus ``get_role_members(role_id)`` -> list[dict] (every member currently
-holding a role, paged worker-side and hard-capped at 200; backs the daily
+reader) — each of the five spends the lookups budget — plus
+``get_role_members(role_id)`` -> list[dict] (every member currently holding a
+role, paged worker-side and hard-capped at 200; backs the daily
 onboarding-reconcile sweep — spends the discord_reads budget like
-``get_guild_member_count``).
+``get_guild_member_count``), and ``report_for_review(user_id, summary)`` -> str
+or None (see :meth:`HandlerExecution._report_for_review`: hands a member to the
+moderators as a review-only incident with no effect, reported in the guild's
+incident report channel).
+
+Admin handlers cannot punish members. Bans, kicks, timeouts, holds, warnings and
+removing members' messages belong to the moderation coordinator, through the
+moderation gateway; a script naming one of the removed sanction functions is
+refused at save (:mod:`smarter_dev.web.handler_moderation_policy`).
 
 Script-facing data (Monty input): ``context`` — a plain dict describing the
 trigger (its keys depend on ``context["trigger_type"]``).
@@ -152,7 +143,6 @@ from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import exception_type_name
 from smarter_dev.shared.staff_protection import UNKNOWN_PREFIX
-from smarter_dev.web.discord_rest import DiscordRestError
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
@@ -167,7 +157,10 @@ from smarter_dev.web.handler_caps import (
     GUILD_THREAD_OPS_PER_MIN,
     HANDLER_TIMERS_PER_HOUR,
     MAX_CLAIMS_PER_FIRE,
+    MAX_REVIEW_REPORTS_PER_FIRE,
     RENAME_WINDOW_SECONDS,
+    REVIEW_REPORT_SUMMARY_MAX_LEN,
+    REVIEW_REPORT_WINDOW_SECONDS,
     TIMER_ARMING_WINDOW_SECONDS,
     RENAMES_PER_WINDOW,
     WindowedLimiter,
@@ -179,28 +172,15 @@ from smarter_dev.web.handler_caps import (
     guild_role_changes_key,
     guild_thread_ops_key,
     handler_timer_arm_key,
+    review_report_key,
 )
 from smarter_dev.web.handler_schedule import validate_timer_delay
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_guild_memory import GuildMemory
-from smarter_dev.web.handler_holds import HOLD_KEY_MAX_LEN
-from smarter_dev.web.handler_holds import HOLD_MAX_SECONDS
-from smarter_dev.web.handler_holds import MemberHolds
 from smarter_dev.web.handler_memory import HandlerMemory
 from smarter_dev.web.admin_actions import AdminActor
-from smarter_dev.web.moderation_gateway.types import MESSAGE_DM
-from smarter_dev.web.moderation_gateway.types import MESSAGE_NOTICE
 
 logger = logging.getLogger(__name__)
-
-
-def _surely_not_sent(error: BaseException) -> bool:
-    """Whether a failed send is known not to have posted: a cap or a 4xx."""
-    if isinstance(error, CapExceeded):
-        return True
-    if not isinstance(error, DiscordRestError) or error.status_code is None:
-        return False
-    return 400 <= error.status_code < 500
 
 
 # Hard sandbox limits, independent of the per-fire budget's wall-clock. Memory
@@ -240,16 +220,10 @@ TimerScheduler = Callable[[datetime.datetime, dict[str, Any]], Awaitable[None]]
 # another guild's mod history) — the same injection discipline as AgentRunner.
 ModActionReader = Callable[[str, int], Awaitable[list[dict[str, Any]]]]
 
-# An async function (target_user_id) -> the target's total warn count in this
-# guild. Injected by the admin fire job, which binds the guild id host-side —
-# the same injection discipline as ModActionReader. The warn row itself is
-# written by the moderation gateway.
-WarnCounter = Callable[[str], Awaitable[int]]
-
 # An async function () -> the guild's incident report channel, or None.
-# Injected by the admin fire job. A script's message to that channel, sent
-# after its own actions joined an incident, becomes part of the incident's one
-# report instead of a second report.
+# Injected by the admin fire job. It is where report_for_review reports, and a
+# script's message to that channel sent after report_for_review becomes part of
+# the incident's one report instead of a second report.
 ReportChannelReader = Callable[[], Awaitable[str | None]]
 
 # An async function () -> this guild's configured rules, in document order.
@@ -290,10 +264,6 @@ async def _no_timer(fire_at: datetime.datetime, refire_context: dict[str, Any]) 
 
 async def _no_mod_action_reader(user_id: str, limit: int) -> list[dict[str, Any]]:
     raise RuntimeError("no mod-action reader configured for this handler execution")
-
-
-async def _no_warn_counter(user_id: str) -> int:
-    raise RuntimeError("no warn counter configured for this handler execution")
 
 
 async def _no_report_channel() -> str | None:
@@ -375,12 +345,8 @@ class HandlerExecution:
     # binds the fire's guild id host-side). Admin handlers only; standard fires
     # never construct list_mod_actions so this stays the raising default.
     mod_action_reader: ModActionReader = _no_mod_action_reader
-    # DB-backed warn count for warn_user's result, injected by the admin fire
-    # job alongside the reader. Admin handlers only; the raising default guards
-    # an unwired call.
-    warn_counter: WarnCounter = _no_warn_counter
-    # The guild's incident report channel, for folding a script's report into
-    # the incident report (see ReportChannelReader). Admin handlers only.
+    # The guild's incident report channel, where report_for_review reports
+    # (see ReportChannelReader). Admin handlers only.
     report_channel_reader: ReportChannelReader = _no_report_channel
     # DB-backed reader for list_rules (the guild's parsed rules), injected by the
     # admin fire job with the guild bound host-side. Admin handlers only.
@@ -402,11 +368,6 @@ class HandlerExecution:
     claimer: Claimer = _no_claimer
     # The read half of the claimer, for ``claimed``; injected the same way.
     claim_reader: ClaimReader = _no_claim_reader
-    # The members' holds for hold_member/release_hold, injected by the admin
-    # fire job with Redis, the guild and the handler id bound host-side. When
-    # set, timeout_user and remove_timeout go through it too, so every write
-    # to one member's timeout happens under that member's lock. Admin only.
-    holds: MemberHolds | None = None
     # Separate 3600s-window limiter for the timer-arming rate cap; self.limiter is
     # fixed at 60s. Falls back to self.limiter (with a per-call window override) in
     # run_handler_script when the fire job doesn't inject a dedicated one.
@@ -425,7 +386,7 @@ class HandlerExecution:
     # empty/absent allowlist means NO role is grantable (unlike channel_ids,
     # where empty = guild-wide — role grants are higher-privilege, so empty=deny).
     allowed_role_ids: list[str] = field(default_factory=list)
-    # Set only for admin handlers; presence enables the moderation functions and
+    # Set only for admin handlers; presence enables the admin functions and
     # lets send_message target any channel.
     actor: AdminActor | None = None
     # Per-handler persistent key/value store, loaded before the fire. The host
@@ -444,6 +405,9 @@ class HandlerExecution:
     # so it needs no HandlerRun column (and no migration) — only a hard stop on a
     # script looping claims without bound.
     claims_made: int = 0
+    # report_for_review calls this fire made, against MAX_REVIEW_REPORTS_PER_FIRE;
+    # a per-fire counter kept here for the same no-migration reason as claims.
+    review_reports_made: int = 0
     # Per-execution cache of a thread's parent channel id, so the send_message
     # home-thread relaxation verifies each target once per fire. This is a host
     # rail (one cached fetch), NOT metered against discord_reads.
@@ -478,20 +442,13 @@ class HandlerExecution:
         }
         # Randomness as flat globals (Monty can't `import random`); pure compute.
         funcs.update(_random_functions())
-        if self.actor is not None:  # admin handler — moderation powers
+        if self.actor is not None:  # admin handler — no sanctions, only upkeep
             funcs.update(
                 {
                     "delete_message": self._guard(self._delete_message),
-                    "delete_webhook": self._guard(self._delete_webhook),
                     "edit_message": self._guard(self._edit_message),
                     "rename_channel": self._guard(self._rename_channel),
-                    "ban_user": self._guard(self._ban_user),
-                    "kick_user": self._guard(self._kick_user),
-                    "timeout_user": self._guard(self._timeout_user),
-                    "remove_timeout": self._guard(self._remove_timeout),
-                    "hold_member": self._guard(self._hold_member),
-                    "release_hold": self._guard(self._release_hold),
-                    "warn_user": self._guard(self._warn_user),
+                    "report_for_review": self._guard(self._report_for_review),
                     "add_role": self._guard(self._add_role),
                     "remove_role": self._guard(self._remove_role),
                     "send_dm": self._guard(self._send_dm),
@@ -504,9 +461,7 @@ class HandlerExecution:
                     "search_guild_members": self._guard(self._search_guild_members),
                     "get_role_members": self._guard(self._get_role_members),
                     "close_thread": self._guard(self._close_thread),
-                    "lock_thread": self._guard(self._lock_thread),
                     "reopen_thread": self._guard(self._reopen_thread),
-                    "delete_thread": self._guard(self._delete_thread),
                     "guild_memory_get": self._guard(self._guild_memory_get),
                     "guild_memory_set": self._guard(self._guild_memory_set),
                     "guild_memory_all": self._guard(self._guild_memory_all),
@@ -577,12 +532,13 @@ class HandlerExecution:
         return await self.emitter.create_message(target, str(content), role_ping)
 
     async def _fold_into_incident_report(self, target: str, content: str) -> str | None:
-        """A script's report about what it just did joins the incident's report.
+        """A script's follow-up about a member it reported joins that report.
 
         Only a message to the guild's incident report channel, and only once
-        this fire's own actions joined an incident: the script reported to the
-        moderators about the incident the gateway already reports, so its text
-        becomes a note on that one message (a model's words, kept 5 hours).
+        this fire opened or joined an incident (``report_for_review``): the
+        script wrote to the moderators about the incident the gateway already
+        reports, so its text becomes a note on that one message (a script's
+        words, kept 5 hours like a model's).
         Returns the report's message id, or None to send as usual.
         """
         incidents = getattr(self.actor, "touched_incidents", None)
@@ -711,24 +667,76 @@ class HandlerExecution:
             )
         await self._hit_guild_thread_ops_window()
 
-    # -- admin-only moderation functions (only present when self.actor is set) --
+    # -- admin-only upkeep and review (only present when self.actor is set) --
 
     async def _delete_message(self, message_id: str, channel_id: str | None = None) -> str:
-        """Delete a message; a 404 is an already-deleted successful no-op."""
-        self.budget.spend_mod_action()
-        target = str(channel_id) if channel_id else self.channel_id
-        return await self.actor.delete_message(target, str(message_id))
+        """Delete a bot's or a webhook's message: channel upkeep, never moderation.
 
-    async def _delete_webhook(self, webhook_url: str) -> bool:
-        """DELETE a leaked webhook URL; return whether one was killed.
-
-        Destructive, so it spends the mod_actions budget (the 25/fire admin cap
-        covers a message with several leaked webhooks). The actor validates the
-        URL host-side — a non-Discord URL raises before any REST call — and
-        returns False on 404 (already dead), which the script branches on.
+        Spends a mod_action (so a mod_action-triggered fire, which has none,
+        deletes nothing) and a discord_read for the message the actor reads to
+        learn who posted it. Returns ``"deleted message <id>"``, or ``"message
+        <id> already deleted"`` when it is gone. A member's message is refused:
+        ``"not deleted: ..."`` comes back and the fire carries on, so a channel
+        cleaner that meets member chatter (which the moderation coordinator
+        removes) does not error. ``channel_id`` defaults to the home channel.
         """
         self.budget.spend_mod_action()
-        return bool(await self.actor.delete_webhook(str(webhook_url)))
+        self.budget.spend_discord_read()
+        target = str(channel_id) if channel_id else self.channel_id
+        return await self.actor.delete_bot_message(target, str(message_id))
+
+    async def _report_for_review(self, user_id: str, summary: str) -> str | None:
+        """Hand a member to the moderators: a review-only incident, no effect.
+
+        Opens (or joins, within this fire) an incident in the moderation
+        gateway about ``user_id``, actor ``handler:<name>``, with ``summary`` as
+        its note, reported in the guild's incident report channel. It applies
+        nothing and records no ``moderation_actions`` row, so no warn count,
+        repeat-offence ladder or ``mod_action`` trigger ever sees it.
+
+        Returns the report's message id; ``""`` when the incident was recorded
+        but the guild reports nowhere (no report channel, or reporting switched
+        off in its moderation policy); ``None`` when this member was already
+        reported in this guild within the last
+        ``REVIEW_REPORT_WINDOW_SECONDS`` — then nothing is recorded, so a
+        join/leave loop cannot flood the report channel.
+
+        Rails, in order: ``user_id`` must be a snowflake and ``summary`` a
+        non-empty str of at most ``REVIEW_REPORT_SUMMARY_MAX_LEN`` characters
+        (otherwise ``ValueError``, failing the fire); at most
+        ``MAX_REVIEW_REPORTS_PER_FIRE`` calls per fire
+        (``CapExceeded("review_reports_per_fire")``); a mod_action spend; then
+        the per-member window, which is guild-wide (shared by every handler).
+        """
+        target_user = str(user_id)
+        if not target_user.isdigit():
+            raise ValueError("report_for_review user_id must be a Discord user id")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("report_for_review summary must be a non-empty string")
+        if len(summary) > REVIEW_REPORT_SUMMARY_MAX_LEN:
+            raise ValueError(
+                "report_for_review summary must be at most "
+                f"{REVIEW_REPORT_SUMMARY_MAX_LEN} characters"
+            )
+        if self.review_reports_made >= MAX_REVIEW_REPORTS_PER_FIRE:
+            raise CapExceeded(
+                "review_reports_per_fire",
+                f"handler hit its {MAX_REVIEW_REPORTS_PER_FIRE}-report per-fire cap",
+            )
+        self.review_reports_made += 1
+        self.budget.spend_mod_action()
+        first_in_window = await self.limiter.hit(
+            review_report_key(self.guild_id, target_user),
+            1,
+            REVIEW_REPORT_WINDOW_SECONDS,
+        )
+        if not first_in_window:
+            return None
+        if self._report_channel is _UNREAD:
+            self._report_channel = await self.report_channel_reader()
+        return await self.actor.report_for_review(
+            target_user, summary.strip(), report_channel_id=self._report_channel or None
+        )
 
     # -- admin-only mod-audit reads (each spends a lookup) --
 
@@ -824,255 +832,6 @@ class HandlerExecution:
             )
         return await self.emitter.rename_channel(target, str(name))
 
-    async def _ban_user(
-        self,
-        user_id: str,
-        reason: str | None = None,
-        delete_message_seconds: int = 0,
-    ) -> str:
-        # Bans stay in the mod pool; delete_message_seconds purges the banned
-        # member's recent messages (onboarding auto-ban sweeps the last hour).
-        # A 404 means the member already left and is a successful no-op.
-        self.budget.spend_mod_action()
-        return await self.actor.ban_user(
-            str(user_id), reason, int(delete_message_seconds)
-        )
-
-    async def _kick_user(self, user_id: str) -> str:
-        """Kick a member; a 404 is an already-left successful no-op."""
-        self.budget.spend_mod_action()
-        return await self.actor.kick_user(str(user_id))
-
-    async def _timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
-        """Timeout a member; a 404 is an already-left successful no-op."""
-        self.budget.spend_mod_action()
-        if self.holds is not None:
-            return await self.holds.timeout(str(user_id), int(duration_seconds))
-        return await self.actor.timeout_user(str(user_id), int(duration_seconds))
-
-    async def _remove_timeout(self, user_id: str) -> str:
-        """Lift a member's timeout; a 404 is an already-left successful no-op.
-
-        Spends the mod_action budget like the timeout it reverses: a
-        mod_action-triggered fire must not be able to undo a timeout either.
-        """
-        self.budget.spend_mod_action()
-        if self.holds is not None:
-            return await self.holds.remove_timeout(str(user_id))
-        return await self.actor.remove_timeout(str(user_id))
-
-    async def _hold_member(self, user_id: str, key: str, seconds: int = 300) -> bool:
-        """Time a member out while ``key`` is under review; True when this
-        call began the hold.
-
-        Several fires share one member's timeout. This never shortens a
-        timeout that already runs longer, and does nothing (False) for a key
-        that is already held or was released in the last five minutes — so a
-        fire that ran late cannot hold a member the review already cleared.
-        A bad key or duration is an author bug and raises before anything is
-        spent; a good one spends a mod_action, like the ``timeout_user`` it
-        stands in for.
-        """
-        hold_key = self._hold_key(key)
-        if isinstance(seconds, bool) or not isinstance(seconds, int):
-            raise ValueError("hold seconds must be an integer number of seconds")
-        if not 1 <= seconds <= HOLD_MAX_SECONDS:
-            raise ValueError(
-                f"hold seconds must be between 1 and {HOLD_MAX_SECONDS} seconds"
-            )
-        self.budget.spend_mod_action()
-        return bool(await self._member_holds().hold(str(user_id), hold_key, seconds))
-
-    async def _release_hold(self, user_id: str, key: str) -> bool:
-        """End ``key``'s hold; True when the member's timeout was ended.
-
-        The timeout is ended only when no key is held any more and the
-        timeout in place is the one a hold put there — never a moderator's or
-        a ``timeout_user``'s. A shorter timeout the holds extended comes back
-        if it still has time to run; otherwise the member is freed. Spends a
-        mod_action like ``remove_timeout``: a mod_action-triggered fire must
-        not undo a hold.
-        """
-        hold_key = self._hold_key(key)
-        self.budget.spend_mod_action()
-        return bool(await self._member_holds().release(str(user_id), hold_key))
-
-    def _hold_key(self, key: str) -> str:
-        if not isinstance(key, str) or not key:
-            raise ValueError("hold key must be a non-empty string")
-        if len(key) > HOLD_KEY_MAX_LEN:
-            raise ValueError(f"hold key must be at most {HOLD_KEY_MAX_LEN} characters")
-        return key
-
-    def _member_holds(self) -> MemberHolds:
-        if self.holds is None:
-            raise RuntimeError("no member holds configured for this handler execution")
-        return self.holds
-
-    async def _warn_user(
-        self,
-        user_id: str,
-        reason: str,
-        channel_id: str | None = None,
-        dm: bool = True,
-    ) -> dict:
-        """Warn a member: channel notice, best-effort DM, durable audit row.
-
-        The handler-tier twin of ``/warn``, so the two produce the same record
-        and the same mod-log fire. Returns ``{"message_id", "dm_sent",
-        "warn_count"}``; ``warn_count`` is the target's authoritative total AFTER
-        this warn, so a script can escalate on it. A protected target is not
-        warned: the result carries ``"refused"`` with the reason and a
-        ``warn_count`` of 0.
-
-        Ordering matters and is deliberate:
-
-        1. The mod_action budget is spent FIRST, before any side effect. This is
-           what makes the §3.5 loop rail hold: a mod_action-triggered handler
-           runs with ``max_mod_actions=0``, so the spend raises immediately and a
-           warn can never be issued in response to a warn — no notice, no DM, no
-           row, no re-dispatch. Spending later would let the loop close before
-           the rail fired.
-        2. An EXPLICIT ``channel_id`` is scope-checked exactly like
-           ``rename_channel``: outside the handler's ``channel_ids`` (or outside
-           this guild when the scope is empty) raises ``out_of_scope_channel``.
-           Unset means the handler's home channel, which needs no check.
-        3. The notice goes out through ``_send_message``, so the per-fire message
-           budget and the per-channel message window apply to a warn's notice
-           exactly as they do to any other send — a warn is not a way around them.
-        4. The row is written by the moderation gateway (which resolves the
-           username host-side and fires mod_action) BEFORE the DM, and that
-           order is load-bearing. Once the public notice
-           is out, the member HAS been warned; the durable record must not be
-           contingent on a courtesy DM that shares the per-fire message pool and
-           two windows of its own (per-recipient hour, global per-minute). A
-           warn that posted its notice and then died on the global DM window —
-           the 11th handler warn in a minute, i.e. exactly the raid this exists
-           for — would be publicly visible with nothing in ``/history``, nothing
-           in ``list_mod_actions``, no mod-log fire, and a ``warn_count`` that
-           never advanced, so a script's "third strike" escalation would silently
-           skip a strike. Recording first makes the record the thing that
-           survives.
-        5. The DM is best-effort through ``_send_dm``: a ``False`` return means
-           closed DMs / no mutual guild, an expected outcome reported as
-           ``dm_sent=False``, NOT an error. A DM cap breach still raises (it is a
-           rail, not a branch) — but by then the warn is durably recorded, so the
-           breach fails the fire without losing the warn.
-        """
-        self.budget.spend_mod_action()
-        explicit_target = bool(channel_id)
-        target = str(channel_id) if channel_id else self.channel_id
-        if explicit_target and not await self._admin_channel_in_scope(target):
-            raise CapExceeded(
-                "out_of_scope_channel",
-                "warn_user channel is outside the handler's channel scope / guild",
-            )
-        target_user = str(user_id)
-        reason_text = str(reason)
-        # A protected member (staff, a bot, or anyone the shared rule cannot
-        # clear) gets no notice, row or DM; the script sees why and carries on.
-        if refusal := await self.actor.staff_refusal(target_user):
-            return {
-                "message_id": "",
-                "dm_sent": False,
-                "warn_count": 0,
-                "refused": f"{target_user} is protected ({refusal})",
-            }
-        notice = f"⚠️ <@{target_user}> has been warned.\n**Reason:** {reason_text}"
-        dm_text = (
-            f"You have received a warning.\n\n"
-            f"**Reason:** {reason_text}\n\n"
-            f"Please review the server rules. Continued violations may "
-            f"result in further action (timeout, kick, or ban)."
-        )
-
-        async def post_notice():
-            # Only forward an explicit channel: the default path must keep
-            # _send_message's raise-on-4xx home-channel contract.
-            if explicit_target:
-                return await self._send_message(notice, target)
-            return await self._send_message(notice)
-
-        # The gateway holds the member's lock across the notice, and skips a
-        # warn the incident already covers (a ban, a timeout, another warn).
-        # Skipped so, the warn adds no row and no strike, but the member is
-        # still told, once per incident: the public notice unless the incident
-        # already posted one, and the DM (gw.MESSAGE_* claims dedupe both).
-        skipped = None
-        message_id = None
-        gateway = None
-        incident_id = None
-        async with self.actor.reserve_warn(target_user, reason_text, target) as slot:
-            incident_id = getattr(slot, "incident_id", None)
-            if incident_id is not None and hasattr(self.actor, "gateway"):
-                gateway = self.actor.gateway()
-            if not slot.go:
-                skipped = slot.outcome.detail if slot.outcome else "not warned"
-                if not (slot.outcome and slot.outcome.superseded and gateway):
-                    return {
-                        "message_id": "",
-                        "dm_sent": False,
-                        "warn_count": int(await self.warn_counter(target_user)),
-                        "skipped": skipped,
-                    }
-                if await gateway.claim_member_message(
-                    incident_id, kind=MESSAGE_NOTICE, target_user_id=target_user
-                ):
-                    try:
-                        message_id = await post_notice()
-                    except BaseException as error:
-                        # Given back only if surely not posted, so the next
-                        # warn may post it. A 5xx, a timeout or a cancellation
-                        # may have posted it: a missed notice beats two.
-                        if _surely_not_sent(error):
-                            await gateway.release_member_message(
-                                incident_id,
-                                kind=MESSAGE_NOTICE,
-                                target_user_id=target_user,
-                            )
-                        raise
-                    if not message_id:
-                        # A gone explicit channel: Discord refused it.
-                        await gateway.release_member_message(
-                            incident_id,
-                            kind=MESSAGE_NOTICE,
-                            target_user_id=target_user,
-                        )
-            else:
-                message_id = await post_notice()
-                # Recorded on leaving this block, BEFORE the DM: the notice is
-                # already public, so the permanent row (and the warn_count and
-                # mod_action fire that come with it) must not hang on a DM
-                # window breach. See step 4 above.
-                slot.confirm()
-        warn_count = await self.warn_counter(target_user)
-        dm_sent = False
-        if dm:
-            claimed = gateway is None or await gateway.claim_member_message(
-                incident_id, kind=MESSAGE_DM, target_user_id=target_user
-            )
-            if claimed:
-                try:
-                    dm_sent = await self._send_dm(target_user, dm_text)
-                except BaseException:
-                    # A DM cap stopped it: the next warn may still send it.
-                    if gateway is not None:
-                        await gateway.release_member_message(
-                            incident_id, kind=MESSAGE_DM, target_user_id=target_user
-                        )
-                    raise
-        # A gone explicit target makes _send_message return False; the warn itself
-        # (audit row + DM) still happened, so report an empty id rather than a
-        # falsy one the script would have to type-check.
-        result = {
-            "message_id": str(message_id) if message_id else "",
-            "dm_sent": bool(dm_sent),
-            "warn_count": int(warn_count),
-        }
-        if skipped is not None:
-            result["skipped"] = skipped
-        return result
-
     async def _list_rules(self) -> list[dict]:
         """This guild's configured rules, in document order; spends a lookup.
 
@@ -1093,23 +852,13 @@ class HandlerExecution:
         await self._spend_thread_op()
         return await self.actor.close_thread(str(thread_id))
 
-    async def _lock_thread(self, thread_id: str) -> bool:
-        """Lock and archive a thread. A gone thread (404) -> False."""
-        await self._spend_thread_op()
-        return await self.actor.lock_thread(str(thread_id))
-
     async def _reopen_thread(self, thread_id: str) -> bool:
         """Unarchive a thread. A gone thread (404) -> False."""
         await self._spend_thread_op()
         return await self.actor.reopen_thread(str(thread_id))
 
-    async def _delete_thread(self, thread_id: str) -> bool:
-        """Delete a thread. A gone thread (404) is a silent no-op -> False."""
-        await self._spend_thread_op()
-        return await self.actor.delete_thread(str(thread_id))
-
     async def _spend_thread_op(self) -> None:
-        """Meter a mutating thread op (close/lock/reopen/delete): per-fire
+        """Meter a mutating thread op (close/reopen): per-fire
         thread_ops budget then the guild thread-op window, before the REST call —
         a breach of either fails the fire mid-flight, the same shape the
         channel-message window uses."""
@@ -1119,8 +868,8 @@ class HandlerExecution:
     async def _hit_guild_thread_ops_window(self) -> None:
         """Charge the guild thread-op window, raising ``CapExceeded`` on breach.
 
-        Shared by every mutating thread op (create/close/lock/reopen/delete) so
-        all six draw the one guild ceiling (spec §5.3)."""
+        Shared by every mutating thread op (create/close/reopen) so
+        all of them draw the one guild ceiling (spec §5.3)."""
         within = await self.limiter.hit(
             guild_thread_ops_key(self.guild_id), GUILD_THREAD_OPS_PER_MIN
         )
@@ -1455,7 +1204,6 @@ async def run_handler_script(
     limiter: WindowedLimiter,
     agent_runner: AgentRunner = _no_agent,
     mod_action_reader: ModActionReader = _no_mod_action_reader,
-    warn_counter: WarnCounter = _no_warn_counter,
     report_channel_reader: ReportChannelReader = _no_report_channel,
     rules_reader: RulesReader = _no_rules_reader,
     recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader,
@@ -1463,7 +1211,6 @@ async def run_handler_script(
     timer_scheduler: TimerScheduler = _no_timer,
     claimer: Claimer = _no_claimer,
     claim_reader: ClaimReader = _no_claim_reader,
-    holds: MemberHolds | None = None,
     timer_limiter: WindowedLimiter | None = None,
     dm_user_limiter: WindowedLimiter | None = None,
     budget: HandlerBudget | None = None,
@@ -1479,7 +1226,7 @@ async def run_handler_script(
     was already emitted stays. We stop, capture the cause, and always return a
     :class:`HandlerResult` for the durable run record — never raise to the caller.
 
-    Passing ``actor`` enables the admin moderation functions (and lets
+    Passing ``actor`` enables the admin functions (and lets
     send_message target any channel). ``memory`` seeds the handler's persistent
     store; the result carries it back (with ``memory_changed``) for the caller to
     persist regardless of outcome — a counter bumped before a later failure is
@@ -1499,7 +1246,6 @@ async def run_handler_script(
         limiter=limiter,
         agent_runner=agent_runner,
         mod_action_reader=mod_action_reader,
-        warn_counter=warn_counter,
         report_channel_reader=report_channel_reader,
         rules_reader=rules_reader,
         recent_messages_reader=recent_messages_reader,
@@ -1507,7 +1253,6 @@ async def run_handler_script(
         timer_scheduler=timer_scheduler,
         claimer=claimer,
         claim_reader=claim_reader,
-        holds=holds,
         timer_limiter=timer_limiter or limiter,
         dm_user_limiter=dm_user_limiter or limiter,
         actor=actor,

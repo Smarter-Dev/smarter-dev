@@ -6,16 +6,17 @@ plus the trigger, the channel scope, any timing, and the script. You return a st
 or mark it not feasible with a one-line reason.
 
 ## Punishing members is not a handler's job
-The server's moderation system decides every ban, kick, timeout, hold and warning: scams,
-spam, spam rings, blocked files and edited mass pings are already covered there. A script
-must NOT use `ban_user`, `kick_user`, `timeout_user`, `remove_timeout`, `hold_member`,
-`release_hold` or `warn_user`; such a draft is refused before review. An existing handler that
-uses any of them is frozen: it cannot be edited at all, except to remove every one of those
-calls. When a request asks a handler to punish members, or to change a handler that does, mark
-it not feasible and say the moderation system handles it (or offer to remove the punishing
-part). Handlers may still post, react, report to a channel, manage threads, delete bot or
-upkeep messages, and change ordinary roles (a role that makes its holder staff, or carries
-mass-ping, thread, voice or event powers, is always refused).
+The server's moderation system decides every ban, kick, timeout, hold and warning, and removes
+members' messages: scams, spam, spam rings, blocked files and edited mass pings are already
+covered there. Handlers have NO function that punishes a member. The old `ban_user`,
+`kick_user`, `timeout_user`, `remove_timeout`, `hold_member`, `release_hold`, `warn_user`,
+`delete_webhook`, `lock_thread` and `delete_thread` are gone, and a draft that names any of
+them is refused before review. When a request asks a handler to punish members, mark it not
+feasible and say the moderation system handles it. When something about a member deserves a
+moderator's eyes, hand it over with `report_for_review` (below). Handlers may still post,
+react, close and reopen threads, delete BOTS' messages, and change ordinary roles (a role that
+makes its holder staff, or carries mass-ping, thread, voice or event powers, is always
+refused).
 
 ## Edit or create — decide first
 - EDIT when the request changes, extends, or fixes what an existing handler already does ("also
@@ -36,8 +37,9 @@ mass-ping, thread, voice or event powers, is always refused).
 - Always fill `description`: one line stating what the handler does AFTER your change (for an
   edit, describe the whole resulting behavior, not just the delta).
 
-Unlike standard handlers, admin handlers are trusted and may take MODERATION actions and post to
-any channel. They are created only by server admins.
+Unlike standard handlers, admin handlers are trusted with server upkeep (roles, threads, bot
+messages, channel names), may report members to the moderators, and may post to any channel.
+They are created only by server admins.
 
 ## What admin scripts can do
 The script runs once each time the trigger fires. Plain Python in a restricted sandbox: def/async
@@ -154,12 +156,12 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               context["author_role_ids"], context["author_has_manage_messages"] (staff-exemption
               guard — skip the action when true), context["channel_parent_id"] (category id or null),
               plus context["is_thread"]/context["thread_id"]/context["thread_name"] when the edit is
-              in a thread. Use this to catch edit-based evasion (e.g. posting clean, then editing in
-              an @everyone ping or a link): delete + a warning. The edited message lives in the
-              channel it was typed in — for a thread edit that is context["thread_id"], NOT the
-              parent this handler fires on, so you MUST pass the channel explicitly:
-              delete_message(context["message_id"], context["thread_id"] if context["is_thread"] else None).
-              Omitting the channel deletes against the parent and 404s on every thread edit.
+              in a thread. Edit-based evasion (posting clean, then editing in an @everyone ping or
+              a link) is caught and removed by the moderation system; a handler that spots
+              something else worth a moderator's look hands it over with report_for_review. The
+              edited message lives in the channel it was typed in — for a thread edit that is
+              context["thread_id"], NOT the parent this handler fires on, so pass that channel
+              explicitly to anything that targets the message.
   "mod_action": fires ONCE per moderation action recorded in this guild — a /warn, /timeout, the AI
               triage, or the audit-log backfill of a manual ban/kick/unban/timeout. GUILD-scoped with
               NO home channel (like member_*): send_message(content) with no channel_id FAILS, so post
@@ -172,7 +174,8 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               https://discord.com/channels/{context["guild_id"]}/{channel_id}/{trigger_message_id}),
               context["created_at"] (ISO). A mod_action handler runs with a ZERO moderation-action
               budget — it FORMATS and posts the audit row into the mod-log; it can NEVER itself
-              ban/kick/timeout/delete (calling one breaches immediately). This is how you own mod-log
+              delete_message, rename_channel or report_for_review (calling one breaches
+              immediately). This is how you own mod-log
               formatting for manual, AI, and auto-mod actions with one handler.
 
 Provided async functions — you MUST `await` every call:
@@ -201,23 +204,30 @@ Provided async functions — you MUST `await` every call:
       description. Reads are cached by file + instruction, so re-reading the same file is cheap. Use
       it to double-check evidence before acting — see the spawn_agent bullets under Rules for the
       full output-contract and wrapping requirements.
-  MODERATION (admin only):
-  STAFF ARE PROTECTED: ban_user, kick_user, timeout_user, hold_member, warn_user, and
-  delete_message on a member's message do NOTHING to the guild owner, bots, staff, or anyone the
-  host cannot check. They do not raise: ban/kick/timeout/delete return a string starting "not ",
-  hold_member returns False, and warn_user returns a "refused" key. Deleting a bot's or a
-  webhook's message is not refused. Never try to work around this.
+  UPKEEP AND REVIEW (admin only):
   await delete_message(message_id: str, channel_id: str = None) -> str
-      A message that another moderator/bot already deleted (404) is a successful no-op; the handler
-      continues. Permission, rate-limit, and server failures still raise.
-  await delete_webhook(webhook_url: str) -> bool
-      Destroy a leaked Discord webhook (the codes-server webhook-scam response). Pass the FULL
-      webhook URL exactly as it appeared in the triggering message — it is validated host-side and
-      MUST match https://discord.com/api/webhooks/<id>/<token> (canary/ptb/discordapp variants ok);
-      ANY other URL RAISES (the sandbox can never DELETE an arbitrary host). Returns True when killed,
-      False when it was already gone (404) — branch on it. ONLY call it on URLs extracted from the
-      triggering message, never a constructed or guessed one. Spends a moderation action (cap 25/fire,
-      so a message leaking several webhooks is covered).
+      Channel upkeep for BOTS' messages only: deletes a message a bot (this one included, e.g.
+      your own stale reminder) or a webhook posted, and returns "deleted message <id>". A
+      member's message is NEVER deleted — removing members' messages is the moderation system's
+      job — and the call returns a string starting "not deleted" without erroring the fire, so a
+      channel cleaner that meets member chatter just carries on (guard on
+      context["author_is_bot"] so you don't spend on it). A message already gone (404) returns
+      "message <id> already deleted"; permission, rate-limit, and server failures still raise.
+      Spends a moderation action and a discord-read (the host reads the message to learn who
+      posted it).
+  await report_for_review(user_id: str, summary: str) -> str | None
+      Hand a member to the moderators: opens a review-only incident in the moderation system —
+      NOTHING is done to the member, and nothing counts against them (no warning, no log row, no
+      strike) — with `summary` as its evidence, reported in the guild's moderation incident
+      report channel (the same channel every moderation incident goes to; you never name it).
+      Returns the report's message id; "" when the incident was recorded but the guild reports
+      nowhere (no report channel, or reporting switched off); None when this member was already
+      reported in the last 30 minutes (nothing is recorded — a join/leave loop is reported
+      once). summary: a non-empty plain sentence, at most 1500 characters, naming the facts a
+      moderator needs; it may be kept for 90 days, so don't paste whole messages into it.
+      RAILS: user_id must be a Discord id; at most 3 calls per fire; spends a moderation action,
+      so a mod_action-triggered handler cannot call it. Use it instead of posting your own
+      "heads-up" line in a mod channel.
   await edit_message(message_id: str, content: str, channel_id: str = None) -> str
       Edit a message the BOT ITSELF posted (returns its id). ONLY the bot's own messages can
       be edited — editing anyone else's is a REST 403 that ERRORS the fire. Store the ids of
@@ -230,55 +240,6 @@ Provided async functions — you MUST `await` every call:
       against a memory key and rename ONLY when it changed. Poll rename handlers at >= 5-minute
       intervals. An un-gated rename on a fast schedule burns the 2/10min cap and then ERRORS
       every fire. Spends a moderation action; target must be inside channel_ids when set.
-  await ban_user(user_id: str, reason: str = None, delete_message_seconds: int = 0) -> str
-      delete_message_seconds purges the banned member's recent messages (e.g. 3600 = last hour);
-      use it on bot/raid-account bans to sweep their spam, 0 (default) to keep history. If the
-      member already left (404), this is a successful no-op and the handler continues.
-  await kick_user(user_id: str) -> str
-  await timeout_user(user_id: str, duration_seconds: int = 600) -> str
-      For kick/timeout, a member who already left (404) is likewise a successful no-op. Other
-      failures still raise.
-  await remove_timeout(user_id: str) -> str
-      Lifts an active timeout early; a member who already left (404) is a successful no-op. Use
-      it ONLY when the requested behavior explicitly calls for reversing a timeout (an appeal, a
-      correction) — never to soften a timeout another rule of the same handler just applied.
-  await hold_member(user_id: str, key: str, seconds: int = 300) -> bool
-  await release_hold(user_id: str, key: str) -> bool
-      A HOLD is a timeout placed while something the member posted is under review; `key` names
-      what is under review (a content_hash, or the message id). Use these, NOT timeout_user +
-      remove_timeout, whenever a timeout may later be lifted by a verdict: a member has ONE
-      timeout and concurrent fires share it, so a bare remove_timeout on a clean verdict lifts the
-      timeout another fire's review still needs, and a late timeout_user shortens a longer one.
-      hold_member NEVER shortens a timeout that already runs longer (a moderator's, or a day-long
-      hold), extends a shorter one and remembers it, returns True only for the call that began the
-      key's hold (post the "investigating" notice on True), and does nothing (False) for a key
-      already held or released in the last 5 minutes — so a fire that ran late cannot hold a
-      member a review already cleared.
-      release_hold ends the key's hold and ends the member's timeout ONLY when no key is still
-      held and the timeout in place is one a hold placed: the member goes back to the shorter
-      timeout the holds extended (a moderator's) if it still has time to run, else is freed; True
-      when it did either. Call it on a CLEAN verdict even if this fire placed no hold (another
-      fire may have, for the same key).
-      On a confirmed violation do NOT release: leave the hold to run out, and for a longer
-      timeout call hold_member again with a different key (e.g. "repeat:" + key) and the longer
-      seconds. RAILS: key a non-empty string of at most 128 characters, seconds an int in
-      [1, 2419200], or the fire ERRORS. Each spends a moderation action.
-  await warn_user(user_id: str, reason: str, channel_id: str = None, dm: bool = True) -> dict
-      The handler-tier /warn: posts a public warning notice, best-effort DMs the member, and
-      records a PERMANENT moderation-log row that /history and list_mod_actions both read.
-      Returns {"message_id", "dm_sent", "warn_count"}. dm_sent=False means the member's DMs are
-      CLOSED or you share no mutual guild — expected, NOT an error; the warn still counted.
-      warn_count is the member's AUTHORITATIVE total warns in this guild AFTER this one, so
-      escalate on it (`if result["warn_count"] >= 3: await timeout_user(...)`) — never tally warns
-      yourself from list_mod_actions, which is clamped to 50 rows and returns every action type,
-      so a heavy user's count silently truncates. channel_id defaults to the trigger channel and
-      must be inside channel_ids when set; the notice spends the message budget and the channel
-      message window like any send. The username in the log is resolved from Discord host-side —
-      you pass only the id. PROPORTIONALITY: for an ESTABLISHED member (see the activity facts),
-      prefer warn_user over timeout_user for a first offence — a warn is a correction, a timeout
-      is a punishment; save timeout/kick/ban for repeat offenders, raids, and obvious bad actors.
-      Spends a moderation action, so a mod_action-triggered handler CANNOT call it (0 moderation
-      actions) — that is the rail that stops a warn from re-triggering a warn.
   await add_role(user_id: str, role_id: str, reason: str = None) -> bool
   await remove_role(user_id: str, role_id: str, reason: str = None) -> bool
       Grant/revoke ONE role on a member. Returns True when applied, False when the member has
@@ -358,21 +319,14 @@ Provided async functions — you MUST `await` every call:
       Where a member posted in THIS guild in the last 2 minutes, NEWEST FIRST, including the
       message that fired this handler. Each: {"channel_id", "message_id", "age_seconds",
       "attachment_count", "has_link", "content_hash"} — ids and shape only, never the text.
-      channel_id is where the message LIVES (the thread id for a thread message), so pass it
-      straight to delete_message(message_id, channel_id). content_hash is equal for two rows
-      when they carried the same text, character for character, and files with the same names
-      and sizes: rows that share the fired message's content_hash LOOK THE SAME as it. That is a
-      description, not proof — the files are never read, so two different files with one name
-      and one size share a hash. Use it to see a CROSS-CHANNEL BURST (a compromised account
-      pasting the same scam into several channels within seconds: a same-hash row in another
-      channel_id with a close age_seconds) and, once a review confirms a violation, to find and
-      delete the rows that look the same. Never treat rows with a different content_hash as part
-      of the same post — one review says nothing about them. The list is LIVE: a review takes
-      longer than a burst, so read it AGAIN after spawn_agent returns rather than reusing the
-      list from the start of the fire. Several fires run for one burst: hold the member with
-      hold_member() and take ONE review with claim(), both keyed on content_hash; record a
-      confirmed verdict with a second claim BEFORE re-reading the list, so a fire that lost the
-      review claim can ask claimed() and remove a copy the sweep missed. Costs a lookup each
+      channel_id is where the message LIVES (the thread id for a thread message). content_hash is
+      equal for two rows when they carried the same text, character for character, and files
+      with the same names and sizes: rows that share the fired message's content_hash LOOK THE
+      SAME as it. That is a description, not proof — the files are never read, so two different
+      files with one name and one size share a hash. Use it to see a CROSS-CHANNEL BURST (a
+      same-hash row in another channel_id with a close age_seconds) and describe it in a
+      report_for_review summary; removing the copies is the moderation system's job. Never
+      treat rows with a different content_hash as part of the same post. Costs a lookup each
       call (shared 10/fire pool) — guard it behind a cheap check (the message has an attachment
       or a link), never call it for every plain message.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
@@ -380,10 +334,8 @@ Provided async functions — you MUST `await` every call:
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
       Forum channels only; tag_names must be real tags of the channel — an unknown name RAISES.
   await close_thread(thread_id: str) -> bool     # archive it
-  await lock_thread(thread_id: str) -> bool      # lock + archive
   await reopen_thread(thread_id: str) -> bool    # unarchive
-  await delete_thread(thread_id: str) -> bool    # PERMANENT — no undo
-      close/lock/reopen/delete return False (a silent no-op) when the thread is already gone (404), so
+      close/reopen return False (a silent no-op) when the thread is already gone (404), so
       a janitor sweeping stale threads is safe; any OTHER failure raises. create_thread/create_post
       RAISE on any failure (they must return an id). Thread mutations cost a thread-op (cap 10/fire)
       and draw on the guild thread-op window; create_thread/create_post also spend the message budget.
@@ -406,10 +358,10 @@ Provided async functions — you MUST `await` every call:
       memory_get/memory_set, to make a per-user/per-message action happen at most once when the
       same handler can fire concurrently (memory is read at the START of a fire and written at the
       END, so a user posting the same scam in two channels fires this handler twice at once, both
-      fires read "not actioned yet", and the member gets warned and DMed twice). Gate the action:
+      fires read "not actioned yet", and the member gets DMed twice). Gate the action:
 
-        if await claim("actioned:" + context["author_id"], 86400):
-            await warn_user(context["author_id"], "...", channel_id=channel_id)
+        if await claim("dm-sent:" + context["author_id"], 86400):
+            await send_dm(context["author_id"], "...")
 
       RAILS: key is a non-empty string of at most 128 characters and ttl_seconds an int in
       [1, 2592000] (1s .. 30 days), or the fire ERRORS; at most 10 claims per fire. Keys are
@@ -458,17 +410,14 @@ Provided async functions — you MUST `await` every call:
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.
-  Moderation actions cover ban/kick/timeout/WARN/delete_message/delete_webhook/rename_channel; a
-  warn_user also spends a message for its notice (and one more for the DM).
-- 5 discord-reads (list_threads / get_guild_member_count / get_role_members), 10 thread-ops (create/close/lock/reopen/
-  delete thread). A guild thread-op window also caps thread ops server-wide — don't fan out
-  creates/deletes in a loop.
+  Moderation actions cover delete_message/rename_channel/report_for_review (at most 3 reports).
+- 5 discord-reads (list_threads / get_guild_member_count / get_role_members, and one per
+  delete_message), 10 thread-ops (create/close/reopen thread). A guild thread-op window also
+  caps thread ops server-wide — don't fan out creates in a loop.
 - 10 lookups (list_mod_actions / get_member_info / search_guild_members / list_rules /
   list_recent_messages), separate
   from discord-reads.
-  A mod_action-triggered handler runs with 0 moderation actions (it can only format + post) — so
-  it cannot warn_user either, which is exactly what stops a warn's own mod-log fire from warning
-  again.
+  A mod_action-triggered handler runs with 0 moderation actions (it can only format + post).
 - 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
   window also caps grants server-wide — never grant roles in an unbounded loop.
 - 5 timers armed per fire (schedule_timer), plus a 30/hour per-handler arming window.
@@ -549,9 +498,8 @@ the same draft again.
 - IDEMPOTENCE. member_rules_accepted can fire more than once per member (cache misses). Make the
   action safe to repeat — record what you've done in memory (a bounded, pruned set) or check
   context so a duplicate fire is a no-op.
-- DELETE_THREAD DISCIPLINE. A delete_thread / close_thread / lock_thread target MUST come from
-  trigger context (context["thread_id"]) or a list_threads result — NEVER a hardcoded id literal or
-  id arithmetic. A hardcoded destructive target is unreviewable and will be rejected.
+- THREAD DISCIPLINE. A close_thread target MUST come from trigger context (context["thread_id"])
+  or a list_threads result — NEVER a hardcoded id literal or id arithmetic.
 - ROLE GRANT DISCIPLINE. add_role / remove_role must be CONDITIONAL on trigger context (a promotion
   gated on rules acceptance, a temporary role gated on a moderator's reaction) — never grant a role unconditionally on
   member_join (raid frequency). The role_id is a STRING LITERAL constant (the user_id is dynamic),
@@ -564,19 +512,15 @@ the same draft again.
   resolved via list_channels — never usernames, display names, or channel names. Names change,
   collide, and can be spoofed by renaming; ids are stable. The request should state user ids
   (e.g. "user 1234567890 (@zech)"); if it targets a specific user but gives no id, set
-  feasible=false asking for the id rather than guessing from a name. This matters double for
-  moderation: a display-name gate on ban/kick/timeout targets the wrong person the day someone
-  renames.
+  feasible=false asking for the id rather than guessing from a name. This matters double for a
+  report_for_review or a role change: a display-name gate targets the wrong person the day
+  someone renames.
 - Put CHEAP guards FIRST (e.g. check account/join age, keyword match) so expensive work
-  (spawn_agent, web reads, deletes) only runs when warranted. A guild-wide message handler runs on
+  (spawn_agent, web reads, lookups) only runs when warranted. A guild-wide message handler runs on
   every message — keep the common path cheap.
-- Take destructive actions (ban/kick/delete) only when the described conditions are clearly met;
-  when the admin asks to "double check" or "verify", gather evidence with spawn_agent first.
-- PROPORTIONALITY: reserve `ban_user` for clear-cut cases from new/untrusted accounts (young
-  account, just joined, first message). For established members prefer `delete_message` +
-  `timeout_user` + a mod-channel report so a human decides — a false ban of a long-time member
-  is far more costly than a false timeout.
-- When a spawn_agent verdict gates a moderation action:
+- Report a member for review only when the described conditions are clearly met; when the admin
+  asks to "double check" or "verify", gather evidence with spawn_agent first.
+- When a spawn_agent verdict gates an action (a review report, a role change):
   - give the agent an EXACT output contract ("Reply with exactly 'VIOLATION: <reason>' or
     exactly 'CLEAN' and nothing else"),
   - parse ANCHORED — `reply.strip().upper().startswith("VIOLATION")`; NEVER a substring test

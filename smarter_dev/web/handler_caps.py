@@ -37,7 +37,7 @@ ADMIN_FIRES_PER_MIN = 120
 # fire-queue explosion. member_leave draws from the same window (join and leave
 # burst together in a raid + ban wave).
 GUILD_MEMBER_EVENTS_PER_MIN = 60
-# Guild-wide gate on mutating thread ops (create/close/lock/reopen/delete),
+# Guild-wide gate on mutating thread ops (create/close/reopen),
 # enforced in the runtime wrapper before the REST call.
 GUILD_THREAD_OPS_PER_MIN = 30
 # Guild-wide gate on role grants/revokes (add_role/remove_role), enforced in the
@@ -55,11 +55,10 @@ GUILD_ROLE_CHANGES_PER_MIN = 30
 # each generation is individually slow.
 #
 # BOUNDARY (know this before trusting the counter): depth only follows causal
-# links the WORKER can see — a fire's schedule_timer re-fire and a fire's
-# warn_user mod_action dispatch. A cascade that leaves through Discord and comes
-# back as a fresh gateway event (a handler's send_message observed as a message,
-# create_thread as thread_create, add_role as member_role_change, ban as
-# member_leave) re-enters at depth 0, because nothing correlates the gateway
+# links the WORKER can see — a fire's schedule_timer re-fire. A cascade that
+# leaves through Discord and comes back as a fresh gateway event (a handler's
+# send_message observed as a message, create_thread as thread_create, add_role
+# as member_role_change) re-enters at depth 0, because nothing correlates the gateway
 # event back to the fire that caused it. Closing that would need Redis
 # breadcrumbs keyed by the emitted side effect; deliberately not built yet.
 MAX_CHAIN_DEPTH = 3
@@ -151,7 +150,7 @@ async def claim_fire_attempt(redis, job_id: str) -> bool:
 # twice at once (worker concurrency is 8), and the per-handler ``memory_*`` store
 # cannot dedupe them — it is loaded at fire start and persisted at fire end, so
 # both fires read the pre-fire snapshot, both decide "not actioned yet", and the
-# member gets warned and DMed twice. A script instead asks for a key with
+# member gets DMed twice. A script instead asks for a key with
 # ``claim("actioned:" + author_id, 86400)``: SET NX EX makes exactly one of the
 # racing fires get True, and the loser skips the action.
 #
@@ -165,6 +164,18 @@ CLAIM_TTL_MAX_SECONDS = int(OPERATIONAL_MAX.total_seconds())
 # counter: a claim is cheap (one Redis round trip, no Discord spend), but an
 # unbounded loop of them is still a script writing unbounded keys into Redis.
 MAX_CLAIMS_PER_FIRE = 10
+
+# report_for_review (admin): a review-only incident for the moderators. A
+# member is reported at most once per window per guild, whichever handler asks,
+# so a join/leave loop cannot flood the report channel; a fire may ask at most
+# a few times; and the evidence note is bounded like any message.
+REVIEW_REPORT_WINDOW_SECONDS = 30 * 60
+MAX_REVIEW_REPORTS_PER_FIRE = 3
+REVIEW_REPORT_SUMMARY_MAX_LEN = 1500
+
+
+def review_report_key(guild_id: str, user_id: str) -> str:
+    return f"hreview:{guild_id}:{user_id}"
 
 
 def handler_claim_key(handler_id: str, key: str) -> str:

@@ -1,4 +1,4 @@
-"""Tests for AdminActor (moderation REST calls).
+"""Tests for AdminActor (an admin fire's REST calls).
 
 These run through the real ``_request`` path over ``httpx.MockTransport`` — a
 mock of ``_request`` itself is what let the ban-with-reason double-``headers``
@@ -8,9 +8,6 @@ TypeError reach production.
 from __future__ import annotations
 
 import json
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
 
 import httpx
 import pytest
@@ -66,189 +63,60 @@ def _actor(requests: list[httpx.Request], status_code: int | None = None) -> Adm
     )
 
 
-async def test_ban_user_with_reason_sends_auth_and_audit_headers():
-    """Regression: a ban with a reason must not crash on duplicate headers."""
+# -- delete_bot_message: upkeep, never a member's message -------------------
+
+
+async def test_a_bots_message_is_deleted_outside_the_gateway(recorded_events):
     requests: list[httpx.Request] = []
-    out = await _actor(requests).ban_user("U1", reason="scam")
-    assert "banned U1" in out
-    request = requests[0]
-    assert request.method == "PUT"
-    assert request.url.path.endswith("/guilds/G1/bans/U1")
-    assert request.headers["Authorization"] == "Bot t"
-    assert request.headers["X-Audit-Log-Reason"] == "scam"
 
+    out = await _bot_message_actor(requests).delete_bot_message("C1", "B1")
 
-async def test_ban_user_without_reason():
-    requests: list[httpx.Request] = []
-    await _actor(requests).ban_user("U1")
-    request = requests[0]
-    assert request.method == "PUT"
-    assert request.url.path.endswith("/guilds/G1/bans/U1")
-    assert "X-Audit-Log-Reason" not in request.headers
-
-
-async def test_ban_reason_is_url_encoded_for_the_audit_header():
-    """Non-latin-1 reasons must not crash httpx's header encoding."""
-    requests: list[httpx.Request] = []
-    await _actor(requests).ban_user("U1", reason="crypto scam — telegram")
-    assert requests[0].headers["X-Audit-Log-Reason"] == "crypto%20scam%20%E2%80%94%20telegram"
-
-
-async def test_a_second_ban_of_the_same_member_is_not_sent():
-    requests: list[httpx.Request] = []
-    actor = _actor(requests)
-    await actor.ban_user("U1", reason="scam")
-    out = await actor.ban_user("U1", reason="scam again")
-    assert out.startswith("not banned: U1")
-    assert len(requests) == 1
-
-
-async def test_kick_user():
-    requests: list[httpx.Request] = []
-    await _actor(requests).kick_user("U1")
+    assert out == "deleted message B1"
     request = requests[0]
     assert request.method == "DELETE"
-    assert request.url.path.endswith("/guilds/G1/members/U1")
+    assert request.url.path.endswith("/channels/C1/messages/B1")
+    # Upkeep, not moderation: no incident, no audit row, nothing announced.
+    assert recorded_events == []
 
 
-async def test_timeout_user():
+async def test_a_members_message_is_refused_without_a_delete_call():
     requests: list[httpx.Request] = []
-    await _actor(requests).timeout_user("U1", duration_seconds=120)
-    request = requests[0]
-    assert request.method == "PATCH"
-    assert request.url.path.endswith("/guilds/G1/members/U1")
-    assert "communication_disabled_until" in json.loads(request.content)
 
+    out = await _actor(requests).delete_bot_message("C1", "M1")
 
-def _member_actor(member: dict | None, status_code: int = 200) -> AdminActor:
-    """An actor whose member endpoint answers with ``member``."""
-
-    def handle(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(status_code, json=member)
-
-    return AdminActor(
-        bot_token="t",
-        guild_id="G1",
-        staff_exempt_role_ids=(),
-        transport=httpx.MockTransport(handle),
-    )
-
-
-async def test_timeout_until_reads_a_running_timeout():
-    until = datetime.now(UTC) + timedelta(hours=1)
-    actor = _member_actor(
-        {"communication_disabled_until": until.isoformat().replace("+00:00", "Z")}
-    )
-
-    assert await actor.timeout_until("U1") == until
-
-
-@pytest.mark.parametrize(
-    "member",
-    [
-        {},
-        {"communication_disabled_until": None},
-        # Discord leaves a lapsed timeout on the member until the next change.
-        {"communication_disabled_until": "2020-01-01T00:00:00+00:00"},
-        {"communication_disabled_until": "not a time"},
-    ],
-)
-async def test_timeout_until_is_none_when_the_member_is_free(member):
-    assert await _member_actor(member).timeout_until("U1") is None
-
-
-async def test_timeout_until_is_none_for_a_member_who_left():
-    assert await _member_actor({}, status_code=404).timeout_until("U1") is None
-
-
-async def test_timeout_until_raises_on_any_other_failure():
-    with pytest.raises(AdminActionError):
-        await _member_actor({}, status_code=500).timeout_until("U1")
-
-
-async def test_remove_timeout_lifts_the_timeout_a_handler_placed():
-    requests: list[httpx.Request] = []
-    actor = _actor(requests)
-    await actor.timeout_user("U1", duration_seconds=600)
-    await actor.remove_timeout("U1")
-    request = requests[-1]
-    assert request.method == "PATCH"
-    assert request.url.path.endswith("/guilds/G1/members/U1")
-    assert json.loads(request.content) == {"communication_disabled_until": None}
-
-
-async def test_remove_timeout_never_lifts_a_moderators_timeout():
-    requests: list[httpx.Request] = []
-    discord = _discord()
-    discord.writes = requests
-    discord.members["U1"] = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    actor = AdminActor(
-        bot_token="t",
-        guild_id="G1",
-        staff_exempt_role_ids=(),
-        transport=discord.transport(),
-    )
-    out = await actor.remove_timeout("U1")
-    assert "not removed" in out
+    assert out.startswith("not deleted: message M1 was posted by a member")
     assert requests == []
-
-
-async def test_delete_message():
-    requests: list[httpx.Request] = []
-    await _actor(requests).delete_message("C1", "M1")
-    request = requests[0]
-    assert request.method == "DELETE"
-    assert request.url.path.endswith("/channels/C1/messages/M1")
-
-
-@pytest.mark.parametrize(
-    ("invoke", "expected"),
-    [
-        (lambda actor: actor.kick_user("U2"), "kick target U2 already absent"),
-        (lambda actor: actor.timeout_user("U2"), "timeout target U2 already absent"),
-        (
-            lambda actor: actor.remove_timeout("U2"),
-            "untimeout target U2 already absent",
-        ),
-    ],
-)
-async def test_absent_moderation_target_is_successful_noop(invoke, expected):
-    """Another actor already achieved the handler's end state: nothing is sent."""
-    requests: list[httpx.Request] = []
-    assert await invoke(_actor(requests)) == expected
-    assert requests == []
-
-
-async def test_a_ban_discord_answers_404_is_a_noop():
-    requests: list[httpx.Request] = []
-    assert await _actor(requests, status_code=404).ban_user("U1") == (
-        "ban target U1 already absent"
-    )
-    assert len(requests) == 1
 
 
 async def test_an_already_deleted_message_is_a_noop_without_a_delete_call():
     """The author read finds it gone, so no DELETE goes out at all."""
     requests: list[httpx.Request] = []
-    out = await _actor(requests).delete_message("C1", "M2")
+    out = await _actor(requests).delete_bot_message("C1", "M2")
     assert out == "message M2 already deleted"
     assert requests == []
 
 
-@pytest.mark.parametrize(
-    "invoke",
-    [
-        lambda actor: actor.ban_user("U1"),
-        lambda actor: actor.kick_user("U1"),
-        lambda actor: actor.timeout_user("U1"),
-        lambda actor: actor.delete_message("C1", "M1"),
-    ],
-)
 @pytest.mark.parametrize("status_code", [403, 429, 500])
-async def test_moderation_action_non_404_error_still_raises(invoke, status_code):
-    requests: list[httpx.Request] = []
+async def test_a_failed_delete_of_a_bots_message_raises(status_code):
     with pytest.raises(AdminActionError):
-        await invoke(_actor(requests, status_code=status_code))
+        await _bot_message_actor([], status_code=status_code).delete_bot_message(
+            "C1", "B1"
+        )
+
+
+def _bot_message_actor(
+    requests: list[httpx.Request], status_code: int | None = None
+) -> AdminActor:
+    """``_actor``'s guild, plus B1: Disboard's notice, a bot's message."""
+    discord = _discord(status_code)
+    discord.messages["B1"] = {"id": "B1", "author": {"id": "D1", "bot": True}}
+    discord.writes = requests
+    return AdminActor(
+        bot_token="t",
+        guild_id="G1",
+        staff_exempt_role_ids=(),
+        transport=discord.transport(),
+    )
 
 
 # -- thread operations ------------------------------------------------------
@@ -296,13 +164,6 @@ async def test_close_thread_verifies_then_archives():
     assert json.loads(mutate.content) == {"archived": True}
 
 
-async def test_lock_thread_locks_and_archives():
-    requests: list[httpx.Request] = []
-    result = await _thread_actor(requests).lock_thread("T1")
-    assert result is True
-    assert json.loads(requests[-1].content) == {"locked": True, "archived": True}
-
-
 async def test_reopen_thread_unarchives():
     requests: list[httpx.Request] = []
     result = await _thread_actor(requests).reopen_thread("T1")
@@ -312,18 +173,9 @@ async def test_reopen_thread_unarchives():
     assert json.loads(mutate.content) == {"archived": False}
 
 
-async def test_delete_thread_deletes():
-    requests: list[httpx.Request] = []
-    result = await _thread_actor(requests).delete_thread("T1")
-    assert result is True
-    mutate = requests[-1]
-    assert mutate.method == "DELETE"
-    assert mutate.url.path.endswith("/channels/T1")
-
-
 async def test_thread_ops_return_false_on_gone_target():
     """A janitor sweeping an already-deleted thread is a silent no-op."""
-    for op in ("close_thread", "lock_thread", "reopen_thread", "delete_thread"):
+    for op in ("close_thread", "reopen_thread"):
         requests: list[httpx.Request] = []
         actor = _thread_actor(requests, get_status=404)
         assert await getattr(actor, op)("T1") is False
@@ -341,12 +193,12 @@ async def test_thread_ops_raise_on_non_404_error():
         with pytest.raises(AdminActionError):
             await _thread_actor([], mutate_status=status).close_thread("T1")
         with pytest.raises(AdminActionError):
-            await _thread_actor([], mutate_status=status).delete_thread("T1")
+            await _thread_actor([], mutate_status=status).reopen_thread("T1")
 
 
 async def test_thread_ops_reject_non_thread_channel():
     """DELETE /channels/{id} on a text channel would delete it wholesale."""
-    for op in ("close_thread", "lock_thread", "reopen_thread", "delete_thread"):
+    for op in ("close_thread", "reopen_thread"):
         requests: list[httpx.Request] = []
         actor = _thread_actor(requests, channel_payload={"type": 0, "guild_id": "G1"})
         with pytest.raises(AdminActionError, match="not a thread"):
@@ -358,20 +210,20 @@ async def test_thread_ops_reject_thread_outside_guild():
     requests: list[httpx.Request] = []
     actor = _thread_actor(requests, channel_payload={"type": 11, "guild_id": "G2"})
     with pytest.raises(AdminActionError, match="outside guild"):
-        await actor.delete_thread("T1")
+        await actor.close_thread("T1")
     assert [r.method for r in requests] == ["GET"]
 
 
 async def test_thread_verification_cached_across_ops():
-    """A close-then-lock sweep fetches the channel once, not per mutation."""
+    """A close-then-reopen sweep fetches the channel once, not per mutation."""
     requests: list[httpx.Request] = []
     actor = _thread_actor(requests)
     await actor.close_thread("T1")
-    await actor.lock_thread("T1")
+    await actor.reopen_thread("T1")
     assert [r.method for r in requests] == ["GET", "PATCH", "PATCH"]
 
 
-# -- role mutation (add_role / remove_role) + ban purge window (E2) --
+# -- role mutation (add_role / remove_role) --
 
 
 MANAGE_MESSAGES = 1 << 13
@@ -517,125 +369,6 @@ async def test_add_role_encodes_audit_reason():
     assert requests[0].headers["X-Audit-Log-Reason"] == "sus%20%E2%80%94%20telegram"
 
 
-async def test_ban_user_sends_delete_message_seconds_body():
-    requests: list[httpx.Request] = []
-    await _actor(requests).ban_user(
-        "U1", reason="bot heuristic", delete_message_seconds=3600
-    )
-    request = requests[0]
-    assert request.method == "PUT"
-    assert request.url.path.endswith("/guilds/G1/bans/U1")
-    assert json.loads(request.content) == {"delete_message_seconds": 3600}
-
-
-async def test_ban_user_defaults_delete_message_seconds_zero():
-    requests: list[httpx.Request] = []
-    await _actor(requests).ban_user("U1")
-    assert json.loads(requests[0].content) == {"delete_message_seconds": 0}
-
-
-# -- delete_webhook ---------------------------------------------------------
-
-
-def _webhook_actor(
-    requests: list[httpx.Request], status_code: int = 204
-) -> AdminActor:
-    def handle(request: httpx.Request) -> httpx.Response:
-        requests.append(request)
-        return httpx.Response(status_code)
-
-    return AdminActor(
-        bot_token="t",
-        guild_id="G1",
-        staff_exempt_role_ids=(),
-        transport=httpx.MockTransport(handle),
-    )
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://discord.com/api/webhooks/123456789/abcDEF-_token",
-        "https://canary.discord.com/api/webhooks/123456789/abcDEF-_token",
-        "https://ptb.discord.com/api/webhooks/123456789/abcDEF-_token",
-        "https://discordapp.com/api/webhooks/123456789/abcDEF-_token",
-    ],
-)
-async def test_delete_webhook_accepts_valid_discord_url_returns_true_on_204(url):
-    requests: list[httpx.Request] = []
-    result = await _webhook_actor(requests).delete_webhook(url)
-    assert result is True
-    request = requests[0]
-    assert request.method == "DELETE"
-    # Deleted by id/token regardless of which Discord host variant was supplied.
-    assert request.url.path.endswith("/webhooks/123456789/abcDEF-_token")
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "discord.com/api/webhooks/123456789/abcDEF-_token",  # pasted without a scheme
-        "HTTPS://discord.com/api/webhooks/123456789/abcDEF-_token",  # uppercase scheme
-        "https://DISCORD.com/api/webhooks/123456789/abcDEF-_token",  # uppercase host
-        # ?wait=true is what Discord's own docs emit, so it is the realistic leak shape.
-        "https://discord.com/api/webhooks/123456789/abcDEF-_token?wait=true",
-        "https://discord.com/api/webhooks/123456789/abcDEF-_token#frag",
-    ],
-)
-async def test_delete_webhook_accepts_the_shapes_leaks_actually_arrive_in(url):
-    """Normalization must cover the spellings a leaked webhook is pasted in.
-
-    These all refused to delete while this module carried its own anchored regex
-    without normalization — the leaked webhook stayed live.
-    """
-    requests: list[httpx.Request] = []
-    result = await _webhook_actor(requests).delete_webhook(url)
-    assert result is True
-    assert requests[0].url.path.endswith("/webhooks/123456789/abcDEF-_token")
-
-
-@pytest.mark.parametrize(
-    "url",
-    [
-        "https://evil.example.com/api/webhooks/1/token",
-        # Case-varied lookalike: normalization lowercases the host, so the anchor
-        # must still reject it rather than letting the casing disguise the domain.
-        "https://DiScOrD.cOm.EvIl.CoM/api/webhooks/1/token",
-        "HTTP://discord.com/api/webhooks/123/token",  # explicit http is never upgraded
-        "https://cdn.discord.com/api/webhooks/1/token",  # wrong Discord subdomain
-        "https://discord.com/api/webhooks/123/token/extra",  # trailing path
-        "https://discord.com/api/webhooks/notanid/token",  # non-numeric id
-        "https://discord.com/api/webhooks/123456789",  # missing token
-        "https://discord.com/api/webhooks/123/../../users/@me",  # traversal
-        "http://discord.com/api/webhooks/123/token",  # not https
-        "not-a-url",
-        "https://discord.com.evil.com/api/webhooks/1/token",
-    ],
-)
-async def test_delete_webhook_rejects_non_discord_host_raises_admin_action_error(url):
-    requests: list[httpx.Request] = []
-    with pytest.raises(AdminActionError):
-        await _webhook_actor(requests).delete_webhook(url)
-    # A rejected URL issues NO request — never an arbitrary-host DELETE.
-    assert requests == []
-
-
-async def test_delete_webhook_returns_false_on_404():
-    requests: list[httpx.Request] = []
-    result = await _webhook_actor(requests, status_code=404).delete_webhook(
-        "https://discord.com/api/webhooks/123456789/tok"
-    )
-    assert result is False
-
-
-async def test_delete_webhook_reraises_on_other_error():
-    requests: list[httpx.Request] = []
-    with pytest.raises(AdminActionError):
-        await _webhook_actor(requests, status_code=403).delete_webhook(
-            "https://discord.com/api/webhooks/123456789/tok"
-        )
-
-
 # -- get_member_info / search_guild_members ---------------------------------
 
 _ROLES = [
@@ -777,86 +510,3 @@ async def test_search_guild_members_query_over_fetches_window():
     # Always over-fetch Discord's 100 window, regardless of the caller's limit.
     assert search.url.params["limit"] == "100"
     assert search.url.params["query"] == "alice"
-
-
-# -- short-term event log: what the bot's account did for a handler ----------
-
-
-async def test_ban_is_written_to_the_event_log(recorded_events):
-    await _actor([]).ban_user("U1", reason="scam")
-
-    assert len(recorded_events) == 1
-    event = recorded_events[0]
-    assert event.kind == "mod_action"
-    assert event.guild_id == "G1"
-    assert event.action == "ban"
-    assert event.target_user_id == "U1"
-    assert event.reason == "scam"
-    assert event.source == "handler"
-
-
-async def test_timeout_records_its_duration(recorded_events):
-    await _actor([]).timeout_user("U1", duration_seconds=900)
-
-    assert recorded_events[0].action == "timeout"
-    assert recorded_events[0].duration_seconds == 900
-
-
-async def test_remove_timeout_records_an_untimeout(recorded_events):
-    actor = _actor([])
-    await actor.timeout_user("U1", duration_seconds=900)
-    await actor.remove_timeout("U1")
-
-    assert [event.action for event in recorded_events] == ["timeout", "untimeout"]
-    assert recorded_events[1].target_user_id == "U1"
-
-
-async def test_kick_and_delete_are_written_to_the_event_log(recorded_events):
-    await _actor([]).delete_message("C1", "M1")
-    await _actor([]).kick_user("U1")
-
-    assert [event.action for event in recorded_events] == ["delete", "kick"]
-    assert recorded_events[0].channel_id == "C1"
-
-
-async def test_a_no_op_against_a_departed_member_is_never_remembered(recorded_events):
-    """Nothing happened, so the bot has nothing to remember doing."""
-    assert "already absent" in await _actor([], status_code=404).ban_user("U1")
-    assert "already absent" in await _actor([]).kick_user("U2")
-    assert "already absent" in await _actor([]).remove_timeout("U2")
-    assert "already deleted" in await _actor([]).delete_message("C1", "M2")
-
-    assert recorded_events == []
-
-
-# -- the warn's audit row: who it names ------------------------------------------
-
-
-class _LookupActor(AdminActor):
-    def __init__(self, error: Exception | None = None, **kwargs):
-        super().__init__(bot_token="t", guild_id="G1", **kwargs)
-        self._error = error
-
-    async def get_member_info(self, user_id: str) -> dict:
-        if self._error is not None:
-            raise self._error
-        return {"username": "zed"}
-
-
-async def test_username_comes_from_discord_for_the_audit_row():
-    assert await _LookupActor()._resolve_username("U1") == "zed"
-
-
-async def test_a_discord_lookup_failure_degrades_to_the_raw_id():
-    actor = _LookupActor(error=AdminActionError("boom"))
-    assert await actor._resolve_username("U1") == "U1"
-
-
-async def test_a_discord_transport_failure_degrades_to_the_raw_id():
-    actor = _LookupActor(error=httpx.ConnectError("discord unreachable"))
-    assert await actor._resolve_username("U1") == "U1"
-
-
-async def test_a_programming_error_in_the_lookup_is_not_swallowed():
-    with pytest.raises(TypeError):
-        await _LookupActor(error=TypeError("bad signature"))._resolve_username("U1")

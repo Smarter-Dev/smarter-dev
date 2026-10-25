@@ -53,21 +53,6 @@ _recurring_chain = RECURRING_CHAINS["admin"]
 _CREATED_BY_EXTENSION = "extension"
 _TIME_TRIGGERS = ("schedule", "timer")
 
-#: Refusal for reconfiguring or updating an install of a template that moved
-#: into the moderation system; it can still be disabled or uninstalled.
-RETIRED_CONFIG_REFUSAL = (
-    "This extension has moved into the moderation system, so its config can "
-    "no longer be changed. You can still disable or uninstall it."
-)
-
-
-#: Refusal for enabling an install of such a template again.
-RETIRED_ENABLE_REFUSAL = (
-    "This extension has moved into the moderation system, so it can no longer "
-    "be enabled. You can still uninstall it."
-)
-
-
 #: Refusal for rendering Disboard's handler while the moderation coordinator
 #: owns the guild: a fresh render restores the bump-channel restriction the
 #: cutover moved into the coordinator, and both would delete chatter.
@@ -133,8 +118,6 @@ async def install_extension(
     """Materialise a fresh install: the install row plus one handler row each."""
     loaded = _get_loaded(slug)
     manifest = loaded.manifest
-    if manifest.moved_to_moderation:
-        raise ExtensionInstallError(manifest.moved_to_moderation)
     await _refuse_disboard_under_coordinator(session, guild_id, slug)
     cleaned = _validate(manifest, raw_config)
     rendered = _render(manifest, cleaned, loaded.scripts)
@@ -186,9 +169,6 @@ async def edit_extension_config(
     catalog version — the registry only holds the newest templates)."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
-    # The refusal first: a config error on a template that can no longer be
-    # configured at all would point the admin the wrong way.
-    _refuse_retired(loaded)
     cleaned = _validate(loaded.manifest, raw_config)
     return await _apply(session, install, loaded, cleaned)
 
@@ -202,7 +182,6 @@ async def update_extension(
     newer schema dropped is discarded rather than blocking the update."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
-    _refuse_retired(loaded)
     try:
         cleaned = validate_stored_config(loaded.manifest, install.config)
     except RenderError as exc:
@@ -216,17 +195,8 @@ async def update_extension(
 async def set_extension_enabled(
     session: AsyncSession, *, guild_id: str, slug: str, enabled: bool
 ) -> ExtensionInstall:
-    """Flip the install and every owned row's ``enabled``; cancel/re-arm schedules.
-
-    A template that moved into the moderation system can be disabled but not
-    enabled again: enabling would re-arm its frozen punisher next to the
-    coordinator that replaced it.
-    """
+    """Flip the install and every owned row's ``enabled``; cancel/re-arm schedules."""
     install = await _locked_install(session, guild_id, slug)
-    if enabled:
-        loaded = _get_loaded(slug)
-        if loaded.manifest.moved_to_moderation:
-            raise ExtensionInstallError(RETIRED_ENABLE_REFUSAL)
     install.enabled = enabled
     for row in await _owned_rows(session, install):
         row.enabled = enabled
@@ -264,9 +234,6 @@ async def _apply(
     cleaned: dict,
 ) -> ExtensionInstall:
     """Render + reconcile rows for a new config, then advance the install."""
-    # Re-rendering would rewrite a frozen punisher (new keywords, a harsher
-    # allowed action) past the handler API's freeze.
-    _refuse_retired(loaded)
     await _refuse_disboard_under_coordinator(
         session, install.guild_id, install.extension_slug
     )
@@ -472,11 +439,6 @@ async def _refuse_disboard_under_coordinator(
     ).scalar_one_or_none()
     if owner == "coordinator":
         raise ExtensionInstallError(DISBOARD_COORDINATOR_REFUSAL)
-
-
-def _refuse_retired(loaded: LoadedExtension) -> None:
-    if loaded.manifest.moved_to_moderation:
-        raise ExtensionInstallError(RETIRED_CONFIG_REFUSAL)
 
 
 def _get_loaded(slug: str) -> LoadedExtension:

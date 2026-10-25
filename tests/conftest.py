@@ -67,10 +67,10 @@ def _dummy_openrouter_key(monkeypatch):
 def _admin_actor_targets_are_members(request, monkeypatch):
     """Clear every AdminActor target through the staff-protection check.
 
-    The check reads the member, the guild and its channels over REST before a
-    ban, kick, timeout, hold, warn or member-message delete. Tests written
-    against a transport that answers only the action call would otherwise see
-    every target refused. The rule itself is tested over the real REST path in
+    The check reads the member, the guild and its channels over REST whenever
+    the worker's moderation gateway asks it. Tests written against a transport
+    that answers only the action call would otherwise see every target
+    refused. The rule itself is tested over the real REST path in
     modules that set ``REAL_STAFF_PROTECTION = True``, which skips this.
     """
     if getattr(request.module, "REAL_STAFF_PROTECTION", False):

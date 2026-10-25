@@ -8,7 +8,7 @@ that skipped a window would quietly widen every cap.
 
 This used to live inline in ``api_native/handlers.py``'s ``dispatch_event``, so
 the ONLY way to fire a trigger was an HTTP POST from the bot. The worker needs
-it too: a handler-issued ``warn_user`` records a ``ModerationAction`` and must
+it too: the worker's moderation gateway records a ``ModerationAction`` and must
 fire the synthetic ``mod_action`` trigger exactly like ``/warn`` does, from
 inside the fire job with no HTTP round trip. ``dispatch_event`` is now a thin
 wrapper over :func:`dispatch_handler_event`.
@@ -107,7 +107,7 @@ def build_mod_action_context(action: ModerationAction) -> dict[str, Any]:
 
     Lives here, next to the fan-out, because BOTH writers need it: the bot's
     ``mod_action_dispatch`` (for /warn, /timeout, the AI tools, the audit-log
-    backfill) and the worker's ``warn_user`` recorder. The web package must never
+    backfill) and the worker's moderation gateway. The web package must never
     import from the bot, so the shared shape belongs on the web side.
     """
     return {

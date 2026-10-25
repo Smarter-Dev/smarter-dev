@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
 from dataclasses import dataclass, field
 
 import pytest
 
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
+from smarter_dev.web.handler_moderation_policy import REMOVED_FUNCTIONS
 from smarter_dev.web.handler_runtime import run_handler_script
-from smarter_dev.web.moderation_gateway import Outcome
-from smarter_dev.web.moderation_gateway import Reservation
 
 
 @dataclass
@@ -126,55 +124,26 @@ class _FakeActor:
     calls: list = field(default_factory=list)
     # Thread ids that model a gone target (404): the mutation returns False.
     gone: set = field(default_factory=set)
-    # User ids the staff-protection check refuses.
-    protected: set = field(default_factory=set)
+    # Message ids a member posted: delete_bot_message refuses them.
+    member_messages: set = field(default_factory=set)
+    # What report_for_review returns (the report's message id).
+    report_id: str = "R-MSG"
 
-    # Warns the gateway recorded, and why it would skip one (None: it goes).
-    warns: list = field(default_factory=list)
-    warn_skip: str | None = None
+    async def delete_bot_message(self, channel_id, message_id):
+        self.calls.append(("delete", channel_id, message_id))
+        if message_id in self.member_messages:
+            return f"not deleted: message {message_id} was posted by a member"
+        return f"deleted message {message_id}"
 
-    async def staff_refusal(self, user_id, *, is_bot=None):
-        return "holds a staff role" if str(user_id) in self.protected else None
-
-    @contextlib.asynccontextmanager
-    async def reserve_warn(self, user_id, reason, channel_id):
-        slot = Reservation(
-            go=self.warn_skip is None,
-            outcome=None
-            if self.warn_skip is None
-            else Outcome(kind="warn", target_user_id=user_id, state="skipped", detail=self.warn_skip),
-        )
-        yield slot
-        if slot._settle and slot._settle[0] == "confirmed":
-            self.warns.append((user_id, reason, channel_id))
-
-    async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
-        self.calls.append(("ban", user_id, reason, delete_message_seconds))
-        return f"banned {user_id}"
-
-    async def kick_user(self, user_id):
-        self.calls.append(("kick", user_id)); return f"kicked {user_id}"
-
-    async def timeout_user(self, user_id, duration_seconds=600):
-        self.calls.append(("timeout", user_id, duration_seconds)); return "ok"
-
-    async def remove_timeout(self, user_id):
-        self.calls.append(("remove_timeout", user_id)); return "ok"
-
-    async def delete_message(self, channel_id, message_id):
-        self.calls.append(("delete", channel_id, message_id)); return "ok"
+    async def report_for_review(self, user_id, summary, *, report_channel_id):
+        self.calls.append(("report", user_id, summary, report_channel_id))
+        return self.report_id if report_channel_id else ""
 
     async def close_thread(self, thread_id):
         self.calls.append(("close", thread_id)); return thread_id not in self.gone
 
-    async def lock_thread(self, thread_id):
-        self.calls.append(("lock", thread_id)); return thread_id not in self.gone
-
     async def reopen_thread(self, thread_id):
         self.calls.append(("reopen", thread_id)); return thread_id not in self.gone
-
-    async def delete_thread(self, thread_id):
-        self.calls.append(("delete_thread", thread_id)); return thread_id not in self.gone
 
     # Roles that confer staff standing are refused (role_refusal); none of
     # this fake's roles do unless a test lists them here.
@@ -188,13 +157,6 @@ class _FakeActor:
     async def remove_role(self, user_id, role_id, reason=None):
         self.calls.append(("remove_role", user_id, role_id, reason))
         return user_id not in self.gone
-
-    # webhook_result: what delete_webhook returns (True killed / False 404).
-    webhook_result: bool = True
-
-    async def delete_webhook(self, webhook_url):
-        self.calls.append(("delete_webhook", webhook_url))
-        return self.webhook_result
 
     # member_info / search_result: canned mod-audit REST reads.
     member_info: dict = field(default_factory=lambda: {"user_id": "U1", "in_guild": True})
@@ -215,8 +177,8 @@ async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
     timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
-    mod_action_reader=None, warn_counter=None, rules_reader=None, claimer=None,
-    recent_messages_reader=None,
+    mod_action_reader=None, report_channel_reader=None, rules_reader=None,
+    claimer=None, recent_messages_reader=None, context=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
@@ -225,8 +187,8 @@ async def _run(
         kwargs["dm_user_limiter"] = dm_user_limiter
     if mod_action_reader is not None:
         kwargs["mod_action_reader"] = mod_action_reader
-    if warn_counter is not None:
-        kwargs["warn_counter"] = warn_counter
+    if report_channel_reader is not None:
+        kwargs["report_channel_reader"] = report_channel_reader
     if rules_reader is not None:
         kwargs["rules_reader"] = rules_reader
     if recent_messages_reader is not None:
@@ -249,7 +211,8 @@ async def _run(
         kwargs["handler_id"] = handler_id
     result = await run_handler_script(
         script,
-        {
+        context
+        or {
             "trigger_type": "message",
             "message_content": "hi",
             "message_id": "M1",
@@ -379,9 +342,21 @@ from smarter_dev.web.handler_budget import admin_budget
 
 
 async def test_standard_handler_has_no_admin_functions():
-    # No actor -> ban_user is not defined in the sandbox -> NameError -> error.
-    result, _, _ = await _run('await ban_user("U1")\n')
+    # No actor -> delete_message is not defined in the sandbox -> NameError.
+    result, _, _ = await _run('await delete_message("M1")\n')
     assert result.outcome == "error"
+
+
+@pytest.mark.parametrize("name", sorted(REMOVED_FUNCTIONS))
+async def test_no_tier_has_a_removed_sanction_function(name):
+    """#242: the sanctions are gone from the runtime, admin tier included."""
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        f'await {name}("U1")\n', budget=admin_budget("message"), actor=actor
+    )
+    assert result.outcome == "error"
+    assert (result.error or "").startswith("runtime: NameError")
+    assert actor.calls == []
 
 
 async def test_standard_handler_cannot_send_to_other_channel():
@@ -426,23 +401,69 @@ async def test_standard_handler_cannot_react_cross_channel():
     assert emitter.reactions == []
 
 
-async def test_admin_handler_moderation_metered():
+async def test_admin_delete_message_is_metered_and_reads_the_message():
     actor = _FakeActor()
     script = (
-        'await delete_message(context["message_id"], "C1")\n'
-        'await ban_user(context["author_id"], "scam")\n'
-        'await send_message("banned a scammer", "MODCHAT")\n'
+        'out = await delete_message(context["message_id"], "C1")\n'
+        'await send_message(out, "MODCHAT")\n'
     )
-    result, emitter, _ = await _run(
-        script, budget=admin_budget("message"), actor=actor,
-        # context needs message_id/author_id
+    result, emitter, _ = await _run(script, budget=admin_budget("message"), actor=actor)
+    assert result.outcome == "ok", result.error
+    assert actor.calls == [("delete", "C1", "M1")]
+    # One mod action for the delete, one discord read for the author lookup.
+    assert result.usage["mod_actions"] == 1
+    assert result.usage["discord_reads"] == 1
+    assert ("MODCHAT", "deleted message M1") in emitter.messages  # admin cross-channel ok
+
+
+async def test_admin_delete_message_defaults_to_the_home_channel():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        'await delete_message("M7")\n', budget=admin_budget("message"), actor=actor
     )
     assert result.outcome == "ok", result.error
-    assert ("delete", "C1", "hi") not in actor.calls  # message_id is from context
-    kinds = [c[0] for c in actor.calls]
-    assert "delete" in kinds and "ban" in kinds
-    assert result.usage["mod_actions"] == 2
-    assert ("MODCHAT", "banned a scammer") in emitter.messages  # admin cross-channel ok
+    assert actor.calls == [("delete", "C1", "M7")]
+
+
+async def test_admin_delete_message_refuses_a_members_message_without_erroring():
+    """#242: a member's message is the coordinator's; the fire carries on."""
+    actor = _FakeActor(member_messages={"M1"})
+    script = (
+        'out = await delete_message(context["message_id"], "C1")\n'
+        'await send_message(out)\n'
+    )
+    result, emitter, _ = await _run(script, budget=admin_budget("message"), actor=actor)
+    assert result.outcome == "ok", result.error
+    assert emitter.messages == [
+        ("C1", "not deleted: message M1 was posted by a member")
+    ]
+
+
+async def test_delete_message_budget_is_spent_before_the_actor_call():
+    # A mod_action-triggered fire runs with max_mod_actions=0: the delete
+    # breaches before anything reaches Discord.
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        'await delete_message("M1")\n',
+        budget=HandlerBudget(max_mod_actions=0, max_messages=5),
+        actor=actor,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "mod_actions"
+    assert actor.calls == []
+
+
+async def test_delete_message_shares_the_discord_reads_pool():
+    actor = _FakeActor()
+    script = "for i in range(3):\n    await delete_message(str(i))\n"
+    result, _, _ = await _run(
+        script,
+        budget=HandlerBudget(max_mod_actions=5, max_discord_reads=2, max_messages=5),
+        actor=actor,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "discord_reads"
+    assert len(actor.calls) == 2
 
 
 async def test_admin_send_message_forwards_ping_role_id():
@@ -465,43 +486,15 @@ async def test_standard_send_message_drops_ping_role_id():
 
 async def test_admin_mod_action_cap():
     actor = _FakeActor()
-    script = "for i in range(5):\n    await kick_user(str(i))\n"
+    script = "for i in range(5):\n    await delete_message(str(i))\n"
     result, _, _ = await _run(
-        script, budget=HandlerBudget(max_mod_actions=3, max_messages=5), actor=actor
-    )
-    assert result.outcome == "cap_exceeded"
-    assert result.cap == "mod_actions"
-    assert len(actor.calls) == 3
-
-
-async def test_standard_handler_has_no_remove_timeout():
-    # Admin-only, like the timeout it reverses: no actor -> NameError -> error.
-    result, _, _ = await _run('await remove_timeout("U1")\n')
-    assert result.outcome == "error"
-
-
-async def test_admin_remove_timeout_spends_mod_action():
-    actor = _FakeActor()
-    result, _, _ = await _run(
-        'await remove_timeout("U1")\n', budget=admin_budget("message"), actor=actor
-    )
-    assert result.outcome == "ok", result.error
-    assert actor.calls == [("remove_timeout", "U1")]
-    assert result.usage["mod_actions"] == 1
-
-
-async def test_remove_timeout_budget_is_spent_before_the_actor_call():
-    # A mod_action-triggered fire runs with max_mod_actions=0, so lifting a
-    # timeout must breach BEFORE the REST call — the same rail as timeout_user.
-    actor = _FakeActor()
-    result, _, _ = await _run(
-        'await remove_timeout("U1")\n',
-        budget=HandlerBudget(max_mod_actions=0, max_messages=5),
+        script,
+        budget=HandlerBudget(max_mod_actions=3, max_messages=5, max_discord_reads=5),
         actor=actor,
     )
     assert result.outcome == "cap_exceeded"
     assert result.cap == "mod_actions"
-    assert actor.calls == []
+    assert len(actor.calls) == 3
 
 
 async def test_random_globals_available_without_import():
@@ -846,18 +839,18 @@ async def test_admin_close_thread_spends_thread_op_and_guild_window():
     assert (guild_thread_ops_key("G1"), GUILD_THREAD_OPS_PER_MIN, None) in limiter.calls
 
 
-async def test_admin_lock_reopen_thread_metered():
+async def test_admin_close_reopen_thread_metered():
     actor = _FakeActor()
-    script = 'await lock_thread("T1")\nawait reopen_thread("T2")\n'
+    script = 'await close_thread("T1")\nawait reopen_thread("T2")\n'
     result, _, _ = await _run(script, budget=admin_budget("message"), actor=actor)
     assert result.outcome == "ok", result.error
-    assert ("lock", "T1") in actor.calls and ("reopen", "T2") in actor.calls
+    assert ("close", "T1") in actor.calls and ("reopen", "T2") in actor.calls
     assert result.usage["thread_ops"] == 2
 
 
 async def test_admin_thread_op_budget_cap_breaches():
     actor = _FakeActor()
-    script = "for i in range(5):\n    await delete_thread(str(i))\n"
+    script = "for i in range(5):\n    await close_thread(str(i))\n"
     result, _, _ = await _run(
         script, budget=HandlerBudget(max_thread_ops=2), actor=actor
     )
@@ -879,11 +872,11 @@ async def test_admin_thread_op_guild_window_denied_fails_loud():
     assert actor.calls == []  # window denied before the REST mutation
 
 
-async def test_admin_delete_gone_thread_returns_false_without_error():
+async def test_admin_close_gone_thread_returns_false_without_error():
     actor = _FakeActor(gone={"T1"})
     script = (
-        'gone = await delete_thread("T1")\n'
-        'await send_message("noop" if gone is False else "deleted")\n'
+        'gone = await close_thread("T1")\n'
+        'await send_message("noop" if gone is False else "closed")\n'
     )
     result, emitter, _ = await _run(
         script, budget=admin_budget("message"), actor=actor, emitter=None
@@ -1121,7 +1114,7 @@ async def test_rename_channel_third_in_window_raises_channel_renames_cap():
     assert len(emitter.renames) == 2
 
 
-# -- admin role mutation (add_role / remove_role) + ban purge window (E2) --
+# -- admin role mutation (add_role / remove_role) --
 
 from smarter_dev.web.handler_caps import guild_role_changes_key  # noqa: E402
 
@@ -1268,14 +1261,6 @@ async def test_add_role_budget_cap_breach():
     assert result.outcome == "cap_exceeded"
     assert result.cap == "role_changes"
     assert result.usage["role_changes"] == 2
-
-
-async def test_ban_user_delete_message_seconds_passthrough():
-    actor = _FakeActor()
-    script = 'await ban_user(context["author_id"], "bot", 3600)\n'
-    result, _, _ = await _run(script, budget=admin_budget("message"), actor=actor)
-    assert result.outcome == "ok", result.error
-    assert ("ban", "U1", "bot", 3600) in actor.calls
 
 
 # -- schedule_timer (persisted one-shot self re-arm, E3) -----------------------
@@ -1534,25 +1519,7 @@ async def test_send_dm_returns_false_does_not_raise():
     assert emitter.messages == []  # the delivered branch did not run
 
 
-# -- mod-audit surface: delete_webhook + reads (admin only) --------------------
-
-
-async def test_delete_webhook_spends_mod_action_and_present_only_for_admin():
-    actor = _FakeActor()
-    script = "r = await delete_webhook('https://discord.com/api/webhooks/1/tok')\n"
-    result, _, _ = await _run(
-        script, budget=admin_budget("message"), actor=actor
-    )
-    assert result.outcome == "ok"
-    assert ("delete_webhook", "https://discord.com/api/webhooks/1/tok") in actor.calls
-    assert result.usage["mod_actions"] == 1
-
-    # A standard (no-actor) handler has no delete_webhook function at all.
-    standard = await _run(
-        "await delete_webhook('https://discord.com/api/webhooks/1/tok')\n"
-    )
-    assert standard[0].outcome == "error"
-    assert (standard[0].error or "").startswith("runtime: NameError: [message content]")
+# -- mod-audit reads (admin only) ---------------------------------------------
 
 
 async def test_read_functions_admin_only_and_spend_lookup():
@@ -1760,192 +1727,6 @@ async def test_get_role_members_denied_when_budget_zero():
     assert result.cap == "discord_reads"
     assert result.usage["discord_reads"] == 0
     assert emitter.role_member_calls == []  # denied before the emitter is reached
-
-
-# -- warn_user (admin tier: notice + best-effort DM + audit row) -------------
-
-
-def _counter(warn_count=1):
-    """A warn_counter stand-in: the member's authoritative warn total."""
-
-    async def counter(user_id):
-        return warn_count
-
-    return counter
-
-
-async def test_warn_user_posts_notice_dms_and_records():
-    actor = _FakeActor()
-    script = (
-        "r = await warn_user('U9', 'spamming links')\n"
-        "await send_message(f\"{r['message_id']}|{r['dm_sent']}|{r['warn_count']}\")\n"
-    )
-    result, emitter, _ = await _run(
-        script,
-        budget=admin_budget("message"),
-        actor=actor,
-        warn_counter=_counter(3),
-    )
-    assert result.outcome == "ok", result.error
-    # The notice lands in the HOME channel; the gateway records the same one.
-    assert emitter.messages[0][0] == "C1"
-    assert "spamming links" in emitter.messages[0][1]
-    assert emitter.dm_sends[0][0] == "U9"
-    assert actor.warns == [("U9", "spamming links", "C1")]
-    # Both the notice and the DM draw on the shared per-fire message pool.
-    assert result.usage["messages_sent"] == 3  # notice + DM + the echo above
-    assert result.usage["mod_actions"] == 1
-    assert emitter.messages[-1][1] == "msg1|True|3"
-
-
-async def test_warn_user_on_a_protected_member_posts_records_and_dms_nothing():
-    actor = _FakeActor(protected={"U9"})
-    script = (
-        "r = await warn_user('U9', 'spamming links')\n"
-        "await send_message(r['refused'])\n"
-    )
-    result, emitter, _ = await _run(
-        script,
-        budget=admin_budget("message"),
-        actor=actor,
-        warn_counter=_counter(3),
-    )
-    assert result.outcome == "ok", result.error
-    assert actor.warns == []
-    assert emitter.dm_sends == []
-    # Only the script's own echo went out, carrying the reason.
-    assert [m[1] for m in emitter.messages] == ["U9 is protected (holds a staff role)"]
-
-
-async def test_warn_user_the_incident_already_covers_posts_records_and_dms_nothing():
-    # A member the incident already timed out or banned is not warned too.
-    actor = _FakeActor(warn_skip="weaker than the ban already in this incident")
-    script = (
-        "r = await warn_user('U9', 'spamming links')\n"
-        "await send_message(r['skipped'] + '|' + str(r['warn_count']))\n"
-    )
-    result, emitter, _ = await _run(
-        script,
-        budget=admin_budget("message"),
-        actor=actor,
-        warn_counter=_counter(2),
-    )
-    assert result.outcome == "ok", result.error
-    assert actor.warns == []
-    assert emitter.dm_sends == []
-    assert [m[1] for m in emitter.messages] == [
-        "weaker than the ban already in this incident|2"
-    ]
-
-
-async def test_warn_user_spends_mod_action_before_any_side_effect():
-    # The loop rail: a mod_action-triggered fire runs with max_mod_actions=0, so
-    # the spend must raise BEFORE the notice, the DM, or the audit row.
-    actor = _FakeActor()
-    result, emitter, _ = await _run(
-        "await warn_user('U9', 'nope')\n",
-        budget=HandlerBudget(max_mod_actions=0, max_messages=5),
-        actor=actor,
-        warn_counter=_counter(),
-    )
-    assert result.outcome == "cap_exceeded"
-    assert result.cap == "mod_actions"
-    assert emitter.messages == []
-    assert emitter.dm_sends == []
-    assert actor.warns == []
-
-
-async def test_warn_user_rejects_out_of_scope_channel():
-    # Same rail rename_channel uses: an EXPLICIT channel outside channel_ids is
-    # refused, and nothing is emitted or recorded.
-    actor = _FakeActor()
-    result, emitter, _ = await _run(
-        "await warn_user('U9', 'r', 'C-OTHER')\n",
-        budget=admin_budget("message"),
-        actor=actor,
-        channel_ids=["C1"],
-        warn_counter=_counter(),
-    )
-    assert result.outcome == "cap_exceeded"
-    assert result.cap == "out_of_scope_channel"
-    assert emitter.messages == []
-    assert actor.warns == []
-
-
-async def test_warn_user_explicit_in_scope_channel_is_used_for_notice_and_row():
-    actor = _FakeActor()
-    result, emitter, _ = await _run(
-        "await warn_user('U9', 'r', 'C2')\n",
-        budget=admin_budget("message"),
-        actor=actor,
-        channel_ids=["C1", "C2"],
-        warn_counter=_counter(),
-    )
-    assert result.outcome == "ok", result.error
-    assert emitter.messages[0][0] == "C2"
-    assert actor.warns == [("U9", "r", "C2")]
-
-
-async def test_warn_user_closed_dms_reported_not_errored():
-    # A False from send_dm (closed DMs / no mutual guild) is an expected outcome:
-    # dm_sent=False, and the warn still posts and still records.
-    actor = _FakeActor()
-    emitter = _FakeEmitter(dm_result=False)
-    script = (
-        "r = await warn_user('U9', 'r')\n"
-        "await send_message(str(r['dm_sent']))\n"
-    )
-    result, emitter, _ = await _run(
-        script,
-        budget=admin_budget("message"),
-        actor=actor,
-        emitter=emitter,
-        warn_counter=_counter(),
-    )
-    assert result.outcome == "ok", result.error
-    assert emitter.messages[-1][1] == "False"
-    assert actor.warns == [("U9", "r", "C1")]
-
-
-async def test_warn_user_dm_false_skips_the_dm_entirely():
-    actor = _FakeActor()
-    result, emitter, _ = await _run(
-        "await warn_user('U9', 'r', None, False)\n",
-        budget=admin_budget("message"),
-        actor=actor,
-        warn_counter=_counter(),
-    )
-    assert result.outcome == "ok", result.error
-    assert emitter.dm_sends == []
-    assert result.usage["messages_sent"] == 1  # the notice only
-    assert actor.warns == [("U9", "r", "C1")]
-
-
-async def test_warn_user_records_the_row_before_the_dm_can_breach_a_cap():
-    # The notice is already public once _send_message returns, so the permanent
-    # row must not hang on the DM. Here the message pool runs out ON the DM
-    # (notice = the last allowed message), which is what a real fire hits on the
-    # 11th handler warn in a minute (the global DMs/min window). The fire still
-    # fails — a cap breach is a rail — but the warn is durably recorded, so
-    # /history, list_mod_actions, warn_count and the mod-log fire all see it.
-    actor = _FakeActor()
-    result, emitter, _ = await _run(
-        "await warn_user('U9', 'third strike')\n",
-        budget=HandlerBudget(max_mod_actions=5, max_messages=1),
-        actor=actor,
-        warn_counter=_counter(),
-    )
-    assert result.outcome == "cap_exceeded"
-    assert result.cap == "messages"
-    assert emitter.messages[0][0] == "C1"  # the public notice went out ...
-    assert actor.warns == [("U9", "third strike", "C1")]  # ... and so did the row
-    assert emitter.dm_sends == []
-
-
-async def test_warn_user_not_available_to_standard_handler():
-    result, _, _ = await _run("await warn_user('U9', 'r')\n")
-    assert result.outcome == "error"
-    assert result.error.startswith("runtime: NameError: [message content]")
 
 
 # -- list_rules (admin-tier lookup over the guild's rules document) ----------
@@ -2173,3 +1954,135 @@ async def test_claim_not_configured_errors_loudly():
     # never silently return a value that lets a duplicate action through.
     result, _, _ = await _run('await claim("k", 60)\n')
     assert result.outcome == "error"
+
+
+# -- report_for_review (admin: a review-only incident for the moderators) -------
+
+from smarter_dev.web.handler_caps import (  # noqa: E402
+    MAX_REVIEW_REPORTS_PER_FIRE,
+    REVIEW_REPORT_SUMMARY_MAX_LEN,
+    REVIEW_REPORT_WINDOW_SECONDS,
+    review_report_key,
+)
+
+
+def _report_channel(channel="REPORTS"):
+    async def read():
+        return channel
+
+    return read
+
+
+async def test_report_for_review_reports_through_the_actor_and_returns_its_id():
+    actor = _FakeActor()
+    script = (
+        'r = await report_for_review("900", "  rejoined with history  ")\n'
+        "await memory_set('r', r)\n"
+    )
+    result, emitter, limiter = await _run(
+        script,
+        budget=admin_budget("member_join"),
+        actor=actor,
+        report_channel_reader=_report_channel(),
+    )
+    assert result.outcome == "ok", result.error
+    assert actor.calls == [("report", "900", "rejoined with history", "REPORTS")]
+    assert result.memory == {"r": "R-MSG"}
+    # Nothing posted by the script itself; one upkeep action spent.
+    assert emitter.messages == []
+    assert result.usage["mod_actions"] == 1
+    assert result.usage["messages_sent"] == 0
+    # The per-member window: one report per member per guild per window.
+    assert (
+        review_report_key("G1", "900"),
+        1,
+        REVIEW_REPORT_WINDOW_SECONDS,
+    ) in limiter.calls
+
+
+async def test_report_for_review_with_reporting_off_records_and_returns_empty():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        "await memory_set('r', await report_for_review('900', 'x'))\n",
+        budget=admin_budget("member_join"),
+        actor=actor,
+        report_channel_reader=_report_channel(None),
+    )
+    assert result.outcome == "ok", result.error
+    assert actor.calls == [("report", "900", "x", None)]
+    assert result.memory == {"r": ""}
+
+
+async def test_a_second_report_in_the_window_returns_none_and_records_nothing():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        "await memory_set('r', await report_for_review('900', 'x'))\n",
+        budget=admin_budget("member_join"),
+        actor=actor,
+        limiter=_StubLimiter(allow=False),
+        report_channel_reader=_report_channel(),
+    )
+    assert result.outcome == "ok", result.error
+    assert actor.calls == []
+    assert result.memory == {"r": None}
+
+
+async def test_report_for_review_per_fire_cap():
+    actor = _FakeActor()
+    script = (
+        f"for i in range({MAX_REVIEW_REPORTS_PER_FIRE + 1}):\n"
+        "    await report_for_review(str(100 + i), 'x')\n"
+    )
+    result, _, _ = await _run(
+        script,
+        budget=admin_budget("member_join"),
+        actor=actor,
+        report_channel_reader=_report_channel(),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "review_reports_per_fire"
+    assert len(actor.calls) == MAX_REVIEW_REPORTS_PER_FIRE
+
+
+async def test_a_mod_action_fire_cannot_report_for_review():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        "await report_for_review('900', 'x')\n",
+        budget=admin_budget("mod_action"),
+        actor=actor,
+        report_channel_reader=_report_channel(),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "mod_actions"
+    assert actor.calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        "'not-an-id', 'x'",
+        "'900', ''",
+        "'900', '   '",
+        "'900', 7",
+        f"'900', 'x' * {REVIEW_REPORT_SUMMARY_MAX_LEN + 1}",
+    ],
+)
+async def test_a_bad_report_for_review_call_errors_before_anything_is_spent(args):
+    actor = _FakeActor()
+    # "900" is not all digits: the fake ids above are, the real ones always are.
+    result, _, limiter = await _run(
+        f"await report_for_review({args})\n",
+        budget=admin_budget("member_join"),
+        actor=actor,
+        report_channel_reader=_report_channel(),
+    )
+    assert result.outcome == "error"
+    assert result.usage["mod_actions"] == 0
+    assert actor.calls == []
+    assert limiter.calls == []
+
+
+async def test_report_for_review_is_admin_only():
+    result, _, _ = await _run("await report_for_review('9', 'x')\n")
+    assert result.outcome == "error"
+    assert (result.error or "").startswith("runtime: NameError")

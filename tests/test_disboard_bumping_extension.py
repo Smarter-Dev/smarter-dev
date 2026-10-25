@@ -90,7 +90,7 @@ class _Emitter:
 class _Actor:
     calls: list = field(default_factory=list)
 
-    async def delete_message(self, channel_id, message_id):
+    async def delete_bot_message(self, channel_id, message_id):
         self.calls.append(("delete", channel_id, message_id))
         return "ok"
 

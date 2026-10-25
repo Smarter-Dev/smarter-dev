@@ -48,15 +48,9 @@ _OPAQUE_MIN_LEN = 120
 _BASE64ISH = re.compile(r"^[A-Za-z0-9+/=_-]+$")
 _HEXISH = re.compile(r"^[0-9a-fA-F]+$")
 
-# delete_thread(...) whose first argument opens with a string quote — a
-# hardcoded destructive target. `f"..."` is not matched (the `f` precedes the
-# quote), so dynamic references are left for the judge.
-_DELETE_THREAD_LITERAL = re.compile(r"\bdelete_thread\s*\(\s*['\"]")
-
 # add_role/remove_role(user_id, ROLE_ID): the SECOND argument (the grant target)
-# must be a plain string literal so the role a handler can grant is reviewable —
-# the inverse of the delete_thread rule (which rejects a LITERAL first arg). The
-# user_id (first arg) is expected to be dynamic (context/payload), so only the
+# must be a plain string literal so the role a handler can grant is reviewable.
+# The user_id (first arg) is expected to be dynamic (context/payload), so only the
 # role id is constrained. The first arg is matched non-greedily up to the comma,
 # then the second arg must open with a bare quote — a variable, subscript, or
 # f-string role id (the `f` precedes the quote) fails the match and is rejected.
@@ -100,13 +94,6 @@ def check_static(script: str) -> str | None:
     for token in _BANNED_TOKENS:
         if re.search(rf"\b{re.escape(token)}\b", script):
             return f"script uses banned construct '{token}'"
-
-    # delete_thread is irreversible: its target must come from trigger context or
-    # a list_threads result, never a hardcoded id literal (an unreviewable
-    # destructive target). A quoted first argument is exactly that literal; a
-    # variable, subscript, or f-string reference passes through to the judge.
-    if _DELETE_THREAD_LITERAL.search(script):
-        return "script calls delete_thread() with a hardcoded thread id literal"
 
     # A role grant's target must be a reviewable string-literal role id (the
     # allowlist is stated against literals). A variable/subscript/f-string role

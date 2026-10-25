@@ -1,16 +1,14 @@
-"""``claimed``, ``hold_member`` and ``release_hold`` as a script reaches them.
+"""``claim`` and ``claimed`` as a script reaches them, and the admin fire job.
 
-The runtime tests drive the three functions through ``run_handler_script``
-with the real :class:`MemberHolds` and the real claim functions over one
-Redis. The last two tests run the real fire jobs, so nothing between a
-handler's script and Redis or Discord's member endpoint is stood in for
-except the HTTP transport.
+The runtime tests drive the claim functions through ``run_handler_script``
+with the real claim functions over one Redis. The fire-job tests run the real
+fire jobs, so nothing between a handler's script and Redis or Discord is
+stood in for except the HTTP transport. (Member holds went with the handler
+sanctions, #242.)
 """
 
 from __future__ import annotations
 
-import json
-import math
 from dataclasses import dataclass
 from dataclasses import field
 from functools import partial
@@ -31,14 +29,10 @@ from smarter_dev.web import moderation_policy_store as store
 from smarter_dev.web.admin_actions import AdminActor
 from smarter_dev.web.admin_actions import HandlerFireFacts
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
-from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import MAX_CLAIMS_PER_FIRE
 from smarter_dev.web.handler_caps import claim_handler_key
 from smarter_dev.web.handler_caps import handler_key_claimed
-from smarter_dev.web.handler_holds import HOLD_MAX_SECONDS
-from smarter_dev.web.handler_holds import MemberHolds
-from smarter_dev.web.handler_holds import member_holds_lock_key
 from smarter_dev.web.handler_runtime import run_handler_script
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
 from smarter_dev.web.models import AdminHandler
@@ -64,33 +58,7 @@ class _Limiter:
         return True
 
 
-class _Discord(FakeModerationDiscord):
-    """The guild; notes whether the member's hold lock is held at each write."""
-
-    def __init__(self) -> None:
-        super().__init__(guild_id="G1")
-        self.add_member("U1")
-        self.redis = None
-        self.locked_during: list = []
-        self._writes: list = []
-
-    async def set_timeout(self, guild_id, user_id, until, *, reason):
-        self.locked_during.append(
-            bool(await self.redis.exists(member_holds_lock_key("G1", "U1")))
-        )
-        self._writes.append(
-            ("remove_timeout",)
-            if until is None
-            else ("timeout", math.ceil(until.timestamp() - self.now()))
-        )
-        return await super().set_timeout(guild_id, user_id, until, reason=reason)
-
-    def writes(self) -> list:
-        """Each timeout write as ("timeout", seconds) or ("remove_timeout",)."""
-        return list(self._writes)
-
-
-def _actor(discord: _Discord) -> AdminActor:
+def _actor(discord: FakeModerationDiscord) -> AdminActor:
     return AdminActor(
         bot_token="t",
         guild_id="G1",
@@ -105,20 +73,15 @@ def redis():
     return fakeredis_aioredis.FakeRedis(decode_responses=True)
 
 
-async def _run(script, redis, *, discord=None, budget=None, wired=True):
+async def _run(script, redis, *, budget=None, wired=True):
     """Run ``script`` as an admin fire of handler H1; return (result, said)."""
     emitter = _Emitter()
-    discord = discord or _Discord()
-    discord.redis = redis
-    actor = _actor(discord)
+    actor = _actor(FakeModerationDiscord(guild_id="G1"))
     kwargs = {}
     if wired:
         kwargs = {
             "claimer": partial(claim_handler_key, redis, "H1"),
             "claim_reader": partial(handler_key_claimed, redis, "H1"),
-            "holds": MemberHolds(
-                redis=redis, guild_id="G1", handler_id="H1", actor=actor
-            ),
         }
     result = await run_handler_script(
         script,
@@ -196,113 +159,6 @@ async def test_claimed_not_configured_errors_loudly(redis):
     assert result.outcome == "error"
 
 
-# -- hold_member / release_hold ----------------------------------------------------
-
-
-async def test_a_script_holds_and_releases_a_member(redis):
-    discord = _Discord()
-    script = (
-        'first = await hold_member("U1", "post-a")\n'
-        'again = await hold_member("U1", "post-a", 300)\n'
-        'lifted = await release_hold("U1", "post-a")\n'
-        "await send_message(str([first, again, lifted]))\n"
-    )
-
-    result, said = await _run(script, redis, discord=discord)
-
-    assert result.outcome == "ok", result.error
-    assert said == ["[True, False, True]"]
-    assert discord.writes() == [("timeout", 300), ("remove_timeout",)]
-    # Three calls, three moderation actions: the same price as the timeout
-    # calls they stand in for.
-    assert result.usage["mod_actions"] == 3
-
-
-async def test_hold_and_release_are_refused_to_a_fire_with_no_mod_actions(redis):
-    # A mod_action-triggered fire runs with zero: it can neither hold a member
-    # nor undo a hold in response to a moderation action.
-    discord = _Discord()
-    budget = HandlerBudget(max_mod_actions=0, max_messages=5)
-
-    held, _ = await _run(
-        'await hold_member("U1", "k")\n', redis, discord=discord, budget=budget
-    )
-    released, _ = await _run(
-        'await release_hold("U1", "k")\n', redis, discord=discord, budget=budget
-    )
-
-    assert (held.cap, released.cap) == ("mod_actions", "mod_actions")
-    assert discord.writes() == []
-    assert await redis.keys("hhold:*") == []
-
-
-@pytest.mark.parametrize(
-    "call",
-    [
-        'hold_member("U1", "")',
-        'hold_member("U1", 7)',
-        'hold_member("U1", "k" * 129)',
-        'hold_member("U1", "k", 0)',
-        'hold_member("U1", "k", 2.5)',
-        'hold_member("U1", "k", True)',
-        f'hold_member("U1", "k", {HOLD_MAX_SECONDS + 1})',
-        'release_hold("U1", "")',
-    ],
-)
-async def test_a_bad_hold_call_errors_before_anything_is_spent(redis, call):
-    discord = _Discord()
-
-    result, _ = await _run(f"await {call}\n", redis, discord=discord)
-
-    assert result.outcome == "error"
-    assert result.usage["mod_actions"] == 0
-    assert discord.writes() == []
-
-
-async def test_hold_functions_not_configured_error_loudly(redis):
-    result, _ = await _run('await hold_member("U1", "k")\n', redis, wired=False)
-
-    assert result.outcome == "error"
-
-
-async def test_timeout_user_and_remove_timeout_run_under_the_members_lock(redis):
-    discord = _Discord()
-    script = 'await timeout_user("U1", 600)\nawait remove_timeout("U1")\n'
-
-    result, _ = await _run(script, redis, discord=discord)
-
-    assert result.outcome == "ok", result.error
-    assert discord.writes() == [("timeout", 600), ("remove_timeout",)]
-    assert discord.locked_during == [True, True]
-    assert await redis.exists(member_holds_lock_key("G1", "U1")) == 0
-
-
-async def test_a_release_does_not_lift_what_the_scripts_own_timeout_user_set(redis):
-    discord = _Discord()
-    script = (
-        'await hold_member("U1", "post-a", 300)\n'
-        'await timeout_user("U1", 3600)\n'
-        'await send_message(str(await release_hold("U1", "post-a")))\n'
-    )
-
-    _, said = await _run(script, redis, discord=discord)
-
-    assert said == ["False"]
-    assert discord.writes() == [("timeout", 300), ("timeout", 3600)]
-
-
-async def test_without_holds_wired_the_timeout_calls_still_reach_the_actor(redis):
-    # A caller of run_handler_script that passes no holds keeps the plain calls.
-    discord = _Discord()
-    script = 'await timeout_user("U1", 600)\nawait remove_timeout("U1")\n'
-
-    result, _ = await _run(script, redis, discord=discord, wired=False)
-
-    assert result.outcome == "ok", result.error
-    assert discord.writes() == [("timeout", 600), ("remove_timeout",)]
-    assert discord.locked_during == [False, False]
-
-
 # -- through the real fire jobs --------------------------------------------------
 
 
@@ -328,24 +184,14 @@ def _job() -> SimpleNamespace:
     return SimpleNamespace(job=SimpleNamespace(id=uuid4().hex))
 
 
-async def test_admin_fire_job_gives_a_script_real_holds_and_claims(
+async def test_admin_fire_job_gives_a_script_claims_and_no_sanctions(
     monkeypatch, test_engine, redis
 ):
     member: dict = {"requests": []}
 
     def discord_api(request: httpx.Request) -> httpx.Response:
         member["requests"].append((request.method, request.url.path))
-        if request.method == "PATCH":
-            member["until"] = json.loads(request.content)[
-                "communication_disabled_until"
-            ]
-        return httpx.Response(
-            200,
-            json={
-                "user": {"id": "U7"},
-                "communication_disabled_until": member.get("until"),
-            },
-        )
+        return httpx.Response(200, json={"user": {"id": "U7"}})
 
     async def drop_event(event, **kwargs) -> None:
         return None
@@ -356,19 +202,18 @@ async def test_admin_fire_job_gives_a_script_real_holds_and_claims(
             AdminHandler(
                 id=handler_id,
                 guild_id="G1",
-                name="hold-probe",
+                name="claim-probe",
                 trigger_type="message",
                 settings={},
                 channel_ids=[],
                 description="d",
                 script=(
-                    "user = context['author_id']\n"
                     "seen = [await claimed('bad:k'), await claim('bad:k', 60), "
                     "await claimed('bad:k')]\n"
-                    "seen.append(await hold_member(user, 'post-a', 300))\n"
-                    "seen.append(await hold_member(user, 'post-b', 300))\n"
-                    "seen.append(await release_hold(user, 'post-a'))\n"
                     "await memory_set('seen', seen)\n"
+                    # The removed sanctions are not there to call: the fire
+                    # errors on the name, after the memory above was set.
+                    "await hold_member(context['author_id'], 'post-a', 300)\n"
                 ),
                 created_by_admin="A1",
             )
@@ -396,7 +241,7 @@ async def test_admin_fire_job_gives_a_script_real_holds_and_claims(
     monkeypatch.setattr(guild_event_recorder, "record_guild_event", drop_event)
     monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", drop_event)
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    outcome = await admin_handlers_jobs.run_admin_handler_fire(
         AdminHandlerFirePayload(
             admin_handler_id=str(handler_id),
             channel_id="C2",
@@ -407,15 +252,13 @@ async def test_admin_fire_job_gives_a_script_real_holds_and_claims(
 
     async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
         handler = await session.get(AdminHandler, handler_id)
-    # Not claimed, claimed by this call, claimed. Both holds began. The first
-    # release lifts nothing: the second post still needs the timeout.
-    assert handler.memory["seen"] == [False, True, True, True, True, False]
-    assert member["until"] is not None
-    assert ("PATCH", "/api/v10/guilds/G1/members/U7") in member["requests"]
-    # Scoped to this guild, this member and this handler.
-    held = await redis.hgetall("hhold:G1:U7")
-    assert {f"{handler_id}:post-a", f"{handler_id}:post-b"} <= set(held)
+    # Not claimed, claimed by this call, claimed.
+    assert handler.memory["seen"] == [False, True, True]
     assert await redis.exists(f"hclaim:{handler_id}:bad:k") == 1
+    # hold_member is gone: the fire errored, and nothing reached the member.
+    assert outcome["status"] == "error"
+    assert not [r for r in member["requests"] if r[0] == "PATCH"]
+    assert await redis.keys("hhold:*") == []
 
 
 async def test_admin_fire_job_hands_the_actor_the_guilds_staff_roles(

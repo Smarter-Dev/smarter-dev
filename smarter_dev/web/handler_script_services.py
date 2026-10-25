@@ -113,22 +113,13 @@ class AdminScriptServices:
             )
             return [_mod_action_row(action) for action in actions]
 
-    async def count_warns(self, target_user_id: str) -> int:
-        """This member's authoritative warn count in this guild.
-
-        The count is host-side because a script tallying warns itself from
-        ``read_mod_actions`` would silently undercount: that read is clamped to
-        50 rows and returns every action type, so a heavy user's warn history
-        truncates and the "third strike" escalation quietly never fires. The
-        warn row itself is written by the moderation gateway.
-        """
-        async with get_db_session_context() as session:
-            return await _mod_action_ops.count_warns_for_user(
-                session, self.guild_id, str(target_user_id)
-            )
-
     async def incident_report_channel(self) -> str | None:
-        """Where this guild's moderation incident reports go."""
+        """Where this guild's moderation incident reports go (None: nowhere).
+
+        ``report_for_review`` reports here, so a handler's review lands where
+        the moderation coordinator's incidents do, and nowhere while the
+        guild's policy has reporting switched off.
+        """
         async with get_db_session_context() as session:
             return await load_incident_report_channel(session, self.guild_id)
 

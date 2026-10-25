@@ -311,9 +311,8 @@ async def test_install_form_unknown_slug_redirects(db_session):
     flash_error.assert_called_once()
 
 
-async def test_install_form_for_a_retired_extension_redirects(db_session):
-    """#255: a template moved to moderation cannot be installed, so its form
-    is not offered either."""
+async def test_install_form_for_a_removed_moderation_template_is_unknown(db_session):
+    """#242: Keyword Watch left the catalog; its form is an unknown extension."""
     flash_error = Mock()
     with patch(
         f"{_CAMPAIGNS_MODULE}.get_admin_discord_client", return_value=_admin_client()
@@ -328,86 +327,33 @@ async def test_install_form_for_a_retired_extension_redirects(db_session):
 
     assert response.status_code in (302, 303, 307)
     [[_, message], _] = flash_error.call_args
-    assert "moderation" in message
+    assert message == "Unknown extension 'keyword-watch'."
 
 
-async def test_configure_form_for_a_retired_extension_redirects(db_session):
-    """#255: config edits of a template moved to moderation are refused, so
-    its configure form is not offered either."""
-    db_session.add(
-        ExtensionInstall(
-            guild_id=_GUILD,
-            extension_slug="keyword-watch",
-            installed_version=1,
-            config={},
-            enabled=True,
-            installed_by="admin@example.com",
-        )
-    )
-    await db_session.commit()
-    flash_error = Mock()
-    with (
-        patch(
-            f"{_CAMPAIGNS_MODULE}.get_admin_discord_client",
-            return_value=_admin_client(),
-        ),
-        patch(f"{_MODULE}.flash_error", flash_error),
-    ):
-        response = await ExtensionsAdminController.extension_configure_form.fn(
-            None,
-            request=object(),
-            db_session=db_session,
-            guild_id=_GUILD,
-            slug="keyword-watch",
-        )
-
-    assert response.status_code in (302, 303, 307)
-    [[_, message], _] = flash_error.call_args
-    assert "config can no longer be changed" in message
-
-
-def test_list_template_offers_a_retired_install_only_disable_and_uninstall():
-    """#255: Configure and Update would re-render a frozen punisher."""
-    retired = get_registry().get("keyword-watch")
+def test_list_template_offers_rejoin_alerts_update_to_an_outdated_install():
+    """#242: the live Rejoin Alert install is at v1; the catalog's v2 reports
+    through report_for_review, and the list offers the update."""
+    rejoin = get_registry().get("rejoin-alert")
     html = render_admin_template(
         "admin/bot/extensions/list.html",
         guild=SimpleNamespace(id=_GUILD, name="Alpha Guild"),
         guild_id=_GUILD,
-        extensions=[retired],
+        extensions=[rejoin],
         installs_by_slug={
-            "keyword-watch": SimpleNamespace(enabled=True, installed_version=0)
+            "rejoin-alert": SimpleNamespace(enabled=True, installed_version=1)
         },
         orphaned_installs=[],
         active_page="extensions",
         flash_messages=[],
     )
 
-    base = f"/admin/bot/guilds/{_GUILD}/extensions/keyword-watch"
+    base = f"/admin/bot/guilds/{_GUILD}/extensions/rejoin-alert"
+    assert "Update available (v1 &rarr; v2)" in html
+    assert f'action="{base}/update"' in html
+    assert f"{base}/configure" in html
     assert f'action="{base}/disable"' in html
     assert f'action="{base}/uninstall"' in html
-    for absent in ("configure", "update", "install"):
-        assert f"{base}/{absent}" not in html
-
-
-def test_list_template_offers_no_enable_for_a_disabled_retired_install():
-    """#240: Enable would re-arm a frozen punisher; the service refuses it."""
-    retired = get_registry().get("keyword-watch")
-    html = render_admin_template(
-        "admin/bot/extensions/list.html",
-        guild=SimpleNamespace(id=_GUILD, name="Alpha Guild"),
-        guild_id=_GUILD,
-        extensions=[retired],
-        installs_by_slug={
-            "keyword-watch": SimpleNamespace(enabled=False, installed_version=0)
-        },
-        orphaned_installs=[],
-        active_page="extensions",
-        flash_messages=[],
-    )
-
-    base = f"/admin/bot/guilds/{_GUILD}/extensions/keyword-watch"
-    assert f'action="{base}/enable"' not in html
-    assert f'action="{base}/uninstall"' in html
+    assert "moved to moderation" not in html
 
 
 # --- controller: install POST ------------------------------------------------

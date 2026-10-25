@@ -54,30 +54,24 @@
                                 {% for handler in manifest.handlers %}<code>{{ handler.trigger_type }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
                             </p>
 
-                            {% if manifest.moved_to_moderation %}
-                            <p class="sk-text-muted" style="font-size:0.85rem; margin:0.25rem 0;">{{ manifest.moved_to_moderation }}</p>
-                            {% endif %}
                             <div style="margin-top:0.75rem; white-space:nowrap;">
-                                {% if not install and manifest.moved_to_moderation %}
-                                {% elif not install %}
+                                {% if not install %}
                                 <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/install" class="sk-btn">Install</a>
                                 {% else %}
-                                {% if not manifest.moved_to_moderation %}
                                 <a href="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/configure" class="sk-btn-outline sk-btn-small">Configure</a>
-                                {% endif %}
-                                {% if manifest.version > install.installed_version and not manifest.moved_to_moderation %}
+                                {% if manifest.version > install.installed_version %}
                                 <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/update" style="display:inline;">
                                     <button type="submit" class="sk-btn sk-btn-small">Update</button>
                                 </form>
                                 {% endif %}
                                 {% if install.enabled %}
                                 {{ disable_form(guild.id, manifest.slug) }}
-                                {% elif not manifest.moved_to_moderation %}
+                                {% else %}
                                 <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/enable" style="display:inline;">
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
                                 </form>
                                 {% endif %}
-                                {{ uninstall_form(guild.id, manifest.slug, manifest.moved_to_moderation) }}
+                                {{ uninstall_form(guild.id, manifest.slug) }}
                                 {% endif %}
                             </div>
                         </div>
