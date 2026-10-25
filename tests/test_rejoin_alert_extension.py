@@ -470,3 +470,47 @@ async def test_the_live_install_updates_to_the_review_report(db_session, monkeyp
     assert "728249959098482829" not in row.script
     assert row.name == "rejoin-alert"
     assert row.trigger_type == "member_join"
+
+
+# -- the CRUD Job that applies the update (scripts/update_extension_install.py) --
+
+
+async def test_the_update_job_moves_the_live_install_once(db_session, monkeypatch):
+    from scripts import update_extension_install as job
+
+    _use_registry(monkeypatch, _version_one())
+    await extension_installs.install_extension(
+        db_session,
+        guild_id=GUILD,
+        slug="rejoin-alert",
+        raw_config=dict(LIVE_CONFIG),
+        installed_by="admin",
+    )
+    catalog = ExtensionRegistry(
+        {"rejoin-alert": LoadedExtension(manifest=MANIFEST, scripts=_scripts())}
+    )
+    monkeypatch.setattr(extension_installs, "get_registry", lambda: catalog)
+    monkeypatch.setattr(job, "get_registry", lambda: catalog)
+
+    planned = await job.check(db_session, GUILD, "rejoin-alert")
+    [row] = (await db_session.execute(select(AdminHandler))).scalars().all()
+    # check changes nothing.
+    assert row.script == _live_v1_script()
+    assert planned[0].startswith("install rejoin-alert v1 -> v2")
+    assert "['mod_log_channel_id']" in planned[0]
+
+    done = await job.update(db_session, GUILD, "rejoin-alert")
+    await db_session.refresh(row)
+    assert done[0] == "install rejoin-alert now v2, config []"
+    assert row.script == _rendered().script
+
+    # A second run finds nothing to do.
+    assert await job.update(db_session, GUILD, "rejoin-alert") == []
+    assert await job.check(db_session, GUILD, "rejoin-alert") == []
+
+
+async def test_the_update_job_refuses_a_guild_without_the_install(db_session):
+    from scripts import update_extension_install as job
+
+    with pytest.raises(job.Refused):
+        await job.check(db_session, GUILD, "rejoin-alert")
