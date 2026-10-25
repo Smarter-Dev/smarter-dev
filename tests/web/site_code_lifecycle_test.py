@@ -496,3 +496,70 @@ async def test_a_cancelled_route_gives_its_places_back_once_its_queueing_has_unw
         close.set()
         writer.close()
         await writer.wait_closed()
+
+
+async def test_a_cancelled_route_still_waits_for_queueing_it_let_finish(
+    served, redis, monkeypatch
+):
+    # The caller hangs up while the job is being queued: the route drops the
+    # call and lets the queueing finish. Then the route is cancelled twice
+    # (the server shutting down) while the queueing unwinds, its AsyncSession
+    # closing in a shielded task as skrift's SQL queue's does.
+    import skrift.workers
+
+    seen: dict = {}
+    entered, closing, close, closed = (asyncio.Event() for _ in range(4))
+    store = site_code.store_request
+
+    async def storing(*args, **kwargs):
+        seen["route"] = asyncio.current_task()
+        await store(*args, **kwargs)
+
+    async def submitting(job_type, payload, **options):
+        seen["run_id"] = payload["run_id"]
+        seen["submit"] = asyncio.current_task()
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            closing.set()
+            await asyncio.shield(asyncio.ensure_future(close.wait()))
+            closed.set()
+
+    monkeypatch.setattr(site_code, "store_request", storing)
+    monkeypatch.setattr(skrift.workers, "submit", submitting)
+    reader, writer = await _post(served, "42")
+    try:
+        await asyncio.wait_for(entered.wait(), 6)
+        route, run_id, submit = seen["route"], seen["run_id"], seen["submit"]
+        writer.close()
+        await writer.wait_closed()
+
+        async def dropped() -> bool:
+            return not await redis.exists(site_code.request_key(run_id)) and bool(
+                await redis.exists(site_code.abandoned_key(run_id))
+            )
+
+        assert await _settled(dropped), await redis.keys("*")
+        assert submit.cancelling() == 0  # left to finish
+        route.cancel()
+        await asyncio.wait_for(closing.wait(), 6)
+        await asyncio.sleep(0.2)
+        route.cancel()  # cancelled again: it still waits
+        await asyncio.sleep(0.2)
+        # The queueing was stopped once and is still unwinding: the route
+        # waits for it, and its places stay taken.
+        assert not route.done()
+        assert not submit.done()
+        assert submit.cancelling() == 1
+        assert await redis.zcard(site_code.ALL_LEASES_KEY) == 1
+        assert await redis.zcard(site_code.user_leases_key(served.member)) == 1
+        close.set()
+        await asyncio.wait({route}, timeout=6)
+        assert closed.is_set()
+        assert route.cancelled()
+        assert await redis.keys("*") == [site_code.abandoned_key(run_id)]
+    finally:
+        close.set()
+        writer.close()
+        await writer.wait_closed()

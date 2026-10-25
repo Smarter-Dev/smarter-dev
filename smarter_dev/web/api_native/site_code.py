@@ -23,7 +23,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import Coroutine
+from collections.abc import Awaitable
 from typing import Any
 from uuid import UUID
 from uuid import uuid4
@@ -112,9 +112,13 @@ class SiteCodeController(Controller):
                 # The caller left while the job was being queued: drop the
                 # call now, before a job can take it, then let the queueing
                 # finish (its job finds nothing to run) before the places
-                # are given back.
+                # are given back. A route cancelled meanwhile stops it once
+                # and still waits for it, as below.
                 await _drop(redis, run_id)
-                await asyncio.gather(submitting, return_exceptions=True)
+                await _held(
+                    asyncio.gather(submitting, return_exceptions=True),
+                    stop=submitting,
+                )
                 raise plain_error(499, HUNG_UP)
             submitting.result()
             waiting = asyncio.ensure_future(_result(redis, run_id))
@@ -150,15 +154,18 @@ async def _unwind(
         await site_code.release(redis, member, run_id)
 
 
-async def _held(work: Coroutine[Any, Any, None]) -> None:
+async def _held(work: Awaitable[Any], *, stop: asyncio.Future | None = None) -> None:
     """Run ``work`` to its end even if the route is cancelled meanwhile;
-    that cancellation is raised once it has."""
+    that cancellation is raised once it has. The first one cancels ``stop``:
+    later ones never reach it, so its own cleanup isn't cut short."""
     task = asyncio.ensure_future(work)
     cancelled = None
     while not task.done():
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError as error:
+            if cancelled is None and stop is not None:
+                stop.cancel()
             cancelled = error
     if cancelled is not None:
         raise cancelled
