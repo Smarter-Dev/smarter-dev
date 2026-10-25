@@ -135,7 +135,8 @@ def triage_trigger(
     trigger_content: str | None = None,
     report_channel_id: str | None = None,
 ) -> Trigger:
-    """The staff ping as the gateway sees it: one incident per ping.
+    """The staff ping as the gateway sees it: one incident per ping (a
+    member's further pings within a minute join it; see ``mod_monitor``).
 
     The ping's author is the reporter, not a suspect, so the incident has no
     subject; the ping itself is kept as evidence.

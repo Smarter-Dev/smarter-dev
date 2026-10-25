@@ -395,7 +395,7 @@ async def test_mod_monitor_triage_started_before_sigterm_is_drained(monkeypatch)
     triage_started, finish = asyncio.Event(), asyncio.Event()
     triaged: list[int] = []
 
-    async def triage(event, _config) -> None:
+    async def triage(event, *_) -> None:
         triage_started.set()
         await finish.wait()
         triaged.append(event.message.id)
@@ -404,6 +404,7 @@ async def test_mod_monitor_triage_started_before_sigterm_is_drained(monkeypatch)
         return SimpleNamespace(monitored_role_ids=frozenset({"99"}))
 
     monkeypatch.setattr(mod_monitor, "_handle_moderation", triage)
+    monkeypatch.setattr(mod_monitor, "_bursts", {})
     monkeypatch.setattr(mod_monitor, "load_triage_config", config)
     event = Mock(guild_id=30, channel_id=20)
     event.message.author.is_bot = False

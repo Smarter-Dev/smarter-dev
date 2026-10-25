@@ -315,9 +315,13 @@ def _ping(author_id=HELPER, role_ids=(MOD_ROLE_ID,)):
 async def test_a_saved_change_reaches_the_very_next_ping(stored, monkeypatch):
     started: list = []
 
-    async def handle(event, config):
+    async def handle(event, config, *_):
         started.append(config)
 
+    # Each ping a minute apart, so none joins an earlier one's incident (#384).
+    now = iter(range(0, 600, 60))
+    monkeypatch.setattr(mod_monitor, "_bursts", {})
+    monkeypatch.setattr(mod_monitor, "_clock", lambda: next(now))
     monkeypatch.setattr(mod_monitor, "_handle_moderation", handle)
     monkeypatch.setattr(mod_monitor.leadership, "track", lambda task: task)
 
@@ -345,7 +349,7 @@ async def test_messages_without_a_role_mention_never_read_the_config(stored):
 async def test_an_unreadable_config_starts_no_triage(stored, monkeypatch):
     started: list = []
 
-    async def handle(event, config):
+    async def handle(event, config, *_):
         started.append(config)
 
     monkeypatch.setattr(mod_monitor, "_handle_moderation", handle)
