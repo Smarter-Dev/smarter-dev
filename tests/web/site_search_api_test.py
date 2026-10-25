@@ -1,7 +1,10 @@
 """Site search facade: principal isolation, idempotent starts, limits,
-structured snapshots without HTML, ownership and deletion."""
+structured snapshots without HTML, ownership, counts and deletion."""
 
 import hashlib
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -13,12 +16,17 @@ from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import create_test_client
 from skrift.db.base import Base as SkriftBase
 from skrift.db.models.user import User
+from sqlalchemy import func
+from sqlalchemy import select
 
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.web import dashboard_controller
 from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native.site_search import SiteSearchController
+from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.models import WorkDispatch
+from smarter_dev.web.user_content import STALLED_AFTER
 
 ROOT = "/api/site/search"
 
@@ -91,6 +99,8 @@ def test_every_route_requires_the_site_search_scope(client, principal, service, 
         tc.delete(f"{path}/{uuid4()}"),
         tc.get(f"{ROOT}/users/{uuid4()}/keys/{uuid4().hex}"),
         tc.delete(f"{ROOT}/users/{uuid4()}/keys/{uuid4().hex}"),
+        tc.get(f"{path}/count"),
+        tc.post(f"{path}/delete-all", json={}),
     ):
         assert response.status_code == 401
 
@@ -443,3 +453,332 @@ async def test_deleting_a_site_run_forgets_its_key(client, member, db_session):
         }
     assert _start(tc, member.id, key=site_key).status_code == 410
     assert _start(tc, member.id, key=dashboard_key).status_code == 201
+
+
+# ── Your data: count and delete all ─────────────────────────────────
+
+
+async def _run(db_session, user, status="complete", changed_ago=None):
+    run = WebSearchRun(
+        owner_user_id=user.id,
+        submission_key=uuid4().hex,
+        request="latest Python release notes",
+        status=status,
+        queries=[],
+        results=[],
+        ranked=status == "complete",
+        usage={},
+        version=1,
+        attempt_count=1,
+    )
+    db_session.add(run)
+    await db_session.flush()
+    if changed_ago is not None:
+        run.updated_at = datetime.now(UTC) - changed_ago
+    db_session.add(
+        WorkDispatch(
+            job_type="web_search.run",
+            aggregate_id=run.id,
+            payload={"search_id": str(run.id)},
+            status="complete",
+        )
+    )
+    await db_session.commit()
+    return run.id
+
+
+async def _other_member(db_session):
+    other = User(email=f"{uuid4()}@example.test", name="Other", is_active=True)
+    db_session.add(other)
+    await db_session.commit()
+    return other
+
+
+def _delete_all(tc, user_id, keep=None):
+    return tc.post(
+        f"{ROOT}/users/{user_id}/runs/delete-all",
+        json={} if keep is None else {"keep": [str(rid) for rid in keep]},
+    )
+
+
+async def test_count_is_every_search_the_member_owns(client, member, db_session):
+    tc, _ = client
+    other = await _other_member(db_session)
+    path = f"{ROOT}/users/{member.id}/runs/count"
+    zero = tc.get(path)
+    assert zero.status_code == 200
+    assert zero.headers["Cache-Control"] == "private, no-store"
+    assert zero.json() == {"searches": 0}
+    await _run(db_session, member)
+    await _run(db_session, member, status="error")
+    await _run(db_session, member, status="searching")
+    await _run(db_session, other)
+    assert tc.get(path).json() == {"searches": 3}
+    assert tc.get(f"{ROOT}/users/{other.id}/runs/count").json() == {"searches": 1}
+
+
+async def test_count_and_delete_all_need_an_active_member(client, member, db_session):
+    tc, _ = client
+    await _run(db_session, member)
+    member.is_active = False
+    await db_session.commit()
+    for response in (
+        tc.get(f"{ROOT}/users/{member.id}/runs/count"),
+        _delete_all(tc, member.id),
+    ):
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Account not found"}
+        assert response.headers["Cache-Control"] == "private, no-store"
+    assert await db_session.scalar(select(func.count(WebSearchRun.id))) == 1
+
+
+async def test_delete_all_keeps_running_searches_and_the_ones_named(
+    client, member, db_session
+):
+    tc, _ = client
+    other = await _other_member(db_session)
+    member_id, other_id = member.id, other.id
+    finished = await _run(db_session, member)
+    failed = await _run(db_session, member, status="error")
+    stalled = await _run(
+        db_session,
+        member,
+        status="searching",
+        changed_ago=STALLED_AFTER + timedelta(minutes=1),
+    )
+    running = await _run(db_session, member, status="searching")
+    cited = await _run(db_session, member)
+    foreign = await _run(db_session, other)
+
+    response = _delete_all(tc, member.id, keep=[cited, foreign])
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    body = response.json()
+    assert (body["deleted"], body["running"]) == (3, 2)
+    assert sorted(body["kept"]) == sorted([str(running), str(cited)])
+    db_session.expire_all()
+    left = set(await db_session.scalars(select(WebSearchRun.id)))
+    assert left == {running, cited, foreign}
+    dispatched = set(await db_session.scalars(select(WorkDispatch.aggregate_id)))
+    assert dispatched == {running, cited, foreign}
+    assert not {finished, failed, stalled} & dispatched
+    again = _delete_all(tc, member_id, keep=[cited]).json()
+    assert (again["deleted"], again["running"]) == (0, 2)
+    assert tc.get(f"{ROOT}/users/{member_id}/runs/count").json() == {"searches": 2}
+    assert tc.get(f"{ROOT}/users/{other_id}/runs/count").json() == {"searches": 1}
+
+
+async def test_delete_all_without_keep_is_the_account_pages_rule(
+    client, member, db_session
+):
+    tc, _ = client
+    await _run(db_session, member)
+    running = await _run(db_session, member, status="answering")
+    assert _delete_all(tc, member.id).json() == {
+        "deleted": 1,
+        "running": 1,
+        "kept": [str(running)],
+        "next": None,
+    }
+    assert _delete_all(tc, member.id).json() == {
+        "deleted": 0,
+        "running": 1,
+        "kept": [str(running)],
+        "next": None,
+    }
+
+
+async def test_delete_all_decides_a_bounded_batch_and_says_where_to_carry_on(
+    client, member, db_session, monkeypatch
+):
+    """One call decides at most a batch of runs and names the last one; the
+    site calls again from there until ``next`` is null. Every run is decided
+    once, and the calls' counts add up."""
+    from smarter_dev.web.api_native import site_search
+
+    monkeypatch.setattr(site_search, "DELETE_ALL_BATCH", 2)
+    tc, _ = client
+    member_id = member.id
+    for _ in range(4):
+        await _run(db_session, member)
+    running = await _run(db_session, member, status="searching")
+
+    calls = _delete_all_until_done(tc, member_id)
+
+    assert len(calls) == 3
+    assert all(call["deleted"] + call["running"] <= 2 for call in calls)
+    assert sum(call["deleted"] for call in calls) == 4
+    assert [rid for call in calls for rid in call["kept"]] == [str(running)]
+    db_session.expire_all()
+    assert set(await db_session.scalars(select(WebSearchRun.id))) == {running}
+    bad = tc.post(f"{ROOT}/users/{member_id}/runs/delete-all", json={"after": "x"})
+    assert bad.status_code == 422
+
+
+def _delete_all_until_done(tc, member_id, body=None, most=20):
+    """The site's loop: call again from ``next`` until it is null; at most
+    ``most`` calls, so a delete that never says it is done fails the test."""
+    calls, after = [], None
+    for _ in range(most):
+        sent = dict(body or {})
+        if after is not None:
+            sent["after"] = after
+        calls.append(
+            tc.post(f"{ROOT}/users/{member_id}/runs/delete-all", json=sent).json()
+        )
+        after = calls[-1]["next"]
+        if after is None:
+            return calls
+    raise AssertionError(f"delete-all still had more after {most} calls")
+
+
+async def test_delete_all_with_many_kept_runs_never_rescans_them_and_finishes(
+    client, member, db_session, monkeypatch
+):
+    """Runs named to keep are left out of the listing itself: counted once,
+    never read again, and each call still makes progress on the rest."""
+    from smarter_dev.web import user_content
+    from smarter_dev.web.api_native import site_search
+
+    monkeypatch.setattr(site_search, "DELETE_ALL_BATCH", 2)
+    decided = []
+    helper = user_content._delete_one_search
+
+    async def counting(session, user_id, run_id):
+        decided.append(run_id)
+        return await helper(session, user_id, run_id)
+
+    monkeypatch.setattr(user_content, "_delete_one_search", counting)
+    tc, _ = client
+    member_id = member.id
+    kept = [await _run(db_session, member) for _ in range(6)]
+    gone = {await _run(db_session, member) for _ in range(3)}
+
+    calls = _delete_all_until_done(tc, member_id, {"keep": [str(rid) for rid in kept]})
+
+    assert len(calls) == 2
+    assert sum(call["deleted"] for call in calls) == 3
+    assert sum(call["running"] for call in calls) == 6
+    assert sorted(rid for call in calls for rid in call["kept"]) == sorted(
+        str(rid) for rid in kept
+    )
+    assert set(decided) == gone and len(decided) == 3
+    db_session.expire_all()
+    assert set(await db_session.scalars(select(WebSearchRun.id))) == set(kept)
+
+
+async def test_a_lost_start_deleted_by_delete_all_is_never_made_again(
+    client, member, db_session
+):
+    """#326's P1 probe: a start whose reply never reached the site finishes,
+    the site's Delete all (which can't name it: no id saved, and its reply no
+    longer writing) deletes it, and the start retried with the same key gets
+    410, not a new run."""
+    tc, _ = client
+    member_id = member.id
+    key = hashlib.sha256(b"a reply whose start answer was lost").hexdigest()
+    run_id = _start(tc, member_id, key=key).json()["search"]["id"]
+    run = await db_session.get(WebSearchRun, UUID(run_id))
+    run.status = "complete"
+    await db_session.commit()
+
+    deleted = tc.post(f"{ROOT}/users/{member_id}/runs/delete-all", json={"keep": []})
+
+    assert deleted.json() == {"deleted": 1, "running": 0, "kept": [], "next": None}
+    retried = _start(tc, member_id, key=key)
+    assert retried.status_code == 410
+    assert retried.json()["detail"] == "This search was deleted."
+    db_session.expire_all()
+    assert (await db_session.execute(WebSearchRun.__table__.select())).all() == []
+
+
+async def test_a_run_kept_by_its_key_is_not_marked_and_can_be_rejoined(
+    client, member, db_session
+):
+    """The reply is still being written: its run is kept by key, its key is
+    not marked, and the reply's retried start rejoins the same run."""
+    tc, _ = client
+    member_id = member.id
+    key = hashlib.sha256(b"a reply still being written").hexdigest()
+    run_id = _start(tc, member_id, key=key).json()["search"]["id"]
+    run = await db_session.get(WebSearchRun, UUID(run_id))
+    run.status = "complete"
+    await db_session.commit()
+
+    kept = tc.post(
+        f"{ROOT}/users/{member_id}/runs/delete-all", json={"keep_keys": [key]}
+    )
+
+    assert kept.json() == {
+        "deleted": 0,
+        "running": 1,
+        "kept": [run_id],
+        "next": None,
+    }
+    assert await db_session.get(WebSearchForgottenKey, (member_id, key)) is None
+    rejoined = _start(tc, member_id, key=key)
+    assert rejoined.status_code == 201
+    assert rejoined.json()["search"]["id"] == run_id
+
+
+async def test_delete_all_keeps_the_runs_of_replies_by_their_search_keys(
+    client, member, db_session
+):
+    """A reply whose start's answer was lost has no run id on the site yet:
+    it names the run by its search key, and the run is kept, finished or not."""
+    tc, _ = client
+    other = await _other_member(db_session)
+    member_id = member.id
+    rejoined, gone, foreign = [
+        await db_session.get(WebSearchRun, await _run(db_session, owner))
+        for owner in (member, member, other)
+    ]
+    key = hashlib.sha256(b"a reply still being written").hexdigest()
+    rejoined.submission_key = key
+    gone.submission_key = hashlib.sha256(b"a finished reply").hexdigest()
+    foreign.submission_key = hashlib.sha256(b"another member's reply").hexdigest()
+    ids = rejoined.id, foreign.id
+    foreign_key = foreign.submission_key
+    await db_session.flush()
+
+    response = tc.post(
+        f"{ROOT}/users/{member_id}/runs/delete-all",
+        json={"keep_keys": [key, key, foreign_key]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "deleted": 1,
+        "running": 1,
+        "kept": [str(ids[0])],
+        "next": None,
+    }
+    db_session.expire_all()
+    left = set(await db_session.scalars(select(WebSearchRun.id)))
+    assert left == set(ids)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"keep_keys": ["a" * 63]},
+        {"keep_keys": ["A" * 64]},
+        {"keep_keys": ["g" * 64]},
+        {"keep_keys": [uuid4().hex]},
+        {"keep_keys": ["a" * 64] * 201},
+        {"keep_keys": "a" * 64},
+        {"keep": ["not-a-run"]},
+        {"keep": [str(uuid4()).upper().replace("-", "")]},
+        {"keep": [str(uuid4()) for _ in range(201)]},
+        {"keep": "all"},
+        {"keep": [], "everything": True},
+    ],
+)
+async def test_delete_all_refuses_a_bad_keep_list(client, member, db_session, body):
+    tc, _ = client
+    await _run(db_session, member)
+    response = tc.post(f"{ROOT}/users/{member.id}/runs/delete-all", json=body)
+    assert response.status_code == 422
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert await db_session.scalar(select(func.count(WebSearchRun.id))) == 1

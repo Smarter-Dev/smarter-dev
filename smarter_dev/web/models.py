@@ -6725,6 +6725,8 @@ class WebSearchRun(Base):
             "owner_user_id", "submission_key", name="uq_web_search_run_submission"
         ),
         Index("ix_web_search_runs_owner_created", "owner_user_id", "created_at"),
+        # Delete all's pages: a member's runs in id order, after a cursor.
+        Index("ix_web_search_runs_owner_id", "owner_user_id", "id"),
     )
 
 

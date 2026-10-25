@@ -7,6 +7,13 @@ and grounded answer on the agent worker, the same limits and the same
 deletion rules. The member is the synced site user named in the path; the
 service key is the only authority, and a browser never reaches these routes.
 
+The site's "Your data" counts and deletes the member's searches as the account
+page does (``count_searches``, ``delete_all_searches``). A delete-all names
+the runs whose replies the site is still writing, by run id and by search key
+(a start whose reply was lost has no id there yet); they are left, unmarked,
+and reported with the ones still running, so the site can keep the turns
+that cite them.
+
 A signed-out visitor using a member's search link gets an anonymous search
 (``web_search.anonymous``): never saved, kept in Redis for 30 minutes, billed
 to the link's owner, under the anonymous limits. The Worker names the visitor
@@ -58,7 +65,10 @@ from smarter_dev.web.models import WebSearchForgottenKey
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.search_preview_controller import result_view
 from smarter_dev.web.search_previews import find_search_preview
+from smarter_dev.web.user_content import SITE_SEARCH_KEY
 from smarter_dev.web.user_content import StillRunning
+from smarter_dev.web.user_content import count_searches
+from smarter_dev.web.user_content import delete_all_searches
 from smarter_dev.web.user_content import delete_search
 from smarter_dev.web.user_content import mark_search_key_forgotten
 from smarter_dev.web.web_search import anonymous
@@ -66,6 +76,10 @@ from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import structured as site_snapshot
 
 SITE_SEARCH_GUARDS = [*SITE_API_GUARDS, Permission("site-search")]
+# The most runs one delete-all call decides: each is a short transaction of
+# its own (about 30 ms locally), so a call stays well inside the site
+# Worker's wait, and the site carries on with ``next``.
+DELETE_ALL_BATCH = 50
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +114,17 @@ class StartSearch(BaseModel):
     request: str = Field(min_length=1, max_length=2000)
     # One key per chat turn: a retried start returns the same run.
     key: str = Field(min_length=8, max_length=64)
+
+
+class DeleteAllSearches(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    # Runs the site's replies are still being written from.
+    keep: list[str] = Field(default_factory=list, max_length=200)
+    # And the search keys of those replies, for a start whose reply was lost:
+    # two per reply (Jev's search and the chat model's tool).
+    keep_keys: list[str] = Field(default_factory=list, max_length=200)
+    # Where an earlier call of this delete stopped (its ``next``).
+    after: str | None = None
 
 
 class StartAnonymousSearch(BaseModel):
@@ -148,6 +173,26 @@ async def _run_for_key(session: AsyncSession, owner: UUID, key: str):
 
 async def _forgotten(session: AsyncSession, owner: UUID, key: str) -> bool:
     return await session.get(WebSearchForgottenKey, (owner, key)) is not None
+
+
+def _search_keys(values: list[str]) -> set[str]:
+    """The site's search keys: each a reply's SHA-256, 64 lowercase hex."""
+    if any(not SITE_SEARCH_KEY.fullmatch(value) for value in values):
+        raise plain_error(422, "Invalid search key")
+    return set(values)
+
+
+def _run_ids(values: list[str]) -> set[UUID]:
+    ids = set()
+    for value in values:
+        try:
+            rid = UUID(value)
+            if str(rid) != value.lower():
+                raise ValueError
+        except ValueError:
+            raise plain_error(422, "Invalid search ID") from None
+        ids.add(rid)
+    return ids
 
 
 async def _owned(session: AsyncSession, user: User, run_id: str) -> WebSearchRun:
@@ -350,6 +395,39 @@ class SiteSearchController(Controller):
                 raise
             return {"search": site_snapshot(existing), "idempotent": True}
         return {"search": site_snapshot(run)}
+
+    @get("/users/{user_id:str}/runs/count", guards=SITE_SEARCH_GUARDS)
+    async def count(self, db_session: AsyncSession, user_id: str) -> dict[str, int]:
+        user = await _member(db_session, user_id)
+        return {"searches": await count_searches(db_session, user.id)}
+
+    @post(
+        "/users/{user_id:str}/runs/delete-all",
+        guards=SITE_SEARCH_GUARDS,
+        status_code=200,
+    )
+    async def remove_all(
+        self, db_session: AsyncSession, user_id: str, data: DeleteAllSearches
+    ) -> dict[str, Any]:
+        user = await _member(db_session, user_id)
+        keep = _run_ids(data.keep)
+        keep_keys = _search_keys(data.keep_keys)
+        after = None if data.after is None else next(iter(_run_ids([data.after])))
+        result = await delete_all_searches(
+            db_session,
+            user.id,
+            keep=keep,
+            keep_keys=keep_keys,
+            after=after,
+            limit=DELETE_ALL_BATCH,
+        )
+        return {
+            "deleted": result.deleted,
+            "running": result.running,
+            "kept": [str(rid) for rid in result.kept],
+            # Runs left to decide: call again with this as ``after``.
+            "next": None if result.next_after is None else str(result.next_after),
+        }
 
     @get("/users/{user_id:str}/runs/{run_id:str}", guards=SITE_SEARCH_GUARDS)
     async def read(
