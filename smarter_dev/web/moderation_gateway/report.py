@@ -312,9 +312,7 @@ class _Deleted:
     shown: bool = False
 
     def words(self) -> str:
-        text = (
-            sanitize(self.text, DELETED_LIMIT) if self.text else SUMMARY_UNAVAILABLE
-        )
+        text = sanitize(self.text, DELETED_LIMIT) if self.text else SUMMARY_UNAVAILABLE
         count = len(self.message_ids)
         if count > 1:
             where = ", ".join(f"<#{channel}>" for channel in self.channel_ids)
@@ -337,10 +335,14 @@ def deleted_posts(facts: ReportFacts) -> list[_Deleted]:
         if post.text is None and text:
             post.text = text
         post.message_ids = list(
-            dict.fromkeys([*post.message_ids, *map(str, details.get("message_ids") or ())])
+            dict.fromkeys(
+                [*post.message_ids, *map(str, details.get("message_ids") or ())]
+            )
         )
         post.channel_ids = list(
-            dict.fromkeys([*post.channel_ids, *map(str, details.get("channel_ids") or ())])
+            dict.fromkeys(
+                [*post.channel_ids, *map(str, details.get("channel_ids") or ())]
+            )
         )
     return list(posts.values())
 

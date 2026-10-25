@@ -467,7 +467,9 @@ def test_the_report_groups_copies_and_says_when_none_was_written():
         expires_at=None,
         at=999.0,
     )
-    other = replace(delete, kind=gw.DELETE, channel_id="2", message_ids=("m3",), deleted=("m3",))
+    other = replace(
+        delete, kind=gw.DELETE, channel_id="2", message_ids=("m3",), deleted=("m3",)
+    )
     lone = replace(delete, kind=gw.DELETE, message_ids=("m4",), deleted=("m4",))
     facts = report_mod.ReportFacts(
         incident_id=uuid4(),
@@ -494,6 +496,5 @@ def test_the_report_groups_copies_and_says_when_none_was_written():
     lone_line = next(line for line in lines if "/m4" in line)
     assert lone_line.endswith("— summary unavailable")
     assert (
-        "**Deleted:** Gift-card lure (×3 in <#1>, <#2>); summary unavailable"
-        in lines
+        "**Deleted:** Gift-card lure (×3 in <#1>, <#2>); summary unavailable" in lines
     )

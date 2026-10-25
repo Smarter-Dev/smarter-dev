@@ -412,9 +412,7 @@ class DeletionSummaries:
                     self.book.settle(*where, future, text)
                 return text
             try:
-                text = await asyncio.wait_for(
-                    asyncio.shield(future), self.wait_seconds
-                )
+                text = await asyncio.wait_for(asyncio.shield(future), self.wait_seconds)
             except TimeoutError:
                 return None
             if text is not None:

@@ -78,6 +78,10 @@ async def test_evidence_goes_after_90_days_assessments_after_5_hours(db_session)
             ),
             _entry(incident, "reason", timedelta(days=400), rule="mass mention"),
             _entry(incident, "note", timedelta(days=400), rule="flagged for review"),
+            # A deleted message's description stays with the incident (#378).
+            _entry(
+                incident, "deleted_summary", timedelta(days=400), content="gift lure"
+            ),
         ]
     )
     await db_session.commit()
@@ -87,6 +91,7 @@ async def test_evidence_goes_after_90_days_assessments_after_5_hours(db_session)
     assert result.counts["moderation_incident_entries"] == 3
     assert await _kinds(db_session) == [
         ("assessment", "model just said"),
+        ("deleted_summary", "gift lure"),
         ("evidence", "recent scam"),
         ("note", "flagged for review"),
         ("reason", "mass mention"),
@@ -219,6 +224,21 @@ async def test_a_deletion_request_removes_their_content_and_keeps_the_history(
                 timedelta(hours=1),
                 rule=f"Flagged for review: <@{PERSON}>",
             ),
+            # What their deleted message was goes; someone else's stays (#378).
+            _entry(
+                incident,
+                "deleted_summary",
+                timedelta(hours=1),
+                target_user_id=PERSON,
+                content="gift-card lure",
+            ),
+            _entry(
+                incident,
+                "deleted_summary",
+                timedelta(hours=1),
+                target_user_id=OTHER,
+                content="their own lure",
+            ),
             ModerationOutbox(
                 incident_id=incident.id,
                 guild_id=GUILD,
@@ -250,8 +270,9 @@ async def test_a_deletion_request_removes_their_content_and_keeps_the_history(
     deleted = await delete_member_moderation_content(db_session, PERSON)
     await db_session.commit()
 
-    assert (deleted.entries, deleted.outbox) == (3, 1)
+    assert (deleted.entries, deleted.outbox) == (4, 1)
     assert await _kinds(db_session) == [
+        ("deleted_summary", "their own lure"),
         ("evidence", "someone else"),
         ("note", f"Flagged for review: <@{PERSON}>"),
         ("reason", "mass mention"),
