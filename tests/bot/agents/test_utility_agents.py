@@ -220,3 +220,16 @@ async def test_the_timeout_announcement_rewrites_the_reason() -> None:
     assert "## user_mention\n<@7>" in seen[0]
     assert "## raw_reason\nspamming like crazy" in seen[0]
     assert "## duration\n10 minutes" in seen[0]
+
+
+def test_the_timeout_instructions_keep_the_moderators_wording() -> None:
+    instructions = timeout.TIMEOUT_MESSAGE_INSTRUCTIONS
+
+    assert "Keep the moderator's own keywords and key phrases" in instructions
+    assert "into the third person" in instructions
+    assert "Drop insults, profanity and personal jabs" in instructions
+    assert "1-2 sentences" in instructions
+    # The examples carry the reason's words through, never a generic summary.
+    assert "not listening to others who know" in instructions
+    assert "You don't know what you don't know" in instructions
+    assert "has been timed out for inappropriate behavior" not in instructions
