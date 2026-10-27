@@ -75,6 +75,13 @@ MESSAGE_DM = "dm"
 #: A warning told by DM alone (the mass-mention warning): its own DM, so a
 #: stronger outcome in the same incident still sends its DM too.
 MESSAGE_WARNING_DM = "warning_dm"
+#: The DM a held member gets while their post is checked (Zech, Oct 27):
+#: its own, so the decision's DM still goes out after it.
+MESSAGE_HOLD_DM = "hold_dm"
+#: The DM of an action the member is not @mentioned about (Zech, Oct 27):
+#: what was removed or the timeout. Its own, so a ban or scam DM after an
+#: early spam mute still goes out.
+MESSAGE_ACTION_DM = "action_dm"
 ENTRY_EVIDENCE = "evidence"
 ENTRY_TRANSCRIPT = "transcript"
 #: Who a member was at the incident (``details``: ``username``,

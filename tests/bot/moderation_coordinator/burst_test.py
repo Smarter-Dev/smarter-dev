@@ -175,10 +175,11 @@ async def test_the_1407_burst_is_one_incident_one_sanction_and_no_blind_copies()
         assert by_name[name].provisional["resolution"] != "expired"
     assert {p.message_id for p in posts.values()} <= h.deleted()
 
-    # One incident, one report, one sanction, one DM.
+    # One incident, one report, one sanction; the hold's DM and the
+    # decision's (#407: the hold notice names nobody).
     assert len(await _incident_ids()) == 1
     assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
-    assert len(h.messenger.dms) == 1
+    assert len(h.messenger.dms) == 2
     sanctions = await _sanctions(SCAMMER.id)
     # The burst is a high-signal scam from an established account: the
     # policy's one-hour high-signal timeout (Zech, Oct 25).
@@ -206,7 +207,8 @@ WARNED_LATELY = replace(
         (SCAMMER, RETURNING, (gw.TIMEOUT, 3600), True),
         # A warning in the last 30 days still makes it a repeat: a day.
         (SCAMMER, WARNED_LATELY, (gw.TIMEOUT, 86400), True),
-        # An account under a week old is still banned, with no DM.
+        # An account under a week old is still banned; told before the ban
+        # (#407).
         (NEW_ACCOUNT, RETURNING, (gw.BAN, None), False),
     ],
     ids=["established", "warned-lately", "new-account"],
@@ -224,10 +226,13 @@ async def test_a_confirmed_burst_is_an_hour_a_repeat_a_day_a_new_account_a_ban(
     assert [s for s in sanctions if s[0] != gw.TIMEOUT or s[1] > 300] == [sanction]
     assert len(await _incident_ids()) == 1
     dms = [text for user, text in h.messenger.dms if user == member.id]
+    # The hold's DM (#407) when it went out before the decision's, which is
+    # last: a hold DM still being placed never follows it.
+    assert len(dms) in (1, 2) and all("being checked" in dm for dm in dms[:-1])
     if secure_account_dm:
-        assert len(dms) == 1 and act_module.SECURE_ACCOUNT_STEPS in dms[0]
+        assert act_module.SECURE_ACCOUNT_STEPS in dms[-1]
     else:
-        assert dms == []
+        assert "you are banned" in dms[-1]
 
 
 def _old_escalation(h):
@@ -261,7 +266,7 @@ async def test_without_the_fix_the_copies_spend_the_budget_and_split_the_burst()
     refused = [m for m, row in rows.items() if row.classifier["refused_by"]]
     assert sorted(refused) == sorted([posts["C"].message_id, posts["D"].message_id])
     assert len(await _incident_ids()) == 2
-    assert len(h.messenger.dms) == 2
+    assert len(h.messenger.dms) == 3  # one hold DM, then each incident's
     alerts = await entries(gw.ENTRY_ALERT)
     assert len([a for a in alerts if "No verdict from the scam check" in a]) == 2
 
@@ -284,7 +289,7 @@ async def test_an_escalated_copy_refused_by_the_budget_falls_back_to_its_posts_a
         assert row.classifier["reused_labels"] == ["abuse", "scam"]
     assert not [a for a in await entries(gw.ENTRY_ALERT) if "No verdict" in a]
     assert len(await _incident_ids()) == 1
-    assert len(h.messenger.dms) == 1
+    assert len(h.messenger.dms) == 2  # the hold's, then the decision's
 
 
 async def test_two_members_in_the_same_burst_are_two_incidents_and_two_sanctions():

@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
 from dataclasses import replace
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 
@@ -39,20 +40,24 @@ from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
+from smarter_dev.bot.moderation_coordinator.model import NOTICE_COPY
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_EDIT_PING
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_MASS_MENTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SECURE_ACCOUNT
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SPAM_WARNING
+from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import Cleanup
+from smarter_dev.bot.moderation_coordinator.model import LabelVerdict
 from smarter_dev.bot.moderation_coordinator.model import MessageFacts
 from smarter_dev.bot.moderation_coordinator.model import RecentPost
 from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.model import Verdicts
 from smarter_dev.bot.moderation_coordinator.model import participant_label
+from smarter_dev.bot.moderation_coordinator.model import percent
 from smarter_dev.bot.moderation_coordinator.ownership import ATTACHMENT_FILTER
 from smarter_dev.bot.moderation_coordinator.ownership import BUMP_CHANNEL
 from smarter_dev.bot.moderation_coordinator.ownership import EDIT_PING
@@ -555,6 +560,15 @@ def _span(seconds: int) -> str:
     return f"{max(1, seconds // 60)} min"
 
 
+def duration_text(seconds: int) -> str:
+    """A sanction's length as a member reads it: "1 hour", "3 days"."""
+    for size, unit in ((DAY, "day"), (3600, "hour"), (60, "minute")):
+        if seconds >= size and seconds % size == 0:
+            count = seconds // size
+            return f"{count} {unit}" if count == 1 else f"{count} {unit}s"
+    return f"{max(1, seconds)} seconds"
+
+
 def scam_claim(key: str) -> str:
     """The one timeout claim a post and its copies share."""
     return f"scam:{key}"
@@ -566,13 +580,14 @@ ALREADY_SANCTIONED = ", already sanctioned for this post"
 
 
 def without_sanction(hits: Sequence[RuleHit], why: str) -> list[RuleHit]:
-    """The scam gate's hits as cleanup only: the post's sanction is owed once."""
+    """The scam gate's hits as cleanup only: the post's sanction is owed once,
+    and the decision that carries it tells the member."""
     return [
         replace(
             hit,
             reason=hit.reason + why,
             sanction=None,
-            notice=None,
+            notice=NOTICE_COPY,
             high_signal=False,
         )
         if hit.rule == SCAM_GATE and hit.sanction is not None
@@ -638,7 +653,7 @@ class ScamReview:
             # second warn (or a repeat timeout) for one post is not owed.
             sanction = None
             reason += ", copy of a post already judged"
-            notice = None
+            notice = NOTICE_COPY
         elif self.account_age < self.ladder.ban_account_age:
             sanction = Sanction(gw.BAN)
             reason += (
@@ -736,6 +751,234 @@ def scam_gate_review(
         repeat=bool(actions_within(history, ladder.repeat_window_seconds, now)),
         copy=known_copy,
         ladder=ladder,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Promotional spam burst (#407)
+# ---------------------------------------------------------------------------
+
+#: A member who joined less than this long ago is newer.
+PROMO_NEW_MEMBER = timedelta(days=7)
+#: Copies count within this long of each other (the spam engine's duplicate
+#: window).
+PROMO_WINDOW_SECONDS = 60.0
+#: Text this short or shorter is never a promotion check (the engine's
+#: duplicate minimum): "thanks!" twice is not an ad.
+PROMO_MIN_LENGTH = 15
+#: How close ``member_activity.first_message_at`` may be to the burst's first
+#: copy and still be that copy (the dispatch records it as it fires).
+PROMO_ACTIVITY_MARGIN_SECONDS = 2.0
+#: When ``member_activity`` began recording messages (its migration, never
+#: backfilled). A member who joined before this and has posted nothing since
+#: has no row, or a row this burst just made, though they may have posted
+#: for years: that is not "no messages before this burst" (#408).
+ACTIVITY_TRACKED_SINCE = datetime(2026, 7, 2, tzinfo=UTC)
+
+
+#: How the rating's report line begins (the executor reports it even when
+#: nothing is done).
+PROMO_LINE = "Promotional spam check"
+
+
+def promo_claim(key: str) -> str:
+    """The one timeout claim a promotional post and its copies share; also
+    its verdict cache key."""
+    return f"promo:{key}"
+
+
+def promo_copies(
+    facts: MessageFacts,
+    key: str,
+    digest: str,
+    recent: Sequence[RecentPost],
+    window: float = PROMO_WINDOW_SECONDS,
+) -> list[RecentPost]:
+    """The author's other posts of the same (or near-same: case and the
+    ends' whitespace folded) text within ``window`` of this one."""
+    return [
+        post
+        for post in recent
+        if post.message_id != facts.message_id
+        and (post.content_hash == key or (digest and post.digest == digest))
+        and abs(post.posted_at - facts.posted_at) <= window
+    ]
+
+
+def _ago(span: timedelta) -> str:
+    seconds = max(0, int(span.total_seconds()))
+    if seconds >= DAY:
+        days = seconds // DAY
+        return "1 day" if days == 1 else f"{days} days"
+    if seconds >= 3600:
+        return f"{seconds // 3600} h"
+    return f"{max(1, seconds // 60)} min"
+
+
+@dataclass(frozen=True, slots=True)
+class PromoReview:
+    """A newer member's same post in two or more channels, to be rated
+    ``promotional_spam``: a confident yes times the author out and removes
+    every copy; anything else leaves the spam engine's warning alone, and
+    the rating goes on the report either way.
+
+    ``copy``: another copy of the post already asked (or is asking); this
+    one reuses that answer and is removed only, never sanctioned again.
+    """
+
+    facts: MessageFacts
+    key: str
+    copies: tuple[RecentPost, ...]
+    #: Why the author counts as newer ("joined 3 days ago", "no messages
+    #: before this burst").
+    newer: tuple[str, ...]
+    #: What the model and the moderators are told about the author and the
+    #: copies.
+    evidence: tuple[str, ...]
+    timeout_seconds: int = HIGH_SIGNAL_TIMEOUT_SECONDS
+    copy: bool = False
+
+    labels: frozenset[str] = frozenset({PROMOTIONAL_SPAM})
+
+    def resolve(
+        self, verdicts: Verdicts, *, rater: str = "Jev"
+    ) -> tuple[list[RuleHit], list[str]]:
+        """The hits and the report's line, whatever the answer."""
+        facts = self.facts
+        verdict = verdicts[PROMOTIONAL_SPAM]
+        evidence = "; ".join(self.evidence)
+        who = f"<@{facts.author_id}>"
+        if not verdict.yes:
+            # A copy's rating is the post's, which its decision reported.
+            return [], [] if self.copy else [
+                f"{PROMO_LINE} on {who}: warned, {_promo_rating(verdict, rater)}; "
+                f"not timed out. {evidence}."
+            ]
+        line = (
+            f"{PROMO_LINE} on {who}: {_promo_rating(verdict, rater)}; "
+            f"timed out and every copy removed. {evidence}."
+        )
+        cleanup = (Cleanup(facts.channel_id, facts.message_id),) + tuple(
+            Cleanup(post.channel_id, post.message_id) for post in self.copies
+        )
+        channels = len({facts.channel_id, *(post.channel_id for post in self.copies)})
+        reason = (
+            f"{_promo_rating(verdict, rater)}, the same post in {channels} channels"
+        )
+        if self.copy:
+            reason += ", copy of a post already judged"
+        return [
+            RuleHit(
+                rule=SCAM_GATE,
+                reason=reason,
+                target_user_id=facts.author_id,
+                target_name=facts.author_name,
+                sanction=None
+                if self.copy
+                else Sanction(
+                    gw.TIMEOUT,
+                    duration_seconds=self.timeout_seconds,
+                    claim=promo_claim(self.key),
+                ),
+                cleanup=cleanup,
+                notice=NOTICE_COPY if self.copy else None,
+                model_justified=True,
+            )
+        ], [] if self.copy else [line]
+
+
+def _promo_rating(verdict: LabelVerdict, rater: str) -> str:
+    """The rating as a moderator reads it: "Jev: 94% promotional spam",
+    "Jev said not spam (88% sure)"; a percentage, never a decimal."""
+    sure = (
+        f" ({percent(verdict.confidence)} sure)"
+        if verdict.confidence is not None
+        else ""
+    )
+    if verdict.yes:
+        return f"{rater}: {percent(verdict.confidence or 0)} promotional spam"
+    if verdict.no:
+        return f"{rater} said not spam{sure}"
+    if verdict.answer is not None:
+        said = "spam" if verdict.answer else "not spam"
+        return f"{rater} said {said} but was too unsure{sure}"
+    return f"{rater} gave no rating ({verdict.describe()})"
+
+
+def promo_review(
+    facts: MessageFacts,
+    *,
+    key: str,
+    copies: Sequence[RecentPost],
+    history: AuthorHistory | None,
+    now: datetime,
+    known_copy: bool = False,
+    timeout_seconds: int = HIGH_SIGNAL_TIMEOUT_SECONDS,
+    min_length: int = PROMO_MIN_LENGTH,
+) -> PromoReview | None:
+    """Whether a newer member's post asks for the promotional-spam rating.
+
+    It does when the same text is in two or more channels within
+    :data:`PROMO_WINDOW_SECONDS` (``copies`` from :func:`promo_copies`) and
+    the author joined within :data:`PROMO_NEW_MEMBER` or had posted nothing
+    in the server before the burst. No link or risky word is needed: the
+    model judges the text (Zech, Oct 27: dannieloficial's two-channel ad
+    was only warned).
+    """
+    if facts.is_edit or facts.is_webhook or facts.author_is_bot:
+        return None
+    if len(facts.content.strip()) <= min_length:
+        return None
+    if not any(post.channel_id != facts.channel_id for post in copies):
+        return None
+    first_posted = min([facts.posted_at, *(post.posted_at for post in copies)])
+    burst_start = datetime.fromtimestamp(first_posted, now.tzinfo)
+    newer: list[str] = []
+    joined = (
+        f"joined {_ago(now - facts.joined_at)} ago"
+        if facts.joined_at is not None
+        else "join date unknown"
+    )
+    if facts.joined_at is not None and now - facts.joined_at < PROMO_NEW_MEMBER:
+        newer.append(joined)
+    first_at = history.first_message_at if history is not None else None
+    if history is None or history.is_first_message is None:
+        posted_before = "earlier messages unknown"
+    elif first_at is None and not history.is_first_message:
+        # Posted before, when not recorded: not a newer member on this.
+        posted_before = "has posted before"
+    elif first_at is None or first_at >= burst_start - timedelta(
+        seconds=PROMO_ACTIVITY_MARGIN_SECONDS
+    ):
+        if facts.joined_at is not None and facts.joined_at >= ACTIVITY_TRACKED_SINCE:
+            posted_before = "no messages before this burst"
+            newer.append(posted_before)
+        else:
+            # Joined before messages were recorded: silence since then says
+            # nothing about whether they posted before.
+            posted_before = "no messages recorded since 2026-07-02"
+    else:
+        posted_before = (
+            f"first message {_ago(burst_start - first_at)} before this burst"
+        )
+    if not newer:
+        return None
+    channels = {facts.channel_id, *(post.channel_id for post in copies)}
+    span = max([facts.posted_at, *(post.posted_at for post in copies)]) - first_posted
+    evidence = (
+        f"account created {_ago(now - facts.account_created_at)} ago",
+        joined,
+        posted_before,
+        f"{len(copies) + 1} copies in {len(channels)} channels within {span:.0f} s",
+    )
+    return PromoReview(
+        facts=facts,
+        key=key,
+        copies=tuple(copies),
+        newer=tuple(newer),
+        evidence=evidence,
+        timeout_seconds=timeout_seconds,
+        copy=known_copy,
     )
 
 

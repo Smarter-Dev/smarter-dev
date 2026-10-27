@@ -64,6 +64,7 @@ from smarter_dev.bot.moderation_coordinator.decide import RELEASED
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
+from smarter_dev.bot.moderation_coordinator.model import NOTICE_COPY
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_EDIT_PING
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_MASS_MENTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
@@ -210,6 +211,21 @@ def hacked_account_dm(
     return (
         f"{opening} This usually means someone else has access to your account.\n\n"
         f"{SECURE_ACCOUNT_STEPS}\n\n{closing}"
+    )
+
+
+def hold_dm(
+    guild_name: str | None, facts: MessageFacts, provisional: Provisional
+) -> str:
+    """What a held member is told while their post is checked: the hold
+    notice in the channel names nobody."""
+    server = f"**{guild_name}**" if guild_name else "the server"
+    return (
+        f"Your message in <#{facts.channel_id}> on {server} looked like a "
+        "possible scam, so it is being checked and you are timed out for up "
+        f"to {rules.duration_text(provisional.duration_seconds)} meanwhile. "
+        "If it is cleared, the timeout is lifted right away.\n\n"
+        "If you think this was a mistake, message a moderator of the server."
     )
 
 
@@ -467,6 +483,26 @@ class Executor:
                     facts.channel_id, INVESTIGATING
                 )
                 hold.channel_id = facts.channel_id
+            # The hold notice names nobody: the member is told by DM.
+            if (
+                outcome is not None
+                and outcome.state == gw.CONFIRMED
+                and result.incident_id is not None
+                and current.document.destinations.member_dms
+                and await gateway.claim_member_message(
+                    result.incident_id,
+                    kind=gw.MESSAGE_HOLD_DM,
+                    target_user_id=facts.author_id,
+                )
+            ):
+                await self._dm_and_record(
+                    gateway,
+                    result.incident_id,
+                    gw.MESSAGE_HOLD_DM,
+                    facts.author_id,
+                    hold_dm(self._guild_name(facts), facts, provisional),
+                    report_channel_id=current.report_channel_id,
+                )
         except Exception:  # noqa: BLE001 — containment failing must not stop the decision
             log_exception(
                 logger,
@@ -645,7 +681,12 @@ class Executor:
         ]
         provisional = decision.provisional
         lines = self._report_lines(evaluation)
-        if not targets and provisional is None and hold is None:
+        # A promotional-spam rating is reported even when it acts on nothing
+        # (#407: "warned, Jev said not spam"), on the warning's incident.
+        promo_rated = any(
+            line[1].startswith(rules.PROMO_LINE) for line in lines if len(line) > 1
+        )
+        if not targets and provisional is None and hold is None and not promo_rated:
             # Nothing to do: review lines alone (an unread history, a skipped
             # ring check on a message nothing fired on) open no incident.
             if lines:
@@ -732,6 +773,7 @@ class Executor:
                 )
             )
 
+        await self._dm_before_ban(gateway, trigger, targets, facts, policy)
         if proposals:
             result = await gateway.act(trigger, proposals)
         else:
@@ -751,6 +793,7 @@ class Executor:
         for target in targets:
             await self._tell(gateway, trigger, result, target, facts, policy, deleted)
         await self._scam_log(facts, policy, targets, deleted)
+        _log_decision(evaluation, targets, result, deleted)
 
         if lines and result.incident_id is not None:
             await gateway.add_notes(
@@ -835,7 +878,14 @@ class Executor:
         destinations = policy.document.destinations
         dms = destinations.member_dms
         channel_notices = destinations.channel_notices
+        # Whether this decision @mentions the member in the channel or DMs
+        # them; when it does neither, they get a DM of what was done.
+        # A copy's post tells them (one DM per incident).
+        told = NOTICE_COPY in notices or (
+            target.sanction is not None and target.sanction.kind == gw.BAN
+        )
         if target.sanction is not None and target.sanction.kind == gw.WARN:
+            told = channel_notices or dms
             if scam_text is not None:
                 notice = (
                     f"⚠️ <@{target.user_id}> has been warned.\n**Reason:** {scam_text}"
@@ -867,13 +917,28 @@ class Executor:
                     send=dms and policy.document.rules.mass_mention.dm,
                 )
             else:
-                notice = format_warning_message(target.user_id, _spam_reasons(target))
+                told = channel_notices or dms
+                reasons = _spam_reasons(target)
+                notice = format_warning_message(target.user_id, reasons)
+                # Channel notices off: the warning names nobody in the
+                # channel, so the member is told by DM (#408).
+                reason = ", ".join(reasons)
                 await self._warn(
-                    gateway, trigger, target, facts, notice, None, post=channel_notices
+                    gateway,
+                    trigger,
+                    target,
+                    facts,
+                    notice,
+                    _warning_dm(reason[:1].upper() + reason[1:])
+                    if dms and not channel_notices
+                    else None,
+                    post=channel_notices,
+                    dm_kind=gw.MESSAGE_WARNING_DM,
                 )
         elif scam_text is not None and target.sanction is not None and dms:
             # A timeout (high-signal or repeat): the member is told by DM,
             # once it took effect (never after a staff refusal or a reversal).
+            told = True
             applied = next(
                 (
                     outcome
@@ -916,25 +981,125 @@ class Executor:
                 )
 
         user = f"<@{target.user_id}>"
-        if not channel_notices:
+        if channel_notices:
+            if NOTICE_ATTACHMENT_BLOCKED in notices and facts.message_id in deleted:
+                told = True
+                await self.messenger.post(
+                    facts.channel_id,
+                    _attachment_notice(facts, policy, user, blocked=True),
+                    mention=target.user_id,
+                )
+            elif NOTICE_ATTACHMENT_WARNED in notices:
+                told = True
+                await self.messenger.post(
+                    facts.channel_id,
+                    _attachment_notice(facts, policy, user, blocked=False),
+                    mention=target.user_id,
+                )
+            if NOTICE_EDIT_PING in notices and facts.message_id in deleted:
+                told = True
+                await self.messenger.post(
+                    facts.channel_id,
+                    EDIT_PING_TEXT.format(user=target.user_id),
+                    mention=target.user_id,
+                )
+        if (
+            told
+            or not dms
+            or (
+                rules.MASS_MENTION in target.rules
+                and not policy.document.rules.mass_mention.dm
+            )
+        ):
             return
-        if NOTICE_ATTACHMENT_BLOCKED in notices and facts.message_id in deleted:
-            await self.messenger.post(
-                facts.channel_id,
-                _attachment_notice(facts, policy, user, blocked=True),
-                mention=target.user_id,
+        await self._tell_by_dm(gateway, result, target, facts, policy, removed)
+
+    async def _tell_by_dm(
+        self,
+        gateway,
+        result: gw.ActResult,
+        target: TargetDecision,
+        facts: MessageFacts,
+        policy: GuildPolicy,
+        removed: int,
+    ) -> None:
+        """Zech, Oct 27: an action the member is not @mentioned about in the
+        channel is told by DM: what they posted, what was done, how to
+        appeal. Only what took effect (a refused timeout is not told); one
+        DM per member per incident, so a post's copies send one."""
+        sanction = target.sanction
+        applied = None
+        if sanction is not None and sanction.kind != gw.WARN:
+            applied = next(
+                (
+                    outcome
+                    for outcome in result.outcomes
+                    if outcome.kind == sanction.kind
+                    and outcome.target_user_id == target.user_id
+                    and outcome.applied
+                ),
+                None,
             )
-        elif NOTICE_ATTACHMENT_WARNED in notices:
-            await self.messenger.post(
-                facts.channel_id,
-                _attachment_notice(facts, policy, user, blocked=False),
-                mention=target.user_id,
-            )
-        if NOTICE_EDIT_PING in notices and facts.message_id in deleted:
-            await self.messenger.post(
-                facts.channel_id,
-                EDIT_PING_TEXT.format(user=target.user_id),
-                mention=target.user_id,
+        if applied is None and not removed:
+            return
+        if result.incident_id is None or not await gateway.claim_member_message(
+            result.incident_id, kind=gw.MESSAGE_ACTION_DM, target_user_id=target.user_id
+        ):
+            return
+        done = "removed" if removed else "left in place"
+        if applied is not None and sanction.kind == gw.TIMEOUT:
+            # A timeout already in place ends when it ends (#342).
+            ends = applied.in_place_until or applied.expires_at
+            done += ", and you are timed out"
+            if sanction.duration_seconds and not applied.in_place_until:
+                done += f" for {rules.duration_text(sanction.duration_seconds)}"
+            if ends:
+                done += f" (until <t:{int(ends.timestamp())}:f>)"
+        await self._dm_and_record(
+            gateway,
+            result.incident_id,
+            gw.MESSAGE_ACTION_DM,
+            target.user_id,
+            action_dm(self._guild_name(facts), facts, done, _reason([target])),
+            report_channel_id=policy.report_channel_id,
+        )
+
+    async def _dm_before_ban(
+        self,
+        gateway,
+        trigger: Trigger,
+        targets: list[TargetDecision],
+        facts: MessageFacts,
+        policy: GuildPolicy,
+    ) -> None:
+        """A ban's DM goes out before the ban: Discord delivers nothing to a
+        member who shares no server with the bot. If the ban is then refused
+        (a staff member, a reversal), the DM has still gone; the report says
+        it was delivered either way."""
+        if not policy.document.destinations.member_dms:
+            return
+        for target in targets:
+            if target.sanction is None or target.sanction.kind != gw.BAN:
+                continue
+            incident_id = await gateway.ensure_incident(trigger, subject=target.user_id)
+            if not await gateway.claim_member_message(
+                incident_id, kind=gw.MESSAGE_DM, target_user_id=target.user_id
+            ):
+                continue
+            await self._dm_and_record(
+                gateway,
+                incident_id,
+                gw.MESSAGE_DM,
+                target.user_id,
+                action_dm(
+                    self._guild_name(facts),
+                    facts,
+                    "removed, and you are banned"
+                    if target.cleanup
+                    else "flagged, and you are banned",
+                    _reason([target]),
+                ),
+                report_channel_id=policy.report_channel_id,
             )
 
     async def _scam_log(
@@ -978,11 +1143,13 @@ class Executor:
         dm: str | None,
         *,
         post: bool = True,
+        dm_kind: str = gw.MESSAGE_DM,
     ) -> None:
         """As the spam engine and the handlers warn: one row, one notice per
         incident (a warn the incident already covers still tells the member
-        once), and for a scam a best-effort DM. ``post=False`` (the policy's
-        channel notices off): the warning is recorded, nothing is posted."""
+        once), and a best-effort DM claimed as ``dm_kind``. ``post=False``
+        (the policy's channel notices off): the warning is recorded, nothing
+        is posted."""
         async with gateway.reserve(
             trigger,
             Proposal(
@@ -1020,13 +1187,13 @@ class Executor:
             dm
             and incident_id is not None
             and await gateway.claim_member_message(
-                incident_id, kind=gw.MESSAGE_DM, target_user_id=target.user_id
+                incident_id, kind=dm_kind, target_user_id=target.user_id
             )
         ):
             await self._dm_and_record(
                 gateway,
                 incident_id,
-                gw.MESSAGE_DM,
+                dm_kind,
                 target.user_id,
                 dm,
                 report_channel_id=trigger.report_channel_id,
@@ -1047,6 +1214,20 @@ class Executor:
         report_channel_id: str | None,
     ) -> bool:
         """A claimed DM, then whether it arrived, on the incident (#333)."""
+        if kind in (gw.MESSAGE_DM, gw.MESSAGE_ACTION_DM):
+            # The decision's DM ends the hold: a hold DM still being placed
+            # ("being checked") must not arrive after it (#407).
+            try:
+                await gateway.claim_member_message(
+                    incident_id, kind=gw.MESSAGE_HOLD_DM, target_user_id=user_id
+                )
+            except Exception:  # noqa: BLE001 — the decision's DM goes either way
+                log_exception(
+                    logger,
+                    "Coordinator could not close the hold DM to %s",
+                    user_id,
+                    level=logging.WARNING,
+                )
         delivered = await self._dm(user_id, content)
         try:
             await gateway.record_member_message(
@@ -1207,11 +1388,84 @@ class Executor:
 # ---------------------------------------------------------------------------
 
 
+def _log_decision(
+    evaluation: Evaluation,
+    targets: list[TargetDecision],
+    result: gw.ActResult,
+    deleted: set[str],
+) -> None:
+    """One INFO line per carried-out decision (#407: a warning left no
+    trace): who, which rules, the model's ratings and what was done. No
+    message content."""
+    facts = evaluation.facts
+    verdicts = ", ".join(
+        f"{label}={verdict.describe()}"
+        for label, verdict in sorted(evaluation.verdicts.items())
+    )
+    actions = []
+    for target in targets:
+        done = []
+        if target.sanction is not None:
+            outcome = next(
+                (
+                    o
+                    for o in result.outcomes
+                    if o.kind == target.sanction.kind
+                    and o.target_user_id == target.user_id
+                ),
+                None,
+            )
+            what = target.sanction.kind
+            if target.sanction.duration_seconds:
+                what += f" {target.sanction.duration_seconds}s"
+            if outcome is not None:
+                what += f" ({outcome.state})"
+            done.append(what)
+        removed = sum(1 for item in target.cleanup if item.message_id in deleted)
+        if target.cleanup:
+            done.append(f"deleted {removed}/{len(target.cleanup)}")
+        actions.append(
+            f"user={target.user_id} rules={','.join(dict.fromkeys(target.rules))} "
+            f"action={'+'.join(done) or 'notice'}"
+        )
+    logger.info(
+        "Coordinator decision guild=%s message=%s author=%s verdicts=[%s] %s",
+        facts.guild_id,
+        facts.message_id,
+        facts.author_id,
+        verdicts or "none",
+        "; ".join(actions) or "action=report",
+    )
+
+
 def review_text(lines) -> str:
     """Report lines as one log line. A line is ``(kind, text)`` or, with its
     details, ``(kind, text, details)`` (#342: a history line once raised
     ValueError here)."""
     return " | ".join(line[1] for line in lines)
+
+
+#: How much of the member's own post their DM quotes.
+DM_EXCERPT_CHARS = 300
+
+
+def action_dm(
+    guild_name: str | None, facts: MessageFacts, done: str, reason: str
+) -> str:
+    """What a member who was not @mentioned in the channel is told (Zech,
+    Oct 27): what they posted, what was done to it and them, and how to
+    appeal. ``done`` finishes "Your message … was …"."""
+    server = f"**{guild_name}**" if guild_name else "the server"
+    text = " ".join(facts.content.split())
+    if len(text) > DM_EXCERPT_CHARS:
+        text = text[: DM_EXCERPT_CHARS - 1] + "…"
+    quoted = "\n\n> " + text.replace("`", "'") if text else ""
+    return (
+        f"Your message in <#{facts.channel_id}> on {server} was {done}."
+        f"{quoted}\n\n**Reason:** {reason or 'it broke the server rules'}\n\n"
+        "If you think this was a mistake, message a moderator of the server to "
+        "appeal."
+    )
 
 
 def _warning_dm(reason: str) -> str:

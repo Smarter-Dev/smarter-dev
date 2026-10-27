@@ -288,8 +288,12 @@ async def test_a_clean_verdict_releases_the_hold_and_closes_its_notice():
     assert (posts[1].channel_id, CLOSED_CLEAN) in h.messenger.posts
     report = h.port.latest_report_text(REPORTS)
     assert f"Hold on <@{victim.id}>" in report and "lifted" in report
-    # The spam engine's warning for the repeat stands; the hold is gone.
-    assert "**Summary:** Scam check found nothing: warned, hold lifted." in report
+    # The spam engine's warning for the repeat stands; the hold is gone. The
+    # hold notice names nobody, so the member was told of it by DM (#407).
+    assert (
+        "**Summary:** Scam check found nothing: warned, hold lifted, told by DM."
+        in report
+    )
     assert "Coordinator decision" not in report
 
 
@@ -511,6 +515,11 @@ async def test_a_ring_and_its_followup_are_one_incident_with_a_transcript():
         ).scalars()
         assert len(set(aliases)) == 1
     assert await entries(gw.ENTRY_TRANSCRIPT)
+    # Each timed-out member is told by DM, once (#407: nobody is @mentioned).
+    told = [user for user, _ in h.messenger.dms]
+    assert {ALICE.id, BOB.id, CAROL.id} <= set(told)
+    assert len(told) == len(set(told))
+    assert all("timed out for 7 days" in dm for _, dm in h.messenger.dms)
 
 
 def test_the_history_note_comes_from_the_record():
@@ -661,7 +670,12 @@ async def test_the_secure_account_dm_follows_an_applied_timeout():
     case = replace(case, policy=acting(case.policy))
     h = harness(case)
     await h.judge(case.messages[0])
-    assert [user for user, _ in h.messenger.dms] == [scammer.id]
+    # The spam engine's early mute is told first (#407: it @mentions
+    # nobody), then the scam's secure-account DM.
+    [(muted, mute), (told, secure)] = h.messenger.dms
+    assert muted == told == scammer.id
+    assert "you are timed out for 1 day" in mute
+    assert act_module.SECURE_ACCOUNT_STEPS in secure
 
 
 async def test_no_dm_when_the_gateway_did_not_apply_the_timeout():
@@ -672,7 +686,11 @@ async def test_no_dm_when_the_gateway_did_not_apply_the_timeout():
     h = harness(case)
     h.port.protected[scammer.id] = "holds a staff role"
     await h.judge(case.messages[0])
-    assert h.messenger.dms == []
+    # Only the removal is told (#407: nobody was @mentioned about it).
+    [(user, text)] = h.messenger.dms
+    assert user == scammer.id
+    assert "was removed." in text and "timed out" not in text
+    assert "secure" not in text.lower()
 
 
 # -- a hold always closes (#310 item 1) ----------------------------------------
@@ -949,7 +967,9 @@ async def test_everyone_with_a_scam_link_is_deleted_held_and_reviewed_in_one_rep
     assert len([p for p in h.port.posts if p["channel_id"] == REPORTS]) == 1
     # Review item 1: both reasons reach the member. The ping warning took
     # the incident's one DM, and the timeout's DM was lost.
-    [(warned, warning), (told, hacked)] = h.messenger.dms
+    # The hold's own DM too (#407: its notice names nobody).
+    [(warned, warning), (held, hold), (told, hacked)] = h.messenger.dms
+    assert held == PINGER.id and "being checked" in hold
     assert (warned, warning) == (
         PINGER.id,
         act_module._warning_dm(rules.MASS_MENTION_WARNING),
@@ -2027,7 +2047,13 @@ async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
     held = at(f"Held <@{HONEY.id}> luluhoney for 5 minutes")
     upgraded = at(f"Hold on <@{HONEY.id}> luluhoney upgraded to a 1-hour timeout")
     deletes = [i for i, line in enumerate(lines) if "Deleted a message from" in line]
-    told = at(f"DM to <@{HONEY.id}> delivered.")
+    # The hold's own DM (#407) comes first, under its own name.
+    assert at(f"Hold DM to <@{HONEY.id}> delivered.") == held + 1
+    told = next(
+        i
+        for i, line in enumerate(lines)
+        if line.endswith(f"> DM to <@{HONEY.id}> delivered.")
+    )
     summary = at("**Summary:**")
     # The copy is judged after the post: its removal comes after the DM.
     assert held < upgraded < deletes[0] < told < deletes[1] < summary
@@ -2043,8 +2069,10 @@ async def test_an_image_only_burst_is_one_incident_reported_as_a_timeline():
     assert "already covered" not in report and "not done" not in report
     assert report.count("History:") == 0  # said once, in the summary
 
-    # The member is told what happened and how to take the account back.
-    [(member, dm)] = h.messenger.dms
+    # The member is told what happened and how to take the account back,
+    # after the hold's own DM (#407).
+    [(_, hold), (member, dm)] = h.messenger.dms
+    assert "being checked" in hold
     until = [c[2] for c in h.port.calls if c[0] == "timeout"][-1]
     assert member == HONEY.id
     # The post is decided before its copy arrives here, so the DM names no
@@ -2121,7 +2149,8 @@ async def test_a_dm_that_did_not_arrive_is_recorded_and_reported():
         f"DM to <@{HONEY.id}> not delivered (DMs closed or Discord refused it)."
         in report
     )
-    assert "**DM not delivered**" in report
+    # The hold's DM (#407) and the decision's.
+    assert "**2 of 2 DMs not delivered**" in report
     assert (gw.MESSAGE_DM, "not delivered") in await _outbox()
 
 
@@ -2192,5 +2221,6 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     assert "No verdict" not in report
     assert "upgraded to a 1-hour timeout" in report
     assert "2 messages removed, timed out for 1 hour, told by DM" in report
-    [(_, dm)] = h.messenger.dms
+    [(_, hold), (_, dm)] = h.messenger.dms
+    assert "being checked" in hold
     assert "we removed what it posted" in dm

@@ -400,11 +400,13 @@ def author_history_from(row, actions: Iterable, before: datetime) -> AuthorHisto
             is_first_message=first >= before - margin,
             days_since_last_message=None,
             actions=past,
+            first_message_at=first,
         )
     return AuthorHistory(
         is_first_message=False,
         days_since_last_message=max(0, (before - last).days),
         actions=past,
+        first_message_at=first,
     )
 
 
