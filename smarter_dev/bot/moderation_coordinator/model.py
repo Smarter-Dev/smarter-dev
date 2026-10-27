@@ -23,6 +23,10 @@ SCAM = "scam"
 ABUSE = "abuse"
 #: The message promotes a specific hackathon, competition or similar event.
 EVENT_PROMOTION = "event_promotion"
+#: Unsolicited advertising: a newer member's same post in several channels
+#: (#407). Jev answers it when it is the only label; with ``scam``/``abuse``
+#: or an image in the request, Haiku answers it with the rest.
+PROMOTIONAL_SPAM = "promotional_spam"
 PARTICIPANT_PREFIX = "participant:"
 
 #: Labels only Claude Haiku answers. Jev serves the ring's validated yes/no
@@ -89,7 +93,7 @@ class LabelVerdict:
         if self.outcome in (ANSWERED, LOW_CONFIDENCE) and self.answer is not None:
             text = "yes" if self.answer else "no"
             if self.confidence is not None:
-                text += f", confidence {self.confidence:.2f}"
+                text += f", confidence {percent(self.confidence)}"
             return text if self.outcome == ANSWERED else f"{text} (too unsure)"
         if self.outcome == UNSEEN_IMAGES:
             return "no, but not every image was seen"
@@ -103,6 +107,12 @@ class LabelVerdict:
             if self.confidence is None
             else round(float(self.confidence), 3),
         }
+
+
+def percent(confidence: float) -> str:
+    """A model's confidence as people read it (Zech, Oct 27): "94%", never
+    "0.94"."""
+    return f"{round(float(confidence) * 100):.0f}%"
 
 
 def settle(label: str, answer: bool | None, confidence: float | None) -> LabelVerdict:
@@ -228,6 +238,9 @@ class AuthorHistory:
     #: Moderation actions on record, newest first; never a review hold or its
     #: release (they are no action on the member).
     actions: tuple[PastAction, ...] = ()
+    #: ``member_activity.first_message_at``; None with no row (never posted)
+    #: or when it could not be read.
+    first_message_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,6 +251,9 @@ class RecentPost:
     message_id: str
     posted_at: float
     content_hash: str
+    #: The spam engine's duplicate digest (whitespace at the ends and case
+    #: folded): a near-same copy for the promotional-spam check (#407).
+    digest: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +293,9 @@ NOTICE_EDIT_PING = "edit_ping"
 NOTICE_SCAM_REMOVED = "scam_removed"
 NOTICE_SECURE_ACCOUNT = "secure_account"
 NOTICE_MASS_MENTION = "mass_mention"
+#: A copy of a post already judged: the post's own decision tells the member
+#: (one DM per incident), so the copy sends nothing.
+NOTICE_COPY = "copy"
 
 
 @dataclass(frozen=True, slots=True)

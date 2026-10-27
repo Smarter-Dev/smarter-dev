@@ -48,6 +48,7 @@ from smarter_dev.bot.moderation_coordinator.classifier import choose_backend
 from smarter_dev.bot.moderation_coordinator.decide import decide
 from smarter_dev.bot.moderation_coordinator.decide import enforceable
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
+from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
@@ -68,6 +69,7 @@ from smarter_dev.bot.moderation_coordinator.state import SpamTracker
 from smarter_dev.bot.moderation_coordinator.state import VerdictCache
 from smarter_dev.bot.moderation_coordinator.summary import SummaryBook
 from smarter_dev.bot.spam_engine import NO_SPAM_ACTION
+from smarter_dev.bot.spam_engine import content_digest
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import TranscriptMessage
 from smarter_dev.web.handler_recent_messages import content_hash
@@ -430,7 +432,13 @@ class Coordinator:
             self.recent.record(
                 facts.guild_id,
                 facts.author_id,
-                RecentPost(facts.channel_id, facts.message_id, now, key),
+                RecentPost(
+                    facts.channel_id,
+                    facts.message_id,
+                    now,
+                    key,
+                    digest=content_digest(facts.content),
+                ),
             )
         if not judge_labels:
             # Past the queue: the deterministic rules only, and no slot taken
@@ -545,6 +553,66 @@ class Coordinator:
             if claimed[0]:
                 # Copies waiting on this check get no answer if it never runs.
                 stack.callback(self._settle, facts, key, claimed[1], {})
+
+        # A newer member's same post in two or more channels (#407): rated
+        # promotional spam or not, whatever the scam gate made of it. Its
+        # copies share one answer, as a scam check's do.
+        promo_review = None
+        promo_claimed = None
+        promo_key = rules.promo_claim(key)
+        if (
+            policy.scam_gate
+            and in_scope(policy.scam_gate_channel_ids, facts.channel_id)
+            and not facts.is_edit
+        ):
+            promo_copies = rules.promo_copies(
+                facts, key, content_digest(facts.content), earlier_posts
+            )
+            if (
+                any(post.channel_id != facts.channel_id for post in promo_copies)
+                and not await author_is_staff()
+            ):
+                if history is None:
+                    history = await self._author_history(
+                        facts,
+                        now_dt,
+                        review,
+                        actions_before=min(
+                            [now, *(post.posted_at for post in promo_copies)]
+                        ),
+                    )
+                promo_review = rules.promo_review(
+                    facts,
+                    key=key,
+                    copies=promo_copies,
+                    history=history,
+                    now=now_dt,
+                    timeout_seconds=rules.ScamLadder.from_policy(
+                        policy.document
+                    ).high_signal_timeout_seconds,
+                )
+            if promo_review is not None and claimed is not None:
+                # Asked with the scam check, in its one request: its copies
+                # share that check's answer.
+                if not claimed[0]:
+                    promo_review = replace(promo_review, copy=True)
+            elif promo_review is not None:
+                # Nothing awaited since the copies were read: a post and its
+                # copy cannot both ask.
+                promo_claimed = self.verdict_cache.claim(
+                    facts.guild_id, facts.author_id, promo_key, now
+                )
+                if promo_claimed[0]:
+                    stack.callback(self._settle, facts, promo_key, promo_claimed[1], {})
+                else:
+                    promo_review = replace(promo_review, copy=True)
+                if burst_alias is None:
+                    burst_anchor = self.bursts.join(
+                        facts.guild_id, facts.author_id, facts.message_id, now
+                    )
+                    burst_alias = _burst_alias(
+                        facts.guild_id, facts.author_id, burst_anchor
+                    )
 
         ring_pending = None
         ring = policy.ring
@@ -683,6 +751,8 @@ class Coordinator:
             if first:
                 first_asker = future
                 labels |= scam_review.labels
+                if promo_review is not None:
+                    labels.add(PROMOTIONAL_SPAM)
             else:
                 try:
                     reused = await asyncio.wait_for(asyncio.shield(future), deadline)
@@ -691,6 +761,41 @@ class Coordinator:
                         label: LabelVerdict(label, TIMEOUT)
                         for label in scam_review.labels
                     }
+                if PROMOTIONAL_SPAM in reused and promo_review is None:
+                    reused = {
+                        label: verdict
+                        for label, verdict in reused.items()
+                        if label != PROMOTIONAL_SPAM
+                    }
+        promo_asker = None
+        if (
+            promo_review is not None
+            and promo_claimed is None
+            and PROMOTIONAL_SPAM not in labels
+            and PROMOTIONAL_SPAM not in reused
+            and not any(verdict.yes for verdict in reused.values())
+        ):
+            # A copy of a post whose scam check had no promotion question
+            # (the post had no copy yet) and found no scam: asked now, once
+            # for the burst.
+            promo_claimed = self.verdict_cache.claim(
+                facts.guild_id, facts.author_id, promo_key, now
+            )
+            if promo_claimed[0]:
+                stack.callback(self._settle, facts, promo_key, promo_claimed[1], {})
+            promo_review = replace(promo_review, copy=not promo_claimed[0])
+        if promo_claimed is not None:
+            first, future = promo_claimed
+            if first:
+                promo_asker = future
+                labels.add(PROMOTIONAL_SPAM)
+            else:
+                try:
+                    answer = await asyncio.wait_for(asyncio.shield(future), deadline)
+                except TimeoutError:
+                    answer = {PROMOTIONAL_SPAM: LabelVerdict(PROMOTIONAL_SPAM, TIMEOUT)}
+                if PROMOTIONAL_SPAM in answer:
+                    reused[PROMOTIONAL_SPAM] = answer[PROMOTIONAL_SPAM]
         if ring_pending is not None:
             labels |= ring_pending.labels
         # A Haiku request also describes the message, in case it is deleted
@@ -717,6 +822,7 @@ class Coordinator:
             ring_context=_ring_context(ring_pending),
             ring_ad=_ring_ad(ring_pending),
             ring_candidates=_ring_candidates(ring_pending),
+            promo_context=promo_review.evidence if promo_review is not None else (),
             charge_author=not isinstance(ring_pending, rules.RingFollowup)
             or bool(labels & {SCAM, ABUSE}),
             sampled_images=_image_sample(
@@ -735,6 +841,8 @@ class Coordinator:
             if first_asker is not None:
                 # Copies waiting on this check get no answer: unknown.
                 self._settle(facts, key, first_asker, {})
+            if promo_asker is not None:
+                self._settle(facts, promo_key, promo_asker, {})
             raise
         if result.summary is None:
             # A separate request may still describe it, from these images.
@@ -769,11 +877,32 @@ class Coordinator:
                 facts,
                 key,
                 first_asker,
-                {label: verdicts[label] for label in scam_review.labels},
+                {
+                    label: verdicts[label]
+                    for label in scam_review.labels
+                    | ({PROMOTIONAL_SPAM} if PROMOTIONAL_SPAM in labels else set())
+                },
+            )
+
+        if promo_asker is not None:
+            self._settle(
+                facts,
+                promo_key,
+                promo_asker,
+                {PROMOTIONAL_SPAM: verdicts[PROMOTIONAL_SPAM]},
             )
 
         # 6. Resolve and decide.
         scam_outcome = None
+        if promo_review is not None:
+            promo_hits, lines = promo_review.resolve(
+                verdicts,
+                rater="Haiku"
+                if result.backend == HAIKU and PROMOTIONAL_SPAM not in reused
+                else "Jev",
+            )
+            hits += promo_hits
+            review += lines
         if scam_review is not None:
             # Read the copies again: the verdict outlasts a burst, so a copy
             # posted while it was asked is removed with the rest (as
@@ -917,9 +1046,14 @@ class Coordinator:
                 facts.guild_id, facts.author_id, burst=burst_anchor, now=now
             ),
             remaining=remaining,
-            copy_ids=tuple(post.message_id for post in scam_review.copies)
-            if scam_review is not None
-            else (),
+            copy_ids=tuple(
+                dict.fromkeys(
+                    post.message_id
+                    for review_ in (scam_review, promo_review)
+                    if review_ is not None
+                    for post in review_.copies
+                )
+            ),
         )
 
     def _claim_summary(

@@ -349,7 +349,9 @@ class ModerationGateway:
                 .values(detail="delivered" if delivered else "not delivered")
             )
             await session.commit()
-        what = "Warning DM" if kind == t.MESSAGE_WARNING_DM else "DM"
+        what = {t.MESSAGE_WARNING_DM: "Warning DM", t.MESSAGE_HOLD_DM: "Hold DM"}.get(
+            kind, "DM"
+        )
         text = (
             f"{what} to <@{target}> delivered."
             if delivered

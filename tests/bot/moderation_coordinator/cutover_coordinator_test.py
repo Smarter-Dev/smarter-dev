@@ -558,9 +558,10 @@ async def test_a_copy_of_a_confirmed_scam_is_removed_but_not_punished_again():
     original, copy = (e.decision.targets[member.id] for e in result.evaluations)
     assert original.sanction.kind == gw.TIMEOUT  # the repeat
     # No second repeat timeout and no scam notice; what is left is the spam
-    # engine's own duplicate-message warning, which legacy gives too.
+    # engine's own duplicate-message warning, which legacy gives too. The
+    # original's decision tells the member of the scam (#407: "copy").
     assert copy.sanction.kind == gw.WARN
-    assert copy.notices == ["spam_warning"]
+    assert copy.notices == ["spam_warning", "copy"]
     assert posts[1].message_id in {item.message_id for item in copy.cleanup}
 
 
@@ -649,7 +650,7 @@ async def test_a_copy_decided_after_its_posts_timeout_is_not_warned_too():
     assert evaluation.scam_outcome == "violation"
     target = evaluation.decision.targets[member.id]
     assert target.sanction is None
-    assert target.notices == []
+    assert target.notices == ["copy"]  # the timeout's decision tells (#407)
     assert [item.message_id for item in target.cleanup] == [post.message_id]
 
 
