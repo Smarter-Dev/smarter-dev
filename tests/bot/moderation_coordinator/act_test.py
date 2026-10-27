@@ -515,6 +515,11 @@ async def test_a_ring_and_its_followup_are_one_incident_with_a_transcript():
         ).scalars()
         assert len(set(aliases)) == 1
     assert await entries(gw.ENTRY_TRANSCRIPT)
+    # Each timed-out member is told by DM, once (#407: nobody is @mentioned).
+    told = [user for user, _ in h.messenger.dms]
+    assert {ALICE.id, BOB.id, CAROL.id} <= set(told)
+    assert len(told) == len(set(told))
+    assert all("timed out for 7 days" in dm for _, dm in h.messenger.dms)
 
 
 def test_the_history_note_comes_from_the_record():
