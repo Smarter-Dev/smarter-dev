@@ -31,6 +31,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
 from dataclasses import replace
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 
@@ -768,6 +769,11 @@ PROMO_MIN_LENGTH = 15
 #: How close ``member_activity.first_message_at`` may be to the burst's first
 #: copy and still be that copy (the dispatch records it as it fires).
 PROMO_ACTIVITY_MARGIN_SECONDS = 2.0
+#: When ``member_activity`` began recording messages (its migration, never
+#: backfilled). A member who joined before this and has posted nothing since
+#: has no row, or a row this burst just made, though they may have posted
+#: for years: that is not "no messages before this burst" (#408).
+ACTIVITY_TRACKED_SINCE = datetime(2026, 7, 2, tzinfo=UTC)
 
 
 #: How the rating's report line begins (the executor reports it even when
@@ -944,8 +950,13 @@ def promo_review(
     elif first_at is None or first_at >= burst_start - timedelta(
         seconds=PROMO_ACTIVITY_MARGIN_SECONDS
     ):
-        posted_before = "no messages before this burst"
-        newer.append(posted_before)
+        if facts.joined_at is not None and facts.joined_at >= ACTIVITY_TRACKED_SINCE:
+            posted_before = "no messages before this burst"
+            newer.append(posted_before)
+        else:
+            # Joined before messages were recorded: silence since then says
+            # nothing about whether they posted before.
+            posted_before = "no messages recorded since 2026-07-02"
     else:
         posted_before = (
             f"first message {_ago(burst_start - first_at)} before this burst"

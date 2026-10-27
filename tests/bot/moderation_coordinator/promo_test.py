@@ -49,6 +49,10 @@ DANNIE = Member(
     "dannieloficial", 407, NOW - timedelta(days=40), NOW - timedelta(days=3)
 )
 REGULAR = Member("helper", 408, NOW - timedelta(days=900), NOW - timedelta(days=600))
+#: Joined after ``member_activity`` began recording (2026-07-02), not this week.
+LATECOMER = Member(
+    "latecomer", 409, NOW - timedelta(days=900), NOW - timedelta(days=30)
+)
 PROMO = (
     "🔥 Grow your channel fast! Real followers and views, packages from $5. "
     "Message me on Instagram @dannie.growth for prices"
@@ -155,6 +159,48 @@ async def test_an_established_member_reposting_a_question_is_only_warned():
     warnings = [text for _, text in h.messenger.posts if f"<@{REGULAR.id}>" in text]
     assert warnings
     assert h.messenger.dms == []
+
+
+async def test_a_long_standing_member_with_no_activity_row_is_only_warned():
+    """#408: member_activity began on 2026-07-02 and was never backfilled, so
+    a member who joined 600 days ago and has not posted since has no row.
+    That is not "never posted": no rating, only the engine's warning."""
+    posts = _two_channels(REGULAR, PROMO)
+    h = harness(_case(REGULAR, posts, FIRST, {PROMOTIONAL_SPAM: (True, 0.99)}))
+
+    await h.judge(*posts)
+
+    assert h.calls.total == 0
+    assert _long_timeouts(h, REGULAR.id) == []
+    assert posts[0].message_id not in h.deleted()
+    assert any(f"<@{REGULAR.id}>" in text for _, text in h.messenger.posts)
+
+
+async def test_a_spam_warning_is_told_by_dm_when_channel_notices_are_off():
+    """#408: with channel notices off the warning is posted nowhere, so with
+    member DMs on it goes by DM."""
+    posts = _two_channels(REGULAR, QUESTION)
+    case = _case(REGULAR, posts, REGULAR_HISTORY)
+    document = case.policy.document
+    quiet = replace(
+        case.policy,
+        document=document.model_copy(
+            update={
+                "destinations": document.destinations.model_copy(
+                    update={"channel_notices": False}
+                )
+            }
+        ),
+    )
+    h = harness(replace(case, policy=quiet))
+
+    await h.judge(*posts)
+
+    assert [text for _, text in h.messenger.posts if f"<@{REGULAR.id}>" in text] == []
+    [(user, dm)] = h.messenger.dms
+    assert user == REGULAR.id
+    assert dm.startswith("You have received a warning.")
+    assert "**Reason:** Repeating the same message" in dm
 
 
 async def test_a_removal_the_channel_notice_mentions_sends_no_dm():
@@ -289,10 +335,24 @@ def test_a_newer_member_is_one_who_joined_this_week_or_never_posted_before():
     joined_this_week = _review(DANNIE, REGULAR_HISTORY)
     assert joined_this_week is not None
     assert joined_this_week.newer == ("joined 3 days ago",)
-    old_but_silent = _review(REGULAR, FIRST)
-    assert old_but_silent is not None
-    assert old_but_silent.newer == ("no messages before this burst",)
+    silent = _review(LATECOMER, FIRST)
+    assert silent is not None
+    assert silent.newer == ("no messages before this burst",)
     assert _review(REGULAR, REGULAR_HISTORY) is None
+
+
+def test_no_activity_row_counts_only_for_members_who_joined_since_tracking():
+    """#408: no row (or a row this burst made) means "never posted" only for
+    a member who joined on or after rules.ACTIVITY_TRACKED_SINCE."""
+    assert _review(REGULAR, FIRST) is None
+    unknown_join = replace(REGULAR, joined=None)
+    assert _review(unknown_join, FIRST) is None
+    on_the_day = replace(REGULAR, joined=rules.ACTIVITY_TRACKED_SINCE)
+    assert _review(on_the_day, FIRST).newer == ("no messages before this burst",)
+    day_before = replace(
+        REGULAR, joined=rules.ACTIVITY_TRACKED_SINCE - timedelta(seconds=1)
+    )
+    assert _review(day_before, FIRST) is None
 
 
 def test_the_burst_itself_is_not_an_earlier_message():
@@ -304,9 +364,11 @@ def test_the_burst_itself_is_not_an_earlier_message():
         days_since_last_message=None,
         first_message_at=burst_start + timedelta(seconds=1),
     )
-    assert _review(REGULAR, during).newer == ("no messages before this burst",)
+    assert _review(LATECOMER, during).newer == ("no messages before this burst",)
+    # Joined before tracking began: a row this burst made says nothing.
+    assert _review(REGULAR, during) is None
     before = replace(during, first_message_at=burst_start - timedelta(minutes=5))
-    assert _review(REGULAR, before) is None
+    assert _review(LATECOMER, before) is None
     # Posted before, when is not on record: not newer on that count.
     unrecorded = AuthorHistory(is_first_message=False, days_since_last_message=3)
     assert _review(REGULAR, unrecorded) is None

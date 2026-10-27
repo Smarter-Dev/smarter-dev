@@ -917,10 +917,23 @@ class Executor:
                     send=dms and policy.document.rules.mass_mention.dm,
                 )
             else:
-                told = channel_notices
-                notice = format_warning_message(target.user_id, _spam_reasons(target))
+                told = channel_notices or dms
+                reasons = _spam_reasons(target)
+                notice = format_warning_message(target.user_id, reasons)
+                # Channel notices off: the warning names nobody in the
+                # channel, so the member is told by DM (#408).
+                reason = ", ".join(reasons)
                 await self._warn(
-                    gateway, trigger, target, facts, notice, None, post=channel_notices
+                    gateway,
+                    trigger,
+                    target,
+                    facts,
+                    notice,
+                    _warning_dm(reason[:1].upper() + reason[1:])
+                    if dms and not channel_notices
+                    else None,
+                    post=channel_notices,
+                    dm_kind=gw.MESSAGE_WARNING_DM,
                 )
         elif scam_text is not None and target.sanction is not None and dms:
             # A timeout (high-signal or repeat): the member is told by DM,
@@ -1130,11 +1143,13 @@ class Executor:
         dm: str | None,
         *,
         post: bool = True,
+        dm_kind: str = gw.MESSAGE_DM,
     ) -> None:
         """As the spam engine and the handlers warn: one row, one notice per
         incident (a warn the incident already covers still tells the member
-        once), and for a scam a best-effort DM. ``post=False`` (the policy's
-        channel notices off): the warning is recorded, nothing is posted."""
+        once), and a best-effort DM claimed as ``dm_kind``. ``post=False``
+        (the policy's channel notices off): the warning is recorded, nothing
+        is posted."""
         async with gateway.reserve(
             trigger,
             Proposal(
@@ -1172,13 +1187,13 @@ class Executor:
             dm
             and incident_id is not None
             and await gateway.claim_member_message(
-                incident_id, kind=gw.MESSAGE_DM, target_user_id=target.user_id
+                incident_id, kind=dm_kind, target_user_id=target.user_id
             )
         ):
             await self._dm_and_record(
                 gateway,
                 incident_id,
-                gw.MESSAGE_DM,
+                dm_kind,
                 target.user_id,
                 dm,
                 report_channel_id=trigger.report_channel_id,
