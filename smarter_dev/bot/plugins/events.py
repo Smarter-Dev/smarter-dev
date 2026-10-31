@@ -7,6 +7,8 @@ buttons, and other interactive elements used by the bot commands.
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 from typing import Any
 
@@ -1074,6 +1076,40 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
     asyncio.create_task(delete_after_delay())
 
 
+GIF_INPUT_PREFIX = "gif64:"
+
+
+def _challenge_input_files(input_data: str, safe_title: str) -> list[hikari.Bytes]:
+    """Turn stored challenge input into the files to attach.
+
+    ``gif64:<base64>`` is one GIF, ``gif64:["<base64>", ...]`` several
+    (``<title>_1.gif``, ``_2.gif`` ...); anything else is sent as text.
+    ``[`` is not in the base64 alphabet, so the two forms cannot collide.
+    Every decoded item must be a GIF, or ValueError is raised.
+    """
+    if not input_data.startswith(GIF_INPUT_PREFIX):
+        return [hikari.Bytes(input_data.encode("utf-8"), f"{safe_title}.txt")]
+
+    payload = input_data[len(GIF_INPUT_PREFIX):]
+    if not payload.lstrip().startswith("["):
+        return [hikari.Bytes(_decode_gif64(payload), f"{safe_title}.gif")]
+
+    encoded = json.loads(payload)
+    if not encoded or not all(isinstance(item, str) for item in encoded):
+        raise ValueError("gif64 list input must be a non-empty list of base64 strings")
+    return [
+        hikari.Bytes(_decode_gif64(item), f"{safe_title}_{number}.gif")
+        for number, item in enumerate(encoded, start=1)
+    ]
+
+
+def _decode_gif64(item: str) -> bytes:
+    data = base64.b64decode(item, validate=True)
+    if not data.startswith(b"GIF8"):
+        raise ValueError("gif64 input item is not a GIF")
+    return data
+
+
 async def _provide_challenge_input_directly(
     event: hikari.InteractionCreateEvent,
     api_client,
@@ -1130,18 +1166,14 @@ async def _provide_challenge_input_directly(
         # Create a safe filename from the challenge title
         import re
         safe_title = re.sub(r"[^a-zA-Z0-9_-]", "_", challenge_title.lower())
-        filename = f"{safe_title}.txt"
-
-        # Create a file with the input data
-        file_content = input_data.encode("utf-8")
-        file_attachment = hikari.Bytes(file_content, filename)
+        attachments = _challenge_input_files(input_data, safe_title)
 
         # Send response with file attachment (non-ephemeral so squad can see) with user mention
         user_mention = f"<@{user_id}>"
         await event.interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
             content=f"{user_mention} requested the challenge input:\n\n📥 **{challenge_title}**",
-            attachment=file_attachment
+            attachments=attachments
         )
 
         logger.info(f"Successfully provided existing challenge input for user {user_id} in guild {guild_id} for challenge {challenge_id}")
