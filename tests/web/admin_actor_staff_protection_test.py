@@ -1,9 +1,10 @@
 """The staff-protection rule on the worker tier, over the real REST path.
 
 AdminActor gathers the member, the guild (owner, roles) and every channel's
-overwrites from a fake Discord API behind ``httpx.MockTransport``, and refuses
-ban, kick, timeout, hold, warn and member-message deletes for protected
-targets. Every request the actor makes is logged, so "refused" means no
+overwrites from a fake Discord API behind ``httpx.MockTransport``: the rule the
+worker's moderation gateway asks, and the role rule a script's role changes
+pass. A member's message is never deleted, whoever they are; a bot's or a
+webhook's is. Every request the actor makes is logged, so "refused" means no
 mutating call went out.
 """
 
@@ -11,7 +12,6 @@ from __future__ import annotations
 
 import json
 
-import fakeredis.aioredis as fakeredis_aioredis
 import httpx
 import pytest
 
@@ -19,7 +19,6 @@ from smarter_dev.shared.staff_protection import ADMINISTRATOR
 from smarter_dev.shared.staff_protection import BAN_MEMBERS
 from smarter_dev.shared.staff_protection import MANAGE_MESSAGES
 from smarter_dev.web.admin_actions import AdminActor
-from smarter_dev.web.handler_holds import MemberHolds
 
 # Run the real check; conftest otherwise clears every target.
 REAL_STAFF_PROTECTION = True
@@ -170,38 +169,29 @@ PROTECTED = [
 
 
 @pytest.mark.parametrize("target", PROTECTED)
-async def test_protected_targets_are_never_banned_kicked_or_timed_out(api, target):
-    actor = _actor(api)
-
-    assert (await actor.ban_user(target, "scam")).startswith("not banned")
-    assert (await actor.kick_user(target)).startswith("not kicked")
-    assert (await actor.timeout_user(target, 600)).startswith("not timed out")
+async def test_protected_targets_are_refused_by_the_shared_rule(api, target):
+    """What the worker's moderation gateway asks before acting on a member."""
+    assert await _actor(api).staff_refusal(target) is not None
     assert api.mutations == []
 
 
 @pytest.mark.parametrize("target", [MEMBER, DEPARTED])
-async def test_ordinary_members_and_departed_accounts_can_be_actioned(api, target):
-    actor = _actor(api)
-
-    assert await actor.ban_user(target, "scam") == f"banned {target}"
-    assert ("PUT", f"/guilds/{GUILD}/bans/{target}") in api.mutations
+async def test_ordinary_members_and_departed_accounts_are_not_protected(api, target):
+    assert await _actor(api).staff_refusal(target) is None
 
 
 async def test_an_unanswerable_check_refuses(api):
     api.fail.add(f"/guilds/{GUILD}/channels")
 
-    out = await _actor(api).ban_user(MEMBER, "scam")
+    refusal = await _actor(api).staff_refusal(MEMBER)
 
-    assert out.startswith("not banned")
-    assert "could not be checked" in out
-    assert api.mutations == []
+    assert refusal is not None and "could not be checked" in refusal
 
 
 async def test_a_role_the_guild_does_not_list_refuses(api):
     api.members[MEMBER]["roles"] = ["999"]
 
-    assert (await _actor(api).timeout_user(MEMBER, 60)).startswith("not timed out")
-    assert api.mutations == []
+    assert await _actor(api).staff_refusal(MEMBER) is not None
 
 
 @pytest.mark.parametrize("target_id", [GUILD, "51", MEMBER])
@@ -213,20 +203,20 @@ async def test_a_channel_overwrite_protects_nobody(api, target_id):
         {"id": target_id, "type": 0, "allow": str(MANAGE_MESSAGES), "deny": "0"}
     ]
 
-    assert await _actor(api).kick_user(MEMBER) == f"kicked {MEMBER}"
-    assert await _actor(api).kick_user(CHANNEL_MOD) == f"kicked {CHANNEL_MOD}"
+    assert await _actor(api).staff_refusal(MEMBER) is None
+    assert await _actor(api).staff_refusal(CHANNEL_MOD) is None
 
 
 async def test_administrator_on_everyone_protects_everybody(api):
     api.roles[0]["permissions"] = str(ADMINISTRATOR)
 
-    assert (await _actor(api).ban_user(MEMBER)).startswith("not banned")
+    assert await _actor(api).staff_refusal(MEMBER) is not None
 
 
 async def test_guild_facts_are_read_once_per_fire(api):
     actor = _actor(api)
-    await actor.ban_user(MEMBER)
-    await actor.kick_user(MEMBER)
+    await actor.staff_refusal(MEMBER)
+    await actor.role_refusal("51")
 
     reads = [path for method, path in api.requests if method == "GET"]
     assert reads.count(f"/guilds/{GUILD}") == 1
@@ -234,26 +224,24 @@ async def test_guild_facts_are_read_once_per_fire(api):
     assert reads.count("/users/@me") == 1
 
 
-async def test_a_staff_role_cannot_be_stripped_to_clear_the_way_for_a_ban(api):
-    """#239: the role change itself is refused, so no later fire finds the
-    moderator unprotected; the ban in this fire is refused as before."""
+async def test_a_staff_role_cannot_be_stripped(api):
+    """#239: the role change itself is refused, so no moderator loses the
+    standing that protects them."""
     from smarter_dev.web.admin_actions import ProtectedRoleError
 
     actor = _actor(api)
 
     with pytest.raises(ProtectedRoleError, match="is a staff role"):
         await actor.remove_role(STAFF_ROLE_HOLDER, "644301991832453120")
-    out = await actor.ban_user(STAFF_ROLE_HOLDER, "scam")
 
-    assert out.startswith("not banned")
     assert api.mutations == []
 
 
 async def test_the_guilds_staff_exempt_roles_are_staff_roles(api):
     """#255: a role the guild's filter config lists as staff carries no
     permission bit, yet the filters treat its holders as staff. A script may
-    neither strip it from a moderator (then punish them) nor hand it out (to
-    exempt a spammer), and its holders are protected."""
+    neither strip it from a moderator nor hand it out (to exempt a spammer),
+    and its holders are protected."""
     from smarter_dev.web.admin_actions import ProtectedRoleError
 
     api.members[MEMBER]["roles"].append("52")
@@ -264,10 +252,9 @@ async def test_the_guilds_staff_exempt_roles_are_staff_roles(api):
         await actor.remove_role(MEMBER, "52")
     with pytest.raises(ProtectedRoleError, match="is a staff role"):
         await actor.add_role(OTHER_BOT, "52")
-    out = await actor.ban_user(MEMBER, "scam")
+    refusal = await actor.staff_refusal(MEMBER)
 
-    assert out.startswith("not banned")
-    assert "holds a staff role" in out
+    assert refusal is not None and "holds a staff role" in refusal
     assert api.mutations == []
 
 
@@ -276,64 +263,50 @@ async def test_unread_staff_exempt_roles_refuse_everything(api):
 
     with pytest.raises(Exception, match="staff roles were not read"):
         await actor.add_role(MEMBER, "51")
-    out = await actor.ban_user(MEMBER, "scam")
-
-    assert out.startswith("not banned")
+    assert await actor.staff_refusal(MEMBER) is not None
     assert api.mutations == []
 
 
-async def test_stripping_an_ordinary_role_leaves_the_member_actionable(api):
+async def test_stripping_an_ordinary_role_takes_one_call(api):
     actor = _actor(api)
 
     assert await actor.remove_role(MEMBER, "51") is True
-
-    assert await actor.ban_user(MEMBER, "scam") == f"banned {MEMBER}"
-
-
-# -- message deletes -------------------------------------------------------------
+    assert api.mutations == [("DELETE", f"/guilds/{GUILD}/members/{MEMBER}/roles/51")]
+    # #242: no member read rides on a role change any more.
+    assert ("GET", f"/guilds/{GUILD}/members/{MEMBER}") not in api.requests
 
 
-@pytest.mark.parametrize("author", [STAFF_ROLE_HOLDER, BANNER, OWNER])
-async def test_a_staff_members_message_is_not_deleted(api, author):
+# -- message deletes: bots' messages only ----------------------------------------
+
+
+@pytest.mark.parametrize("author", [MEMBER, STAFF_ROLE_HOLDER, BANNER, OWNER])
+async def test_a_members_message_is_never_deleted(api, author):
     api.message("M1", author)
 
-    out = await _actor(api).delete_message("C1", "M1")
+    out = await _actor(api).delete_bot_message("C1", "M1")
 
     assert out.startswith("not deleted")
+    assert "posted by a member" in out
     assert api.mutations == []
 
 
 @pytest.mark.parametrize(
     ("author", "extra"),
     [
-        (MEMBER, {}),
         (OTHER_BOT, {}),  # Disboard's notice: upkeep, not a sanction
         (BOT, {}),  # the bot's own old reminder
         ("3333", {"webhook_id": "3333"}),
     ],
 )
-async def test_member_bot_and_webhook_messages_are_deleted(api, author, extra):
+async def test_bot_and_webhook_messages_are_deleted(api, author, extra):
     api.message("M1", author, **extra)
 
-    assert await _actor(api).delete_message("C1", "M1") == "deleted message M1"
+    assert await _actor(api).delete_bot_message("C1", "M1") == "deleted message M1"
     assert api.mutations == [("DELETE", "/channels/C1/messages/M1")]
 
 
-# -- holds and warns -------------------------------------------------------------
+async def test_a_gone_message_is_already_deleted(api):
+    out = await _actor(api).delete_bot_message("C1", "M9")
 
-
-async def test_a_staff_member_is_never_held(api):
-    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
-    holds = MemberHolds(redis=redis, guild_id=GUILD, handler_id="H1", actor=_actor(api))
-
-    assert await holds.hold(BANNER, "post-a", 300) is False
+    assert out == "message M9 already deleted"
     assert api.mutations == []
-    assert await redis.keys("*") == []
-
-
-async def test_an_ordinary_member_is_held(api):
-    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
-    holds = MemberHolds(redis=redis, guild_id=GUILD, handler_id="H1", actor=_actor(api))
-
-    assert await holds.hold(MEMBER, "post-a", 300) is True
-    assert ("PATCH", f"/guilds/{GUILD}/members/{MEMBER}") in api.mutations

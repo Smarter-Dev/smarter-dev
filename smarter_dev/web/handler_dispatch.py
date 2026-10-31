@@ -8,7 +8,7 @@ that skipped a window would quietly widen every cap.
 
 This used to live inline in ``api_native/handlers.py``'s ``dispatch_event``, so
 the ONLY way to fire a trigger was an HTTP POST from the bot. The worker needs
-it too: a handler-issued ``warn_user`` records a ``ModerationAction`` and must
+it too: the worker's moderation gateway records a ``ModerationAction`` and must
 fire the synthetic ``mod_action`` trigger exactly like ``/warn`` does, from
 inside the fire job with no HTTP round trip. ``dispatch_event`` is now a thin
 wrapper over :func:`dispatch_handler_event`.
@@ -26,6 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.redis_client import get_redis_client
+from smarter_dev.web.bump_channel_scope import admin_scope
 from smarter_dev.web.handler_caps import ADMIN_FIRES_PER_MIN
 from smarter_dev.web.handler_caps import DM_FIRES_PER_AUTHOR_PER_MIN
 from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN
@@ -106,7 +107,7 @@ def build_mod_action_context(action: ModerationAction) -> dict[str, Any]:
 
     Lives here, next to the fan-out, because BOTH writers need it: the bot's
     ``mod_action_dispatch`` (for /warn, /timeout, the AI tools, the audit-log
-    backfill) and the worker's ``warn_user`` recorder. The web package must never
+    backfill) and the worker's moderation gateway. The web package must never
     import from the bot, so the shared shape belongs on the web side.
     """
     return {
@@ -284,7 +285,9 @@ async def dispatch_handler_event(
     # member_* events (channel_id="") the scope check is bypassed — the event
     # has no channel for a scope to mean anything, so they match by guild
     # alone. Every other trigger (including thread_create, dispatched with the
-    # parent channel) matches when its scope includes the channel ([] = all).
+    # parent channel) matches when its scope includes the channel ([] = all,
+    # except the Disboard bump tracker, whose scope is the policy's bump
+    # channels and [] is none: bump_channel_scope).
     admin_rows = (
         (
             await db_session.execute(
@@ -304,8 +307,8 @@ async def dispatch_handler_event(
         ):
             continue
         if not is_guild_scoped:
-            scope = admin_handler.channel_ids or []
-            if scope and channel_id not in scope:
+            scope, empty_means_all = await admin_scope(db_session, admin_handler)
+            if (scope or not empty_means_all) and channel_id not in scope:
                 continue
         # dm_message: a per-(handler, author) minute window so a user spamming
         # DMs burns their OWN window (a declined dispatch) rather than the

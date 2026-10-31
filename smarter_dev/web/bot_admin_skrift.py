@@ -1,16 +1,15 @@
 """Bot admin controller for the Skrift admin panel.
 
-Provides guild overview and moderation configuration pages.
+Provides the bot overview: the guilds with a moderation policy, each linked to
+its Moderation page. The old per-guild AI moderation (triage) form and its
+``moderation_configs`` table were dropped in #242: triage is the moderation
+policy's ``triage`` section. The old form's URL redirects to the Moderation
+page.
 """
 
 from __future__ import annotations
 
-from typing import Annotated
-
-from litestar import Controller, Request, get, post
-from litestar.datastructures import State
-from litestar.enums import RequestEncodingType
-from litestar.params import Body
+from litestar import Controller, Request, get
 from litestar.response import Redirect, Template as TemplateResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,15 +18,11 @@ from skrift.admin.helpers import get_admin_context
 from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import auth_guard, Permission
 
-from smarter_dev.web.crud import ModerationConfigOperations
-from smarter_dev.web.moderation_policy_store import read_policy
-from smarter_dev.web.models import ModerationConfig
-
-mod_config_ops = ModerationConfigOperations()
+from smarter_dev.web.models import ModerationPolicy
 
 
 class BotAdminController(Controller):
-    """Bot admin panel — guild overview and moderation configuration."""
+    """Bot admin panel — the guilds with a moderation policy."""
 
     path = "/admin"
     guards = [auth_guard]
@@ -41,132 +36,28 @@ class BotAdminController(Controller):
     async def bot_overview(
         self, request: Request, db_session: AsyncSession
     ) -> TemplateResponse:
-        """Bot admin landing page — lists guilds with config status."""
+        """Bot admin landing page — lists the guilds with a moderation policy."""
         ctx = await get_admin_context(request, db_session)
 
         result = await db_session.execute(
-            select(ModerationConfig).order_by(ModerationConfig.created_at.desc())
+            select(ModerationPolicy).order_by(ModerationPolicy.guild_id)
         )
-        guilds = list(result.scalars().all())
+        policies = list(result.scalars().all())
 
         return TemplateResponse(
             "admin/bot/overview.html",
             context={
-                "guilds": guilds,
+                "policies": policies,
                 "active_page": "overview",
                 "guild_id": None,
                 **ctx,
             },
         )
 
-    @post(
-        "/bot/add-guild",
-        guards=[auth_guard, Permission("administrator")],
-    )
-    async def add_guild(
-        self,
-        request: Request,
-        db_session: AsyncSession,
-        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
-    ) -> Redirect:
-        """Add a guild to the moderation config."""
-        guild_id = data.get("guild_id", "").strip()
-        if not guild_id:
-            return Redirect(path="/admin/bot")
-
-        await mod_config_ops.get_or_create_config(db_session, guild_id)
-        await db_session.commit()
-
-        return Redirect(path=f"/admin/bot/moderation/{guild_id}")
-
     @get(
         "/bot/moderation/{guild_id:str}",
         guards=[auth_guard, Permission("administrator")],
     )
-    async def moderation_config(
-        self, request: Request, db_session: AsyncSession, guild_id: str
-    ) -> TemplateResponse | Redirect:
-        """Moderation config page for a specific guild.
-
-        A guild with a moderation policy (#241) is configured on its
-        Moderation page; this row is no longer read for it.
-        """
-        if await read_policy(db_session, guild_id) is not None:
-            return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")
-        ctx = await get_admin_context(request, db_session)
-
-        config = await mod_config_ops.get_config(db_session, guild_id)
-
-        return TemplateResponse(
-            "admin/bot/moderation_config.html",
-            context={
-                "config": config,
-                "guild_id": guild_id,
-                "active_page": "moderation",
-                **ctx,
-            },
-        )
-
-    @post(
-        "/bot/moderation/{guild_id:str}",
-        guards=[auth_guard, Permission("administrator")],
-    )
-    async def save_moderation_config(
-        self,
-        request: Request,
-        db_session: AsyncSession,
-        guild_id: str,
-        data: Annotated[dict, Body(media_type=RequestEncodingType.URL_ENCODED)],
-    ) -> Redirect:
-        """Save moderation config for a guild (refused under a policy)."""
-        if await read_policy(db_session, guild_id) is not None:
-            return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")
-        # Parse form data
-        is_active = data.get("is_active") == "true"
-        instructions = data.get("instructions", "").strip()
-        response_channel_id = data.get("response_channel_id", "").strip() or None
-
-        # Parse context message limit
-        try:
-            context_message_limit = int(data.get("context_message_limit", 25))
-            context_message_limit = max(5, min(50, context_message_limit))
-        except (ValueError, TypeError):
-            context_message_limit = 25
-
-        # Parse monitored role IDs (newline-separated)
-        role_ids_raw = data.get("monitored_role_ids", "")
-        monitored_role_ids = [
-            rid.strip()
-            for rid in role_ids_raw.split("\n")
-            if rid.strip()
-        ]
-
-        # Parse enabled tools (multiple checkboxes)
-        # URL-encoded forms send multiple values as comma-separated or repeated keys
-        enabled_tools_raw = data.get("enabled_tools", "")
-        if isinstance(enabled_tools_raw, list):
-            enabled_tools = enabled_tools_raw
-        elif enabled_tools_raw:
-            enabled_tools = [t.strip() for t in enabled_tools_raw.split(",") if t.strip()]
-        else:
-            enabled_tools = []
-
-        # Filter to valid tool names
-        valid_tools = {"timeout", "purge", "delete"}
-        enabled_tools = [t for t in enabled_tools if t in valid_tools]
-
-        await mod_config_ops.update_config(
-            db_session,
-            guild_id,
-            is_active=is_active,
-            instructions=instructions,
-            monitored_role_ids=monitored_role_ids,
-            enabled_tools=enabled_tools,
-            response_channel_id=response_channel_id,
-            context_message_limit=context_message_limit,
-        )
-        # The bot reads this row on each monitored ping and again before each
-        # destructive triage action, so committing is all a save needs.
-        await db_session.commit()
-
-        return Redirect(path=f"/admin/bot/moderation/{guild_id}")
+    async def moderation_config(self, guild_id: str) -> Redirect:
+        """The old AI moderation form: triage is on the Moderation page."""
+        return Redirect(path=f"/admin/bot/guilds/{guild_id}/moderation")

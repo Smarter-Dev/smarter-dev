@@ -70,27 +70,6 @@ def test_allows_plain_toplevel_script():
     assert check_static('await send_message("hi")\n') is None
 
 
-def test_rejects_hardcoded_delete_thread_target():
-    # A delete target must come from trigger context or a list_threads result —
-    # a hardcoded id literal is an unreviewable destructive action.
-    reason = check_static('await delete_thread("123456789012345678")\n')
-    assert reason and "delete_thread" in reason
-
-
-def test_allows_delete_thread_from_context():
-    ok = 'await delete_thread(context["thread_id"])\n'
-    assert check_static(ok) is None
-
-
-def test_allows_delete_thread_over_list_threads_result():
-    script = (
-        "for t in await list_threads(context['parent_channel_id']):\n"
-        "    if t['archived']:\n"
-        "        await delete_thread(t['thread_id'])\n"
-    )
-    assert check_static(script) is None
-
-
 def test_add_role_with_literal_role_id_ok():
     ok = 'await add_role(context["member_id"], "888160821673349140")\n'
     assert check_static(ok) is None

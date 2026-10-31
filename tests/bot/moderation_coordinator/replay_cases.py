@@ -26,15 +26,16 @@ from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import MessageFacts
 from smarter_dev.bot.moderation_coordinator.model import participant_label
+from smarter_dev.bot.moderation_coordinator.ownership import RULES
 from smarter_dev.bot.moderation_coordinator.policy import AttachmentPolicy
 from smarter_dev.bot.moderation_coordinator.policy import GuildPolicy
 from smarter_dev.bot.moderation_coordinator.replay import ReplayCase
 from smarter_dev.bot.moderation_coordinator.replay import ReplayReads
 from smarter_dev.bot.spam_engine import SpamEngineSettings
+from smarter_dev.bot.spam_engine import SpamThresholds
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import SpamRingSettings
 from smarter_dev.bot.spam_ring import TranscriptMessage
-from smarter_dev.web.models import ModerationFilterConfig
 
 GUILD = "644299523686006834"
 GENERAL = "702178352395580001"
@@ -79,21 +80,67 @@ class Member:
         )
 
 
+#: The scam-link domains production's spam engine ran with (the old
+#: ``moderation_filter_configs`` seed list).
+SCAM_LINK_DOMAINS = (
+    "t.me",
+    "telegram.me",
+    "telegram.dog",
+    "tlgrm.me",
+    "wa.me",
+    "chat.whatsapp.com",
+    "signal.me",
+    "signal.group",
+    "join.skype.com",
+    "kik.me",
+    "line.me",
+    "matrix.to",
+    "icq.im",
+)
+
+
 def policy(**over) -> GuildPolicy:
-    """smarter.dev's live policy: every legacy actor on, defaults throughout."""
-    config = ModerationFilterConfig(guild_id=GUILD, spam_engine_enabled=True)
+    """smarter.dev's live rules: every rule on and enforced (while the
+    coordinator acts), the old defaults throughout."""
     return replace(
         GuildPolicy(
             guild_id=GUILD,
-            spam=SpamEngineSettings.from_config(config),
+            spam=SpamEngineSettings(
+                enabled=True,
+                staff_exempt_role_ids=(),
+                scam_link_domains=SCAM_LINK_DOMAINS,
+                thresholds=SpamThresholds(
+                    message_rate_threshold=5,
+                    message_rate_window_seconds=5,
+                    channel_spread_threshold=3,
+                    channel_spread_window_seconds=15,
+                    duplicate_message_min_length=15,
+                    duplicate_message_window_seconds=60,
+                    mass_mention_window_seconds=15,
+                    warning_reoffense_window_seconds=120,
+                    mute_duration_seconds=86400,
+                ),
+                mod_alert_channel_id=None,
+                mod_ping_role_id=None,
+                scam_log_channel_id=None,
+            ),
             attachments=AttachmentPolicy(
                 ignored_extensions=(".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4"),
                 warn_extensions=(".txt", ".pdf", ".py"),
             ),
-            ring=SpamRingSettings.from_config(config),
+            ring=SpamRingSettings(
+                enabled=True,
+                new_member_window=timedelta(days=2),
+                timeout_seconds=604800,
+                lookback=timedelta(minutes=60),
+                followup=timedelta(minutes=15),
+                report_channel_id=None,
+                staff_exempt_role_ids=(),
+            ),
             scam_gate=True,
             edit_ping=True,
             bump_channel_ids=frozenset({BUMP}),
+            enforced=frozenset(RULES),
         ),
         **over,
     )

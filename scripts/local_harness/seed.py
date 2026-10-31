@@ -39,7 +39,6 @@ from smarter_dev.shared.date_provider import get_date_provider
 
 import smarter_dev.web.roles  # noqa: F401 — registers the bot-service role for the sync below
 from smarter_dev.web.models import (
-    AttachmentFilterConfig,
     AuditLogConfig,
     BytesBalance,
     BytesConfig,
@@ -224,7 +223,6 @@ def _adopted_bot_rows() -> list[object]:
             is_active=True,
         ),
         AuditLogConfig(guild_id=config.GUILD_ID),
-        AttachmentFilterConfig(guild_id=config.GUILD_ID),
         SquadSaleEvent(
             guild_id=config.GUILD_ID,
             name="Harness Sale",

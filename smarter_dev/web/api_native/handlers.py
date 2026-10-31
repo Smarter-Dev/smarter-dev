@@ -52,11 +52,13 @@ from skrift.workers import get_handle
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import parse_uuid_path
 from smarter_dev.web.api_native.errors import plain_error
+from smarter_dev.web.bump_channel_scope import admin_scope
 from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
 # The fan-out and its trigger-class constants live in handler_dispatch so the
 # worker can fire a trigger through the same rails; re-imported here because
@@ -422,37 +424,58 @@ class HandlerController(Controller):
         channels = [[channel, trigger] for channel, trigger in rows]
 
         admin_rows = (
-            await db_session.execute(
-                select(
-                    AdminHandler.guild_id,
-                    AdminHandler.trigger_type,
-                    AdminHandler.channel_ids,
-                ).where(
-                    AdminHandler.enabled.is_(True),
-                    AdminHandler.trigger_type.in_(ADMIN_HANDLER_EVENT_TRIGGERS),
+            (
+                await db_session.execute(
+                    select(AdminHandler)
+                    .options(
+                        load_only(
+                            AdminHandler.guild_id,
+                            AdminHandler.name,
+                            AdminHandler.trigger_type,
+                            AdminHandler.channel_ids,
+                            AdminHandler.settings,
+                            AdminHandler.extension_handler_key,
+                        )
+                    )
+                    .where(
+                        AdminHandler.enabled.is_(True),
+                        AdminHandler.trigger_type.in_(ADMIN_HANDLER_EVENT_TRIGGERS),
+                    )
                 )
             )
-        ).all()
+            .scalars()
+            .all()
+        )
         guild_triggers: list[list[str]] = []
-        for guild_id, trigger, channel_ids in admin_rows:
+        bot_message_channels: list[str] = []
+        bot_message_guild_triggers: list[str] = []
+        for row in admin_rows:
+            guild_id, trigger = row.guild_id, row.trigger_type
             # Guild-scoped admin triggers (member_* and dm_message) always surface
             # as (guild_id, trigger) — their dispatch guard is per-guild regardless
             # of channel_ids (a member event / DM has no channel to scope against).
             # Everything else (message/reaction/thread_create/message_edit)
             # follows the scoped/guild-wide split: listed channels become channel
-            # entries, empty scope = guild.
+            # entries, empty scope = guild (none for the bump tracker, whose
+            # channels are the policy's: bump_channel_scope).
             if trigger in GUILD_SCOPED_ADMIN_TRIGGERS:
                 guild_triggers.append([guild_id, trigger])
-            elif channel_ids:
+                continue
+            channel_ids, empty_means_all = await admin_scope(db_session, row)
+            if channel_ids:
                 channels.extend([channel_id, trigger] for channel_id in channel_ids)
-            else:
+            elif empty_means_all:
                 guild_triggers.append([guild_id, trigger])
+            # Bot-message opt-in sets: message-trigger handlers with
+            # include_bot_messages. Channel-scoped admin -> channel ids;
+            # guild-wide admin -> guild ids. Only the message trigger can opt in.
+            if trigger == "message" and (row.settings or {}).get("include_bot_messages"):
+                if channel_ids:
+                    bot_message_channels.extend(channel_ids)
+                elif empty_means_all:
+                    bot_message_guild_triggers.append(guild_id)
 
-        # Bot-message opt-in sets: message-trigger handlers with
-        # include_bot_messages. Standard + channel-scoped admin -> channel ids;
-        # guild-wide admin -> guild ids. Only the message trigger can opt in.
-        bot_message_channels: list[str] = []
-        bot_message_guild_triggers: list[str] = []
+        # Standard handlers' bot-message opt-in: their channel ids.
         std_bot_rows = (
             await db_session.execute(
                 select(ChannelHandler.channel_id, ChannelHandler.settings).where(
@@ -464,25 +487,6 @@ class HandlerController(Controller):
         for channel_id, settings in std_bot_rows:
             if (settings or {}).get("include_bot_messages"):
                 bot_message_channels.append(channel_id)
-        admin_bot_rows = (
-            await db_session.execute(
-                select(
-                    AdminHandler.guild_id,
-                    AdminHandler.channel_ids,
-                    AdminHandler.settings,
-                ).where(
-                    AdminHandler.enabled.is_(True),
-                    AdminHandler.trigger_type == "message",
-                )
-            )
-        ).all()
-        for guild_id, channel_ids, settings in admin_bot_rows:
-            if not (settings or {}).get("include_bot_messages"):
-                continue
-            if channel_ids:
-                bot_message_channels.extend(channel_ids)
-            else:
-                bot_message_guild_triggers.append(guild_id)
 
         return {
             "channels": channels,

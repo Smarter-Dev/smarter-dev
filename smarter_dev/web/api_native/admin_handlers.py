@@ -3,7 +3,7 @@
 Ports the legacy FastAPI ``routers/admin_handlers.py`` (prefix
 ``/admin/handlers``) — part of unit U9 in docs/v2/legacy-sunset/04-api-rewrite.md.
 Separate from ``/handlers`` (member tier): created only via the admin slash
-command (author-written script with moderation powers), never editable by
+command (author-written script with admin powers), never editable by
 members. Preserves the exact paths, verbs, status codes, and request/response
 shapes so ``smarter_dev/bot/plugins/admin_handlers.py`` (and any external
 caller) needs zero changes:
@@ -52,10 +52,11 @@ from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import parse_uuid_path
 from smarter_dev.web.api_native.errors import plain_error
+from smarter_dev.web.bump_channel_scope import BUMP_TRACKER_HANDLER
+from smarter_dev.web.bump_channel_scope import CHANNELS_REFUSAL
+from smarter_dev.web.bump_channel_scope import is_bump_tracker
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_moderation_policy import moderation_refusal
-from smarter_dev.web.handler_moderation_policy import rename_refusal
-from smarter_dev.web.handler_moderation_policy import sanction_calls
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
@@ -143,6 +144,27 @@ def _to_response(record: AdminHandler) -> AdminHandlerResponse:
     )
 
 
+def _reject_bump_tracker_scope(record: AdminHandler, data) -> None:
+    """The bump tracker's channels are the policy's (``bump_channel_scope``):
+    an edit may not change its stored ``channel_ids`` or its name. Nor may
+    another handler be renamed to the tracker's name, which would silently
+    give it the policy's bump channels as its scope."""
+    if not is_bump_tracker(record):
+        if data.name is not None and _normalized_name(data.name) == BUMP_TRACKER_HANDLER:
+            raise plain_error(
+                422,
+                f"{BUMP_TRACKER_HANDLER!r} is the Disboard bump tracker's name; "
+                "another handler cannot be renamed to it",
+            )
+        return
+    if list(data.channel_ids or []) != list(record.channel_ids or []):
+        raise plain_error(422, CHANNELS_REFUSAL)
+    if data.name is not None and _normalized_name(data.name) != record.name:
+        raise plain_error(
+            422, f"{record.name!r} is the Disboard bump tracker and cannot be renamed"
+        )
+
+
 def _reject_bot_optin_on_non_message(settings: dict, trigger_type: str) -> None:
     """422 when ``include_bot_messages`` is set on a non-message admin handler.
 
@@ -195,16 +217,10 @@ async def _reschedule(record: AdminHandler) -> None:
     await _recurring_chain.arm_occurrence(record, fire_at)
 
 
-def _reject_new_sanctions(
-    script: str,
-    *,
-    existing_script: str | None = None,
-    handler_name: str | None = None,
-) -> None:
-    """422 for a script that would punish members (handler_moderation_policy)."""
-    reason = moderation_refusal(
-        script, existing_script=existing_script, handler_name=handler_name
-    )
+def _reject_removed_functions(script: str) -> None:
+    """422 for a script naming a function the runtime no longer has: the
+    sanctions (handler_moderation_policy)."""
+    reason = moderation_refusal(script)
     if reason is not None:
         raise plain_error(422, reason)
 
@@ -224,8 +240,10 @@ class AdminHandlerController(Controller):
         if data.trigger_type not in ADMIN_HANDLER_TRIGGER_TYPES:
             raise plain_error(422, "unknown trigger_type")
         _reject_bot_optin_on_non_message(data.settings, data.trigger_type)
-        _reject_new_sanctions(data.script)
+        _reject_removed_functions(data.script)
         name = _normalized_name(data.name)
+        if name == BUMP_TRACKER_HANDLER and data.channel_ids:
+            raise plain_error(422, CHANNELS_REFUSAL)
 
         if await _name_taken(db_session, data.guild_id, name):
             raise plain_error(
@@ -277,9 +295,9 @@ class AdminHandlerController(Controller):
         data: UpdateAdminHandlerRequest,
     ) -> AdminHandlerResponse:
         parsed_handler_id = parse_uuid_path(handler_id, "handler_id")
-        # Locked until commit: the sanction check below reads the live
-        # script, and a concurrent write must not land between the check and
-        # this one (the /script route's conditional UPDATE, done as a lock).
+        # Locked until commit: the retired check below reads the live row,
+        # and a concurrent write must not land between the check and this one
+        # (the /script route's conditional UPDATE, done as a lock).
         record = await db_session.get(
             AdminHandler, parsed_handler_id, with_for_update=True
         )
@@ -287,9 +305,8 @@ class AdminHandlerController(Controller):
             raise plain_error(404, "admin handler not found")
         # trigger_type is immutable on edit, so validate against the stored one.
         _reject_bot_optin_on_non_message(data.settings, record.trigger_type)
-        _reject_new_sanctions(
-            data.script, existing_script=record.script, handler_name=record.name
-        )
+        _reject_bump_tracker_scope(record, data)
+        _reject_removed_functions(data.script)
 
         # Judged on the name the row had before this write: a switched-off
         # replaced handler renamed in the same save would otherwise come back.
@@ -302,9 +319,6 @@ class AdminHandlerController(Controller):
                     f"{record.name!r} was replaced by the moderation coordinator "
                     "and cannot be renamed",
                 )
-            reason = rename_refusal(data.script, name=record.name, new_name=name)
-            if reason is not None:
-                raise plain_error(422, reason)
             if await _name_taken(
                 db_session, record.guild_id, name, exclude_id=record.id
             ):
@@ -318,10 +332,10 @@ class AdminHandlerController(Controller):
         record.script = data.script
         record.settings = data.settings
         record.channel_ids = data.channel_ids
-        # Every write enables, except a frozen punisher or a handler the
-        # coordinator replaced (scam-banner, edit-ping-catch) that was switched
-        # off: saving it must not re-arm it next to the coordinator.
-        if record.enabled or not (sanction_calls(data.script) or retired):
+        # Every write enables, except a handler the coordinator replaced
+        # (scam-banner, edit-ping-catch) that was switched off: saving it must
+        # not re-arm it next to the coordinator.
+        if record.enabled or not retired:
             record.enabled = True
 
         if record.trigger_type in _TIME_TRIGGERS:
@@ -344,19 +358,17 @@ class AdminHandlerController(Controller):
         """Put a reviewed script on a handler (``scripts/apply_handler_script.py``).
 
         A disabled handler stays disabled, unlike the full update, which
-        enables on every write (a switched-off punisher aside).
+        enables on every write (a switched-off replaced handler aside).
         """
         parsed_handler_id = parse_uuid_path(handler_id, "handler_id")
         record = await db_session.get(AdminHandler, parsed_handler_id)
         if record is None:
             raise plain_error(404, "admin handler not found")
-        # Against the script the caller read: the write below only lands
-        # while that is still the live one.
-        _reject_new_sanctions(
-            data.script, existing_script=data.expected_script, handler_name=record.name
-        )
-        # The check and the write are one statement, so two callers who both
-        # read the old script cannot both get past it: the row matches only
+        _reject_removed_functions(data.script)
+        # The write below only lands while the live script is still the one
+        # the caller read. The check and the write are one statement, so two
+        # callers who both read the old script cannot both get past it: the
+        # row matches only
         # while the script is still what the caller read, and the one that
         # matched holds the row until commit. Comparing the loaded record
         # would let both through, each against its own stale copy.

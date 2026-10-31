@@ -2,7 +2,9 @@
 
 One row per switched guild (``moderation_ownership``), written only by
 ``scripts/moderation_cutover.py``. No row means legacy: the coordinator
-judges in shadow and acts on nothing.
+judges in shadow and acts on nothing. What runs is the guild's moderation
+policy's; the row's ``rules`` column is the cutover's old record of the
+rules it handed over and is no longer read (#242).
 
 ``generation`` goes up on every switch. The coordinator reads it with the
 guild's policy and reads it again just before acting; a decision made under
@@ -57,7 +59,6 @@ class Ownership:
     guild_id: str
     owner: str = LEGACY
     generation: int = 0
-    rules: frozenset[str] = frozenset()
     #: The guild's policy revision; None while it has no policy.
     policy_revision: int | None = None
 
@@ -77,7 +78,6 @@ def ownership_from(
         guild_id=guild_id,
         owner=row.owner,
         generation=int(row.generation or 0),
-        rules=frozenset(str(rule) for rule in (row.rules or ()) if rule in RULES),
         policy_revision=policy_revision,
     )
 

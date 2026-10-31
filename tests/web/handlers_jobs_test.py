@@ -21,6 +21,9 @@ import smarter_dev.web.handler_script_services as handler_script_services
 import smarter_dev.web.handlers_jobs as handlers_jobs
 import smarter_dev.web.handler_runtime as handler_runtime
 from smarter_dev.web.models import ModerationPolicy
+from smarter_dev.web.models import ModerationIncident
+from smarter_dev.web.models import ModerationIncidentEntry
+from smarter_dev.web.models import ModerationOperation
 from smarter_dev.web.admin_actions import AdminActionError
 from smarter_dev.web.admin_actions import AdminActor
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
@@ -1330,19 +1333,19 @@ class _NullActor:
     def __init__(self, *args, **kwargs):
         pass
 
-    async def timeout_user(self, *args, **kwargs):
-        raise AssertionError("timeout_user must never reach the actor (budget=0)")
+    async def delete_bot_message(self, *args, **kwargs):
+        raise AssertionError("delete_message must never reach the actor (budget=0)")
 
 
 async def test_mod_action_fire_forces_zero_mod_action_budget(monkeypatch, test_engine):
-    # A mod_action-triggered handler whose script tries to timeout a user must
+    # A mod_action-triggered handler whose script tries an upkeep action must
     # breach CapExceeded('mod_actions') immediately — the loop rail forces its
     # mod-action budget to 0 (§3.5).
     handler_id = await _seed_admin_handler(
         test_engine,
         "G1",
         trigger_type="mod_action",
-        script="await timeout_user('U1')\n",
+        script="await delete_message('M1')\n",
     )
 
     async def fake_agent(*args, **kwargs):
@@ -1385,18 +1388,14 @@ async def test_mod_action_fire_forces_zero_mod_action_budget(monkeypatch, test_e
     assert run.cap == "mod_actions"
 
 
-# -- warn recorder + rules reader injection (host-bound guild) ------------------
+# -- review reports + rules reader injection (host-bound guild) -----------------
 
 import smarter_dev.web.handler_dispatch as handler_dispatch
 from smarter_dev.web.models import GuildRulesConfig
 
 
 class _NamedActor(AdminActor):
-    """AdminActor whose get_member_info answers the username lookup.
-
-    ``fail`` models a Discord REST failure so the degrade-to-raw-id path is
-    exercisable; only that failure degrades, anything else propagates.
-    """
+    """AdminActor whose get_member_info answers without Discord."""
 
     fail = False
 
@@ -1409,13 +1408,13 @@ class _NamedActor(AdminActor):
 def _capture_injected(monkeypatch, test_engine, captured):
     """Run an admin fire that only captures what it hands the script.
 
-    The fire's actor records through the moderation gateway, here on the
-    test engine, so a warn lands where ``_actions_for`` reads.
+    The fire's actor reaches the moderation gateway, here on the test
+    engine, so a review report lands where the tests read.
     """
 
     async def fake_run(script, context, **kwargs):
         captured["actor"] = kwargs.get("actor")
-        captured["warn_counter"] = kwargs.get("warn_counter")
+        captured["kwargs"] = kwargs
         captured["report_channel_reader"] = kwargs.get("report_channel_reader")
         captured["rules_reader"] = kwargs.get("rules_reader")
         return _ok_result()
@@ -1432,7 +1431,7 @@ def _capture_injected(monkeypatch, test_engine, captured):
         "SESSION_FACTORY_OVERRIDE",
         async_sessionmaker(test_engine, expire_on_commit=False),
     )
-    # The warn's mod_action fire rides the extracted fan-out; stub its
+    # A mod_action fire would ride the extracted fan-out; stub its
     # submit/redis seams so nothing reaches a real worker queue.
     submitted: list = []
 
@@ -1451,14 +1450,6 @@ def _capture_injected(monkeypatch, test_engine, captured):
 
     monkeypatch.setattr(handler_dispatch, "WindowedLimiter", _AllowLimiter)
     return submitted
-
-
-async def _warn(captured, user_id: str, reason: str, channel_id: str = "C1") -> int:
-    """What warn_user does around its notice: reserve, confirm, count."""
-    async with captured["actor"].reserve_warn(user_id, reason, channel_id) as slot:
-        assert slot.go
-        slot.confirm()
-    return await captured["warn_counter"](user_id)
 
 
 async def _actions_for(engine, guild_id: str) -> list[ModerationAction]:
@@ -1503,10 +1494,8 @@ async def test_a_fire_tells_its_actor_what_the_fire_is_about(monkeypatch, test_e
     assert fire.chain_depth == 1
 
 
-async def test_warn_binds_guild_and_resolves_username_host_side(
-    monkeypatch, test_engine
-):
-    _NamedActor.fail = False
+async def test_a_fire_wires_no_warn_counter_or_holds(monkeypatch, test_engine):
+    """#242: the sanctions' host services are gone from the admin fire."""
     handler_id = await _seed_admin_handler(test_engine, "G1")
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
@@ -1515,101 +1504,76 @@ async def test_warn_binds_guild_and_resolves_username_host_side(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
-    assert await _warn(captured, "U1", "spamming") == 1
-
-    actions = await _actions_for(test_engine, "G1")
-    assert len(actions) == 1
-    action = actions[0]
-    # The guild is bound host-side; the script supplied only the target.
-    assert action.guild_id == "G1"
-    assert action.action_type == "warn"
-    assert action.source == "handler"
-    assert action.channel_id == "C1"
-    # The username is resolved from Discord, never taken from the script.
-    assert action.target_username == "name-U1"
-    assert action.moderator_username.startswith("handler:")
-    assert action.operation_id is not None
+    assert "warn_counter" not in captured["kwargs"]
+    assert "holds" not in captured["kwargs"]
+    assert callable(captured["report_channel_reader"])
 
 
-async def test_warn_count_is_authoritative(monkeypatch, test_engine):
-    _NamedActor.fail = False
-    handler_id = await _seed_admin_handler(test_engine, "G2")
-    captured: dict = {}
-    _capture_injected(monkeypatch, test_engine, captured)
-    await _admin_fire(
-        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
-    )
-
-    # The count is the guild+user total AFTER each warn, so a script can escalate
-    # on it without tallying (and truncating) list_mod_actions itself.
-    assert await _warn(captured, "U5", "one") == 1
-    # A second warn from a new fire is a new incident, so it counts.
-    await _admin_fire(
-        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
-    )
-    assert await _warn(captured, "U5", "two") == 2
-    # Another user's warns never bleed into the counter.
-    assert await _warn(captured, "U6", "one") == 1
-
-
-async def test_warn_degrades_to_raw_id_when_lookup_fails(monkeypatch, test_engine):
-    # A username fetch failure must not fail a warn whose notice already
-    # landed: the audit row falls back to the raw id.
-    _NamedActor.fail = True
-    handler_id = await _seed_admin_handler(test_engine, "G3")
-    captured: dict = {}
-    _capture_injected(monkeypatch, test_engine, captured)
-    await _admin_fire(
-        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
-    )
-
-    assert await _warn(captured, "U7", "r") == 1
-    actions = await _actions_for(test_engine, "G3")
-    assert actions[0].target_username == "U7"
-    _NamedActor.fail = False
-
-
-async def test_warn_fires_mod_action_trigger_for_mod_log_handlers(
+async def test_a_review_report_from_a_fire_is_an_incident_with_no_effect(
     monkeypatch, test_engine
 ):
-    _NamedActor.fail = False
-    handler_id = await _seed_admin_handler(test_engine, "G4")
-    # A guild-wide mod-log formatter that must see the handler-issued warn
-    # exactly like it sees /warn's.
-    log_id = await _seed_admin_handler(test_engine, "G4", trigger_type="mod_action")
-    captured: dict = {}
-    submitted = _capture_injected(monkeypatch, test_engine, captured)
-    await _admin_fire(
-        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
-    )
+    """The fire's actor opens a review-only incident in the gateway's tables:
+    the member as its subject, ``handler:<name>`` as its source, and no
+    operation or moderation_actions row."""
+    from sqlalchemy import select
 
-    await _warn(captured, "U8", "rude")
-    fired = [p.admin_handler_id for p in submitted]
-    assert log_id in fired
-    context = [p for p in submitted if p.admin_handler_id == log_id][0].trigger_context
-    assert context["trigger_type"] == "mod_action"
-    assert context["action_type"] == "warn"
-    assert context["target_user_id"] == "U8"
-
-
-async def test_warn_survives_a_dispatch_failure(monkeypatch, test_engine):
-    # Best-effort, mirroring mod_action_dispatch: a dispatch blow-up is logged,
-    # never propagated into the warn — the row and the count still come back.
-    _NamedActor.fail = False
-    handler_id = await _seed_admin_handler(test_engine, "G5")
+    handler_id = await _seed_admin_handler(test_engine, "GR1")
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
-
-    async def boom(*args, **kwargs):
-        raise RuntimeError("queue is down")
-
-    monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", boom)
     await _admin_fire(
-        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id,
+            channel_id="",
+            trigger_context={"trigger_type": "member_join", "member_id": "U4"},
+        )
+    )
+    actor = captured["actor"]
+
+    # The guild reports nowhere (no channel configured): recorded, unreported.
+    assert await captured["report_channel_reader"]() is None
+    out = await actor.report_for_review(
+        "U4", "rejoined with 2+ prior actions", report_channel_id=None
     )
 
-    assert await _warn(captured, "U9", "r") == 1
-    assert len(await _actions_for(test_engine, "G5")) == 1
+    assert out == ""
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        incidents = list(
+            (
+                await s.execute(
+                    select(ModerationIncident).where(
+                        ModerationIncident.guild_id == "GR1"
+                    )
+                )
+            ).scalars()
+        )
+        entries = list(
+            (
+                await s.execute(
+                    select(ModerationIncidentEntry).where(
+                        ModerationIncidentEntry.guild_id == "GR1"
+                    )
+                )
+            ).scalars()
+        )
+        operations = list(
+            (
+                await s.execute(
+                    select(ModerationOperation).where(
+                        ModerationOperation.guild_id == "GR1"
+                    )
+                )
+            ).scalars()
+        )
+    assert len(incidents) == 1
+    assert incidents[0].subject_user_id == "U4"
+    assert incidents[0].report_channel_id is None
+    evidence = [e for e in entries if e.kind == "evidence"]
+    assert [(e.source, e.content) for e in evidence] == [
+        (actor.actor_name, "rejoined with 2+ prior actions")
+    ]
+    assert actor.actor_name.startswith("handler:h-")
+    assert operations == []
+    assert await _actions_for(test_engine, "GR1") == []
 
 
 async def test_rules_reader_binds_guild_and_reuses_the_shared_parse(
@@ -1656,8 +1620,6 @@ async def test_rules_reader_returns_empty_for_a_guild_with_no_rules_row(
 
 
 # -- trigger chain depth (§3.8 recursion rail) ---------------------------------
-
-from smarter_dev.web.handler_caps import MAX_CHAIN_DEPTH
 
 
 async def test_standard_timer_refire_descends_one_generation(monkeypatch):
@@ -1737,48 +1699,3 @@ async def test_admin_timer_refire_descends_one_generation(monkeypatch, test_engi
         datetime.now(timezone.utc) + timedelta(seconds=60), {"trigger_type": "timer"}
     )
     assert submits[0].chain_depth == 2
-
-
-async def test_warn_mod_action_dispatch_descends_one_generation(
-    monkeypatch, test_engine
-):
-    # warn -> mod-log handler is a real causal chain, so the synthetic
-    # mod_action dispatch descends one generation from the warning fire.
-    _NamedActor.fail = False
-    handler_id = await _seed_admin_handler(test_engine, "GD2")
-    log_id = await _seed_admin_handler(test_engine, "GD2", trigger_type="mod_action")
-    captured: dict = {}
-    submitted = _capture_injected(monkeypatch, test_engine, captured)
-    await _admin_fire(
-        AdminHandlerFirePayload(
-            admin_handler_id=handler_id, channel_id="C1", chain_depth=1
-        )
-    )
-
-    await _warn(captured, "U1", "rude")
-    fired = [p for p in submitted if p.admin_handler_id == log_id]
-    assert len(fired) == 1
-    assert fired[0].chain_depth == 2
-    # Depth stays OUT of the sandbox-visible context.
-    assert "chain_depth" not in fired[0].trigger_context
-
-
-async def test_warn_mod_action_dispatch_is_cut_past_the_max_depth(
-    monkeypatch, test_engine
-):
-    # A fire already at MAX_CHAIN_DEPTH would dispatch at MAX+1: refused at the
-    # choke point, nothing enqueued — and the warn itself still succeeds.
-    _NamedActor.fail = False
-    handler_id = await _seed_admin_handler(test_engine, "GD3")
-    await _seed_admin_handler(test_engine, "GD3", trigger_type="mod_action")
-    captured: dict = {}
-    submitted = _capture_injected(monkeypatch, test_engine, captured)
-    await _admin_fire(
-        AdminHandlerFirePayload(
-            admin_handler_id=handler_id, channel_id="C1", chain_depth=MAX_CHAIN_DEPTH
-        )
-    )
-
-    assert await _warn(captured, "U1", "rude") == 1
-    assert submitted == []
-    assert len(await _actions_for(test_engine, "GD3")) == 1

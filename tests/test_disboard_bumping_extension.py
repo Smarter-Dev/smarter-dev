@@ -90,7 +90,7 @@ class _Emitter:
 class _Actor:
     calls: list = field(default_factory=list)
 
-    async def delete_message(self, channel_id, message_id):
+    async def delete_bot_message(self, channel_id, message_id):
         self.calls.append(("delete", channel_id, message_id))
         return "ok"
 
@@ -132,8 +132,13 @@ def _apply(state: dict, result) -> dict:
     return state
 
 
-async def _run_tracker(context, *, guild_memory=None, config=None, ping=True):
-    """Execute the rendered bump-tracker against a context; return the pieces."""
+async def _run_tracker(
+    context, *, guild_memory=None, config=None, ping=True, channel=None
+):
+    """Execute the rendered bump-tracker against a context; return the pieces.
+
+    ``channel`` is the fire's channel and scope; by default the configured
+    bump channel."""
     rendered = _rendered(config)["bump-tracker"]
     emitter = _Emitter()
     actor = _Actor()
@@ -142,13 +147,13 @@ async def _run_tracker(context, *, guild_memory=None, config=None, ping=True):
     result = await run_handler_script(
         rendered.script,
         context,
-        channel_id=_BUMP_CHANNEL,
+        channel_id=channel or _BUMP_CHANNEL,
         guild_id="G1",
         emitter=emitter,
         limiter=_Limiter(),
         budget=admin_budget("message"),
         actor=actor,
-        channel_ids=rendered.channel_ids,
+        channel_ids=[channel] if channel else rendered.channel_ids,
         allowed_role_ids=rendered.settings.get("allowed_role_ids", []),
         guild_memory=guild_memory,
         timer_scheduler=timer,
@@ -250,6 +255,37 @@ async def test_confirmation_rotation_deletes_previous_reminder_and_confirmation(
     assert result.guild_memory_writes["disboard_confirmation_message_id"] == "NEWCONF"
     # The spent reminder pointer is cleared.
     assert result.guild_memory_writes["disboard_reminder_message_id"] is None
+
+
+async def test_a_bump_in_the_policys_new_bump_channel_completes():
+    """#242: the policy's bump channels are the scope, and they can move away
+    from the channel configured at install. Everything happens in the
+    fire's own channel, so the bump still rotates the crown and arms the
+    reminder."""
+    seed = {
+        "disboard_reminder_message_id": "OLDREM",
+        "disboard_confirmation_message_id": "OLDCONF",
+    }
+    result, emitter, actor, timer = await _run_tracker(
+        _confirmation(message_id="NEWCONF"), guild_memory=seed, channel="MOVED"
+    )
+    assert result.outcome == "ok", result.error
+    deletes = [call for call in actor.calls if call[0] == "delete"]
+    assert deletes == [("delete", "MOVED", "OLDREM"), ("delete", "MOVED", "OLDCONF")]
+    assert ("add_role", "USERA", _CROWN_ROLE) in actor.calls
+    assert len(timer.calls) == 1
+
+
+async def test_the_reminder_goes_to_the_channel_the_timer_fired_in():
+    result, emitter, _, _ = await _run_tracker(
+        {"trigger_type": "timer", "payload": {"bump_at": 100}},
+        guild_memory={"disboard_last_bump_at": 100, "disboard_reminded": False},
+        channel="MOVED",
+    )
+    assert result.outcome == "ok", result.error
+    [(channel, _content, ping)] = emitter.message_calls
+    assert channel == "MOVED"
+    assert ping == _PING_ROLE
 
 
 async def test_confirmation_rotation_from_empty_state_deletes_nothing():

@@ -23,7 +23,7 @@ from smarter_dev.bot.plugins.handler_events import _dispatch
 from smarter_dev.shared.guild_event_log import mod_action_event
 
 # The context shape lives in the web tier's handler_dispatch because the worker's
-# handler-issued ``warn_user`` builds the same context for the same trigger, and
+# moderation gateway (``RestModerationPort.announce``) builds the same context, and
 # the web package must never import from the bot. Re-exported here so the bot-side
 # writers (and their tests) keep importing it from the module they always have.
 from smarter_dev.web.handler_dispatch import build_mod_action_context

@@ -1,13 +1,13 @@
 """#241: the policy document, its store, the import and the revision pickup.
 
-The import runs on smarter.dev as it is after the cutover (#240): the
-cutover's own ``switch`` turns the legacy actors off first, so the import is
-shown reading the coordinator's rules, not the switches the cutover zeroed.
+Since #242 the import writes revision 1 with every rule off (the old config
+tables it used to read are gone), and a guild without a policy gets nothing
+from the coordinator, the triage or the content filter's staff and report
+lookups.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -28,15 +28,14 @@ from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.web import moderation_cutover as cutover
 from smarter_dev.web import moderation_policy_import as policy_import
 from smarter_dev.web import moderation_policy_store as store
-from smarter_dev.web.models import ModerationConfig
 from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.web.models import ModerationOwnership
 from smarter_dev.web.models import ModerationPolicyLoad
 from smarter_dev.web.models import ModerationPolicyRevision
 from smarter_dev.web.moderation_gateway.config import load_incident_report_channel
 from smarter_dev.web.moderation_gateway.gateway import default_session_factory
 from tests.web.moderation_cutover_test import BUMP_CHANNEL
 from tests.web.moderation_cutover_test import GUILD
-from tests.web.moderation_cutover_test import _production_like
 
 REPORTS = "728249959098482829"
 MODS = "644390354157568014"
@@ -47,26 +46,8 @@ def sessions():
     return default_session_factory()()
 
 
-async def _switched(*, triage_tools=("timeout", "purge", "delete")) -> None:
-    """smarter.dev after the cutover: switched, report channels and triage set."""
-    await _production_like()
-    async with sessions() as session:
-        config = await session.get(ModerationFilterConfig, GUILD)
-        config.staff_exempt_role_ids = [MODS, ADMIN]
-        config.mod_alert_channel_id = REPORTS
-        config.mod_ping_role_id = MODS
-        session.add(
-            ModerationConfig(
-                guild_id=GUILD,
-                is_active=True,
-                monitored_role_ids=[MODS, ADMIN],
-                instructions="Freeze, don't judge.",
-                enabled_tools=list(triage_tools),
-                response_channel_id=REPORTS,
-                context_message_limit=25,
-            )
-        )
-        await session.commit()
+async def _switched() -> None:
+    """A guild just handed to the coordinator: the ownership row, no policy."""
     async with sessions() as session:
         await cutover.switch(session, GUILD, by="zech")
 
@@ -76,12 +57,30 @@ async def _plan() -> policy_import.ImportPlan:
         return await policy_import.plan(session, GUILD)
 
 
+def live_document() -> mp.PolicyDocument:
+    """smarter.dev's policy as revision 1 was imported on Oct 25: every rule
+    enforced, staff-ping triage on."""
+    raw = mp.default_document().as_json()
+    for rule in mp.RULES:
+        raw["rules"][rule]["mode"] = mp.ENFORCE
+    raw["rules"]["bump_channel"]["channels"] = [BUMP_CHANNEL]
+    raw["protected_role_ids"] = [MODS, ADMIN]
+    raw["destinations"].update(report_channel_id=REPORTS, mod_ping_role_id=MODS)
+    raw["triage"].update(
+        mode=mp.ENFORCE,
+        monitored_role_ids=[MODS, ADMIN],
+        enabled_tools=["timeout", "purge", "delete"],
+        response_channel_id=REPORTS,
+    )
+    return mp.validate(raw)
+
+
 # -- the document -----------------------------------------------------------------
 
 
 def test_the_defaults_are_the_values_the_code_ran_with():
-    """The policy replaces these constants; a guild without one runs on them,
-    so a default that drifts from its constant changes nothing silently."""
+    """The policy replaced these constants; a default that drifts from its
+    constant would change a new guild's settings silently."""
     doc = mp.default_document()
     assert doc.risk.windows.model_dump() == rules.RISK_SECONDS
     assert doc.risk.joined_within_seconds == rules.DAY
@@ -106,15 +105,6 @@ def test_the_defaults_are_the_values_the_code_ran_with():
     )
     assert doc.sanctions.max_timeout_seconds == mp.DISCORD_MAX_TIMEOUT_SECONDS
     assert set(mp.TRIAGE_TOOLS) == set(triage_config.DESTRUCTIVE_TOOLS)
-    model = ModerationFilterConfig.get_defaults(GUILD)
-    spam = doc.rules.spam_engine
-    for name in policy_import._SPAM_FIELDS:
-        assert getattr(spam, name) == getattr(model, name), name
-    ring = doc.rules.spam_ring
-    assert ring.new_member_days == model.spam_ring_new_member_days
-    assert ring.timeout_seconds == model.spam_ring_timeout_seconds
-    assert ring.lookback_minutes == model.spam_ring_lookback_minutes
-    assert ring.followup_minutes == model.spam_ring_followup_minutes
     # The triage caps are code, not settings.
     assert mod_tools.MAX_PURGE_COUNT == 50
 
@@ -169,38 +159,36 @@ def test_guild_wide_controls_override_each_rule():
 # -- the import -------------------------------------------------------------------
 
 
-async def test_the_import_reads_the_coordinators_rules_not_the_zeroed_switches():
+async def test_the_import_writes_every_rule_off():
+    """A newly moved guild starts with nothing on: no rule, no triage, no
+    protected roles, no report channel, no bump channel."""
     await _switched()
     plan = await _plan()
     doc = plan.document
-
-    # Every rule the cutover handed over (and mass mention) enforces, though
-    # the old tables' switches now read off.
     assert {rule: doc.rule(rule).mode for rule in mp.RULES} == dict.fromkeys(
-        mp.RULES, mp.ENFORCE
+        mp.RULES, mp.OFF
     )
+    assert doc.triage.mode == mp.OFF and doc.triage.enabled_tools == []
+    assert doc.protected_role_ids == []
+    assert doc.destinations.report_channel_id is None
+    assert doc.destinations.mod_ping_role_id is None
+    assert doc.rules.bump_channel.channels == []
+    assert doc == mp.default_document()
+    assert plan.sources["ownership"] == {"owner": "coordinator", "generation": 1}
+
+
+async def test_the_import_reads_no_old_config(monkeypatch):
+    """Whatever else the guild has (its content filter row), revision 1 is
+    the default document."""
     async with sessions() as session:
-        config = await session.get(ModerationFilterConfig, GUILD)
-        assert config.spam_engine_enabled is False
-    assert doc.protected_role_ids == [MODS, ADMIN]
-    assert doc.destinations.report_channel_id == REPORTS
-    assert doc.destinations.mod_ping_role_id == MODS
-    assert doc.rules.bump_channel.channels == [BUMP_CHANNEL]
-    assert doc.rules.scam_gate.channels == [] and doc.rules.edit_ping.channels == []
-    assert doc.rules.spam_engine.scam_link_domains == list(
-        ModerationFilterConfig.get_defaults(GUILD).scam_link_domains
-    )
-    assert doc.triage.mode == mp.ENFORCE
-    assert doc.triage.enabled_tools == ["timeout", "purge", "delete"]
-    assert doc.triage.monitored_role_ids == [MODS, ADMIN]
-    assert doc.classifier.per_guild_day == 1500
-    assert plan.sources["ownership"]["generation"] == 1
-    assert plan.notes == []
-
-
-async def test_an_empty_triage_allowlist_is_imported_empty():
-    await _switched(triage_tools=())
-    assert (await _plan()).document.triage.enabled_tools == []
+        session.add(
+            ModerationFilterConfig(
+                guild_id=GUILD, content_filter_enabled=True, mod_log_channel_id=REPORTS
+            )
+        )
+        await session.commit()
+    await _switched()
+    assert (await _plan()).document == mp.default_document()
 
 
 async def test_the_acting_daily_ceiling_comes_from_the_bots_setting(monkeypatch):
@@ -214,7 +202,11 @@ async def test_the_acting_daily_ceiling_comes_from_the_bots_setting(monkeypatch)
 
 
 async def test_a_guild_the_coordinator_does_not_own_is_refused():
-    await _production_like()
+    with pytest.raises(policy_import.ImportRefused, match="not moderated"):
+        await _plan()
+    async with sessions() as session:
+        session.add(ModerationOwnership(guild_id=GUILD, owner="legacy", generation=2))
+        await session.commit()
     with pytest.raises(policy_import.ImportRefused, match="not moderated"):
         await _plan()
 
@@ -227,9 +219,29 @@ async def test_the_import_writes_revision_one_once():
         stored = await store.read_policy(session, GUILD)
         [revision] = await store.revisions(session, GUILD)
     assert stored.revision == 1 and stored.updated_by == "zech"
+    assert stored.document == mp.default_document()
     assert revision.source == store.SOURCE_IMPORT and revision.revision == 1
     with pytest.raises(policy_import.ImportRefused, match="already has"):
         await _plan()
+
+
+@pytest.fixture
+def triage_db(monkeypatch):
+    """Triage reads through the app's session context; point it at the
+    test database the rest of this module uses."""
+    monkeypatch.setattr(triage_config, "get_db_session_context", sessions)
+
+
+async def test_an_imported_guild_runs_nothing_until_a_rule_is_switched_on(triage_db):
+    await _switched()
+    async with sessions() as session:
+        await policy_import.run(session, GUILD, by="zech")
+    policy = await load_policy(GUILD)
+    assert policy.revision == 1 and policy.acting
+    assert policy.spam is None and policy.ring is None and policy.attachments is None
+    assert not (policy.scam_gate or policy.edit_ping or policy.mass_mention)
+    assert policy.enforced == frozenset()
+    assert await triage_config.load_triage_config(GUILD) is None
 
 
 async def test_the_dry_run_writes_nothing():
@@ -243,9 +255,14 @@ async def test_the_dry_run_writes_nothing():
 
 
 async def _imported() -> mp.PolicyDocument:
+    """smarter.dev: switched, with its live policy as revision 1."""
     await _switched()
+    doc = live_document()
     async with sessions() as session:
-        return (await policy_import.run(session, GUILD, by="import")).document
+        await store.save_policy(
+            session, GUILD, doc, base_revision=None, by="import", source="import"
+        )
+    return doc
 
 
 async def test_a_save_on_a_stale_revision_is_refused_and_writes_nothing():
@@ -339,11 +356,41 @@ async def test_reporting_off_reports_nowhere():
         assert await load_incident_report_channel(session, GUILD) is None
 
 
-async def test_without_a_policy_the_old_tables_are_read_as_before():
+async def test_a_guild_without_a_policy_gets_nothing(triage_db):
+    """No policy, whatever the guild still has: the coordinator runs no rule,
+    triage does not run, nobody is protected beyond the built-in staff rule,
+    and incidents are reported nowhere."""
+    async with sessions() as session:
+        session.add(
+            ModerationFilterConfig(
+                guild_id=GUILD, content_filter_enabled=True, mod_log_channel_id=REPORTS
+            )
+        )
+        await session.commit()
     await _switched()
     policy = await load_policy(GUILD)
-    assert policy.revision is None and policy.enforced is None
-    assert policy.spam is not None and policy.report_channel_id == REPORTS
+    assert policy.acting and policy.revision is None
+    assert policy.enforced == frozenset() and policy.spam is None
+    assert policy.ring is None and policy.report_channel_id is None
+    assert await triage_config.load_triage_config(GUILD) is None
+    assert await triage_config.staff_exempt_role_ids(GUILD) == ()
+    assert await triage_config.tool_refusal(GUILD, "timeout") == (
+        "AI moderation has been switched off for this server; no action taken."
+    )
+    async with sessions() as session:
+        assert await store.protected_role_ids(session, GUILD) == ()
+        assert await load_incident_report_channel(session, GUILD) is None
+
+
+async def test_with_a_policy_triage_and_protection_are_the_policys(triage_db):
+    await _imported()
+    config = await triage_config.load_triage_config(GUILD)
+    assert config.enabled_tools == ("timeout", "purge", "delete")
+    assert config.monitored_role_ids == frozenset({MODS, ADMIN})
+    assert await triage_config.staff_exempt_role_ids(GUILD) == (MODS, ADMIN)
+    async with sessions() as session:
+        assert await store.protected_role_ids(session, GUILD) == (MODS, ADMIN)
+        assert await load_incident_report_channel(session, GUILD) == REPORTS
 
 
 def test_triage_follows_the_policys_mode():
@@ -396,89 +443,22 @@ async def test_the_heartbeat_reports_what_the_cache_loaded():
     assert [r.revision for r in revisions] == [1]
 
 
-PARITY_FIELDS = (
-    "spam",
-    "attachments",
-    "ring",
-    "scam_gate",
-    "edit_ping",
-    "scam_gate_channel_ids",
-    "edit_ping_channel_ids",
-    "bump_channel_ids",
-    "mass_mention",
-    "staff_exempt_role_ids",
-    "owner",
-    "generation",
-    "report_channel_id",
-)
-
-
-async def test_after_the_import_the_coordinator_runs_exactly_as_before():
-    """The imported revision gives the coordinator the very settings it read
-    from the old tables, field by field."""
-    await _switched()
-    before = await load_policy(GUILD)
-    async with sessions() as session:
-        await policy_import.run(session, GUILD, by="import")
-    after = await load_policy(GUILD)
-    assert after.revision == 1
-    # The legacy engine's own switch and channel, which the coordinator never
-    # reads: the cutover zeroed the one, the other is the report channel.
-    before = replace(
-        before,
-        spam=replace(before.spam, enabled=True, report_channel_id=REPORTS),
-        ring=replace(before.ring, enabled=True),
-    )
-    for name in PARITY_FIELDS:
-        assert getattr(after, name) == getattr(before, name), name
-    assert after.document.as_json() != mp.default_document().as_json()
-
-
 # -- review of 09f3f973 (#364) ----------------------------------------------------
 
 
-async def test_triage_keeps_its_own_reply_channel_and_its_fallback():
-    """Fix 1: triage replied in ``moderation_configs.response_channel_id``,
-    else in the ping's channel; the import keeps both, and the report
-    channel does not stand in for it."""
-    await _switched()
-    async with sessions() as session:
-        triage = await session.get(ModerationConfig, GUILD)
-        triage.response_channel_id = "702178352395580009"
-        await session.commit()
-    doc = (await _plan()).document
-    assert doc.triage.response_channel_id == "702178352395580009"
+def test_triage_keeps_its_own_reply_channel_and_its_fallback():
+    """Fix 1: triage replies in ``triage.response_channel_id``, else in the
+    ping's channel; the report channel does not stand in for it."""
+    raw = live_document().as_json()
+    raw["triage"]["response_channel_id"] = "702178352395580009"
+    doc = mp.validate(raw)
     assert doc.destinations.report_channel_id == REPORTS
     config = triage_config.triage_from_policy(GUILD, doc)
     assert config.response_channel_id == "702178352395580009"
 
-    raw = doc.as_json()
     raw["triage"]["response_channel_id"] = None
     config = triage_config.triage_from_policy(GUILD, mp.validate(raw))
     assert config.response_channel_id is None  # the ping's own channel
-
-
-async def test_a_missing_config_row_imports_its_rules_off():
-    """Fix 2: no row is no rule, whatever the ownership lists; defaults
-    never switch a rule on."""
-    from smarter_dev.web.models import AttachmentFilterConfig
-
-    await _switched()
-    async with sessions() as session:
-        await session.delete(await session.get(AttachmentFilterConfig, GUILD))
-        await session.delete(await session.get(ModerationFilterConfig, GUILD))
-        await session.commit()
-    plan = await _plan()
-    doc = plan.document
-    assert doc.rule(mp.ATTACHMENT_FILTER).mode == mp.OFF
-    assert doc.rule(mp.SPAM_ENGINE).mode == mp.OFF
-    assert doc.rule(mp.SPAM_RING).mode == mp.OFF
-    assert doc.rule(mp.SCAM_GATE).mode == mp.ENFORCE
-    assert sorted(n.split()[0] for n in plan.notes if "row is missing" in n) == [
-        mp.ATTACHMENT_FILTER,
-        mp.SPAM_ENGINE,
-        mp.SPAM_RING,
-    ]
 
 
 def test_classifier_budgets_of_zero_are_refused():

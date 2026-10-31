@@ -136,8 +136,9 @@ class JudgeVerdict(BaseModel):
         "True when no agent reply gates anything"
     )
     actions_appropriate: bool = Field(
-        description="Actions fit the target: destructive moderation only for new/untrusted "
-        "accounts on clear evidence (established members get timeout+report); emits are "
+        description="Actions fit the target: nothing punishes a member by other means "
+        "(a muting role, silencing their threads); deletes are bot-message upkeep; a "
+        "member worth a moderator's look is handed over with report_for_review; emits are "
         "selective enough not to be spam for the trigger frequency"
     )
     transparent: bool = Field(
@@ -518,8 +519,8 @@ def describe_trigger(trigger_type: str, settings: dict) -> str:
             "Fires once per moderation action recorded in this guild (from a slash "
             "command, the AI triage, or the audit-log backfill) — low frequency, "
             "one fire per action. Runs with a 0 moderation-action budget: it can "
-            "format and post the audit row but can NEVER itself ban/kick/timeout/"
-            "delete. Use it to own the mod-log channel's formatting."
+            "format and post the audit row but can NEVER itself delete, rename or "
+            "report for review. Use it to own the mod-log channel's formatting."
         )
     return f"Trigger: {trigger_type}."
 
@@ -892,7 +893,7 @@ async def _list_channels(ctx: RunContext[_AdminAuthorDeps]) -> list[dict]:
 AdminAuthor = Callable[..., Awaitable["AdminHandlerPlan"]]
 
 _admin_author_agent: Agent[_AdminAuthorDeps, AdminHandlerPlan] | None = None
-# Admin scripts get moderation powers, so up to two judges review in parallel
+# Admin scripts get admin powers, so up to two judges review in parallel
 # and either rejection blocks install — one agent per distinct judge model.
 _admin_judge_agents: dict[str, Agent[None, JudgeVerdict]] = {}
 
@@ -1128,22 +1129,9 @@ async def _validate_admin_draft(
             None,
         )
 
-    target = next(
-        (
-            handler
-            for handler in existing_handlers
-            if resolved.target_handler_id
-            and handler.get("handler_id") == resolved.target_handler_id
-        ),
-        {},
-    )
-    reason = moderation_refusal(
-        script,
-        existing_script=target.get("script"),
-        handler_name=target.get("name"),
-    )
+    reason = moderation_refusal(script)
     if reason is not None:
-        logger.info("admin draft refused: it sanctions members")
+        logger.info("admin draft refused: it uses a removed sanction function")
         return _DraftRejection(is_mechanical=False, feedback=reason), None
 
     if resolved.trigger_type in ("schedule", "timer"):

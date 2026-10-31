@@ -11,8 +11,10 @@ from __future__ import annotations
 import pytest
 
 from smarter_dev.bot import spam_engine
-from smarter_dev.web.models import DEFAULT_SCAM_LINK_DOMAINS
-from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.shared import moderation_policy as mp
+from tests.bot.moderation_coordinator.replay_cases import SCAM_LINK_DOMAINS
+
+DEFAULT_SCAM_LINK_DOMAINS = SCAM_LINK_DOMAINS
 
 GUILD_ID = 100
 CHANNEL_ID = 200
@@ -27,9 +29,13 @@ NOW = 1_000_000.0
 
 
 def _thresholds(**overrides) -> spam_engine.SpamThresholds:
-    return spam_engine.SpamThresholds.from_config(
-        ModerationFilterConfig(guild_id=str(GUILD_ID), **overrides)
-    )
+    """The policy's default spam engine thresholds, with overrides."""
+    rule = mp.default_document().rules.spam_engine
+    values = {
+        name: getattr(rule, name)
+        for name in spam_engine.SpamThresholds.__dataclass_fields__
+    }
+    return spam_engine.SpamThresholds(**{**values, **overrides})
 
 
 def _entry(

@@ -34,7 +34,7 @@ DEFAULT_MAX_DISCORD_READS = 2
 DEFAULT_MAX_THREAD_OPS = 0
 # Role grants/revokes. Standard handlers have no AdminActor, so zero (belt and
 # suspenders — the functions aren't even injected for them). Kept OUT of the mod
-# pool so a promotion burst can't starve a ban and vice versa.
+# pool so a promotion burst can't starve the upkeep actions and vice versa.
 DEFAULT_MAX_ROLE_CHANGES = 0
 # One-shot timers a fire may arm (schedule_timer). Available to both tiers — a
 # standard handler can legitimately self-defer — so the default is non-zero, kept
@@ -46,8 +46,10 @@ DEFAULT_MAX_TIMERS = 2
 DEFAULT_MAX_LOOKUPS = 0
 
 # Admin handlers are admin-created and trusted: looser per-fire caps, and a
-# moderation-action budget (bans/kicks/timeouts/deletes), e.g. cleaning up a
-# scammer's messages = several deletes in one fire.
+# budget of upkeep actions (bot-message deletes, renames, review reports). A
+# delete also spends a discord read (it reads who posted the message first),
+# so ADMIN_MAX_DISCORD_READS caps deletes at 5 per fire; the Disboard tracker
+# clears at most 2 stale notices per fire.
 ADMIN_MAX_MESSAGES = 5
 ADMIN_MAX_AGENT_CALLS = 3
 ADMIN_MAX_MOD_ACTIONS = 25
@@ -169,7 +171,7 @@ class HandlerBudget:
         self.agent_calls += 1
 
     def spend_mod_action(self) -> None:
-        """Account for one moderation action (ban/kick/timeout/delete)."""
+        """Account for one admin action (a delete, a rename, a review report)."""
         self.check_deadline()
         if self.mod_actions >= self.max_mod_actions:
             raise CapExceeded(
@@ -189,7 +191,7 @@ class HandlerBudget:
         self.discord_reads += 1
 
     def spend_thread_op(self) -> None:
-        """Account for one mutating thread op (create/close/lock/reopen/delete)."""
+        """Account for one mutating thread op (close/reopen)."""
         self.check_deadline()
         if self.thread_ops >= self.max_thread_ops:
             raise CapExceeded(
@@ -202,7 +204,7 @@ class HandlerBudget:
         """Account for one role grant/revoke (add_role/remove_role).
 
         Separate from mod_actions: role changes are routine lifecycle plumbing
-        and must not draw from the same pool as bans.
+        and must not draw from the same pool as the upkeep actions.
         """
         self.check_deadline()
         if self.role_changes >= self.max_role_changes:

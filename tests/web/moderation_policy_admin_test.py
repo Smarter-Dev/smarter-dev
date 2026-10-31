@@ -28,8 +28,6 @@ from smarter_dev.web.bot_admin_skrift import BotAdminController
 from smarter_dev.web.discord_admin_client import DiscordChannel
 from smarter_dev.web.discord_admin_client import DiscordGuildDetail
 from smarter_dev.web.discord_admin_client import DiscordRole
-from smarter_dev.web.models import AttachmentFilterConfig
-from smarter_dev.web.models import ModerationConfig
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.models import ModerationIncident
 from smarter_dev.web.models import ModerationIncidentEntry
@@ -413,75 +411,89 @@ async def test_the_api_reads_and_writes_on_a_base_revision(db_session):
     ).document.rules.edit_ping.mode == mp.OFF
 
 
-# -- the old forms under a policy -----------------------------------------------
+# -- the old forms ----------------------------------------------------------------
 
 
-async def test_the_old_triage_and_attachment_pages_send_you_to_the_policy(db_session):
-    await _import(db_session)
-    db_session.add(
-        ModerationConfig(guild_id=GUILD, is_active=True, enabled_tools=["timeout"])
-    )
-    await db_session.commit()
+async def test_the_old_triage_and_attachment_urls_send_you_to_the_policy(db_session):
+    """Their forms and tables are gone (#242); the URLs redirect, with or
+    without a policy."""
     to = f"/admin/bot/guilds/{GUILD}/moderation"
-    with _patched():
-        triage_get = await BotAdminController.moderation_config.fn(
-            None, request=SimpleNamespace(), db_session=db_session, guild_id=GUILD
+    for with_policy in (False, True):
+        if with_policy:
+            await _import(db_session)
+        triage = await BotAdminController.moderation_config.fn(None, guild_id=GUILD)
+        attachment = await GuildConfigsAdminController.attachment_filter_config.fn(
+            None, guild_id=GUILD
         )
-        triage_post = await BotAdminController.save_moderation_config.fn(
-            None,
-            request=SimpleNamespace(),
-            db_session=db_session,
-            guild_id=GUILD,
-            data={"is_active": "false", "enabled_tools": ""},
-        )
-        attachment_get = await GuildConfigsAdminController.attachment_filter_config.fn(
-            None, request=SimpleNamespace(), db_session=db_session, guild_id=GUILD
-        )
-        with patch("smarter_dev.web.bot_admin.guild_configs.flash_error"):
-            attachment_post = (
-                await GuildConfigsAdminController.save_attachment_filter_config.fn(
-                    None,
-                    request=SimpleNamespace(
-                        form=AsyncMock(return_value={"is_active": "on"})
-                    ),
-                    db_session=db_session,
-                    guild_id=GUILD,
-                )
-            )
-    for response in (triage_get, triage_post, attachment_get, attachment_post):
-        assert response.url == to
-    row = await db_session.get(ModerationConfig, GUILD)
-    assert row.is_active is True and row.enabled_tools == ["timeout"]
-    assert await db_session.get(AttachmentFilterConfig, GUILD) is None
+        assert triage.url == to and attachment.url == to
 
 
-async def test_the_old_filter_form_saves_only_the_content_filter(db_session):
-    await _import(db_session)
-    db_session.add(
-        ModerationFilterConfig(
-            guild_id=GUILD, spam_engine_enabled=False, staff_exempt_role_ids=[MODS]
-        )
-    )
+async def test_the_content_filters_form_saves_only_its_own_fields(db_session):
+    """The form reads and saves the content filter's six settings and nothing
+    else, whatever else is submitted."""
+    from smarter_dev.web.bot_admin import guild_configs
+
+    db_session.add(ModerationFilterConfig(guild_id=GUILD))
     await db_session.commit()
     form = {
         "content_filter_enabled": "on",
         "blocked_tlds": ".zip",
+        "invite_filter_enabled": "on",
+        "invite_filter_exempt_category_ids": "702178352395583499",
+        "webhook_killer_enabled": "on",
+        "mod_log_channel_id": REPORTS,
+        # What the old form also posted: dropped.
         "spam_engine_enabled": "on",
-        "staff_exempt_role_ids": "",
+        "staff_exempt_role_ids": MODS,
         "message_rate_threshold": "99",
+        "scam_link_domains": "t.me",
+        "mod_alert_channel_id": REPORTS,
     }
-    with _patched(), patch("smarter_dev.web.bot_admin.guild_configs.flash_success"):
+    real_update = guild_configs.moderation_filter_ops.update_config
+    with (
+        _patched(),
+        patch("smarter_dev.web.bot_admin.guild_configs.flash_success"),
+        patch.object(
+            guild_configs.moderation_filter_ops,
+            "update_config",
+            new=AsyncMock(side_effect=real_update),
+        ) as update,
+    ):
         await GuildConfigsAdminController.save_moderation_filter_config.fn(
             None,
             request=SimpleNamespace(form=AsyncMock(return_value=form)),
             db_session=db_session,
             guild_id=GUILD,
         )
+    [call] = update.await_args_list
+    assert set(call.kwargs) == guild_configs.CONTENT_FILTER_FIELDS
+    assert guild_configs.CONTENT_FILTER_FIELDS == {
+        "content_filter_enabled",
+        "blocked_tlds",
+        "invite_filter_enabled",
+        "invite_filter_exempt_category_ids",
+        "webhook_killer_enabled",
+        "mod_log_channel_id",
+    }
     await db_session.refresh(row := await db_session.get(ModerationFilterConfig, GUILD))
     assert row.content_filter_enabled is True and row.blocked_tlds == [".zip"]
-    assert row.spam_engine_enabled is False
-    assert row.staff_exempt_role_ids == [MODS]
-    assert row.message_rate_threshold == 5
+    assert row.invite_filter_enabled is True and row.webhook_killer_enabled is True
+    assert row.invite_filter_exempt_category_ids == ["702178352395583499"]
+    assert row.mod_log_channel_id == REPORTS
+
+
+async def test_the_content_filters_page_shows_only_its_own_fields(db_session):
+    from smarter_dev.web.bot_admin import guild_configs
+
+    with _patched():
+        response = await GuildConfigsAdminController.moderation_filter_config.fn(
+            None, request=SimpleNamespace(), db_session=db_session, guild_id=GUILD
+        )
+    html = render_admin_template(response.template_name, **response.context)
+    parsed = _Form()
+    parsed.feed(html)
+    assert parsed.names - {"csrf_token"} == guild_configs.CONTENT_FILTER_FIELDS
+    assert f"/admin/bot/guilds/{GUILD}/moderation" in html
 
 
 # -- incidents --------------------------------------------------------------------

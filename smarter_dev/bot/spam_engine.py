@@ -17,8 +17,8 @@ and DB-free:
 * :class:`GuildSpamState` — a plain state class holding the buffer plus the
   warning/muting timestamps.
 
-Every threshold and window comes from ``ModerationFilterConfig``, including the
-buffer's own bounds: :func:`derive_buffer_bounds` sizes retention from the
+Every threshold and window comes from the guild's moderation policy
+(``rules.spam_engine``), including the buffer's own bounds: :func:`derive_buffer_bounds` sizes retention from the
 longest configured window and the per-author cap from the largest configured
 count, so no configured value is silently unreachable. Only three things are
 hardcoded: the reason phrasing, the ``d*.gift`` lookalike pattern (the domain
@@ -36,8 +36,6 @@ import re
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-
-from smarter_dev.web.models import ModerationFilterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +110,7 @@ def host_matches_configured_domain(host: str, scam_link_domain: str) -> bool:
 
     The dot boundary is required, so "t.me" matches "t.me" and "x.t.me" but
     never "nott.me". Configured entries are already bare lowercase hostnames
-    (see ``ModerationFilterConfig.scam_link_domains``), so lower-casing the
+    (see the policy's ``rules.spam_engine.scam_link_domains``), so lower-casing the
     host is the only normalization needed here.
     """
     return host == scam_link_domain or host.endswith(f".{scam_link_domain}")
@@ -335,7 +333,7 @@ class SpamMessageBuffer:
 
 @dataclass(frozen=True, slots=True)
 class SpamThresholds:
-    """The tunables the metrics need, lifted off the config row."""
+    """The tunables the metrics need, from the policy's spam engine rule."""
 
     message_rate_threshold: int
     message_rate_window_seconds: int
@@ -346,20 +344,6 @@ class SpamThresholds:
     mass_mention_window_seconds: int
     warning_reoffense_window_seconds: int
     mute_duration_seconds: int
-
-    @classmethod
-    def from_config(cls, config: ModerationFilterConfig) -> SpamThresholds:
-        return cls(
-            message_rate_threshold=config.message_rate_threshold,
-            message_rate_window_seconds=config.message_rate_window_seconds,
-            channel_spread_threshold=config.channel_spread_threshold,
-            channel_spread_window_seconds=config.channel_spread_window_seconds,
-            duplicate_message_min_length=config.duplicate_message_min_length,
-            duplicate_message_window_seconds=config.duplicate_message_window_seconds,
-            mass_mention_window_seconds=config.mass_mention_window_seconds,
-            warning_reoffense_window_seconds=config.warning_reoffense_window_seconds,
-            mute_duration_seconds=config.mute_duration_seconds,
-        )
 
 
 #: Retention keeps this much slack beyond the longest configured window, so an
@@ -443,10 +427,9 @@ def derive_buffer_bounds(thresholds: SpamThresholds) -> SpamBufferBounds:
 
 @dataclass(frozen=True, slots=True)
 class SpamEngineSettings:
-    """Immutable snapshot of a guild's config, taken inside the DB session.
-
-    Snapshotting keeps every ORM attribute read inside the session and leaves
-    the rest of the engine working on plain values.
+    """Immutable snapshot of a guild's spam engine settings, built from its
+    moderation policy (``policy.from_document``), so the engine works on plain
+    values.
     """
 
     enabled: bool
@@ -458,25 +441,6 @@ class SpamEngineSettings:
     scam_log_channel_id: str | None
     #: The guild's incident report channel (a mute is reported there).
     report_channel_id: str | None = None
-
-    @classmethod
-    def from_config(
-        cls, config: ModerationFilterConfig, report_channel_id: str | None = None
-    ) -> SpamEngineSettings:
-        return cls(
-            enabled=bool(config.spam_engine_enabled),
-            staff_exempt_role_ids=tuple(
-                str(role_id) for role_id in (config.staff_exempt_role_ids or [])
-            ),
-            scam_link_domains=tuple(
-                str(domain).lower() for domain in (config.scam_link_domains or [])
-            ),
-            thresholds=SpamThresholds.from_config(config),
-            mod_alert_channel_id=config.mod_alert_channel_id,
-            mod_ping_role_id=config.mod_ping_role_id,
-            scam_log_channel_id=config.scam_log_channel_id,
-            report_channel_id=report_channel_id,
-        )
 
 
 # ---------------------------------------------------------------------------

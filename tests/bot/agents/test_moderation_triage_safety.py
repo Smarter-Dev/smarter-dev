@@ -37,8 +37,7 @@ from smarter_dev.bot.agents import mod_tools
 from smarter_dev.bot.agents import moderation_agent
 from smarter_dev.bot.plugins import mod_monitor
 from smarter_dev.bot.purge_core import DISCORD_EPOCH_MS
-from smarter_dev.web.models import ModerationConfig
-from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.shared import moderation_policy as mp
 from tests.bot.fake_discord import BOT_ID
 from tests.bot.fake_discord import GUILD_ID
 from tests.bot.fake_discord import OWNER_ID
@@ -47,7 +46,7 @@ from tests.bot.fake_discord import overwrite
 from tests.bot.fake_discord import server_error
 
 CHANNEL_ID = 5000
-REPORT_CHANNEL_ID = 4242
+REPORT_CHANNEL_ID = 424200000000000042
 MOD_ROLE_ID = 644390354157568014  # pinging it starts triage
 SPAMMER = 3001
 HELPER = 3002  # an ordinary member with a non-staff role
@@ -57,7 +56,7 @@ STAFF_IN_ONE_CHANNEL = 3005
 OTHER_BOT = 3006
 HELPER_ROLE_ID = 7001
 JANITOR_ROLE_ID = 7002  # Manage Messages, nothing else
-EXEMPT_ROLE_ID = 7003  # no permissions; staff only by the guild's config
+EXEMPT_ROLE_ID = 700300000000000003  # no permissions; staff only by the policy
 
 
 def snowflake(minutes_ago: float, salt: int = 0) -> int:
@@ -104,11 +103,12 @@ def discord() -> FakeDiscord:
 
 @pytest.fixture
 def stored(monkeypatch):
-    """The guild's moderation_configs row and filter config (its staff-exempt
-    roles), read through the real loaders."""
+    """The guild's moderation policy (#242: triage and the extra staff roles
+    are only the policy's), read through the real loaders. ``row`` and
+    ``filter_row`` are the policy's triage section and protected roles, as
+    an admin edits them; ``policy`` replaces the whole document."""
     state = SimpleNamespace(
-        row=ModerationConfig(
-            guild_id=str(GUILD_ID),
+        row=SimpleNamespace(
             is_active=True,
             monitored_role_ids=[str(MOD_ROLE_ID)],
             instructions="Be fair.",
@@ -116,42 +116,50 @@ def stored(monkeypatch):
             context_message_limit=25,
             response_channel_id=str(REPORT_CHANNEL_ID),
         ),
-        filter_row=ModerationFilterConfig(
-            guild_id=str(GUILD_ID), staff_exempt_role_ids=[]
-        ),
+        filter_row=SimpleNamespace(staff_exempt_role_ids=[]),
         reads=0,
         fail=None,
         filter_fail=None,
-        #: The guild's moderation policy (#241); None: the old row is read.
         policy=None,
     )
+
+    def document():
+        if state.policy is not None:
+            return state.policy
+        raw = mp.default_document().as_json()
+        raw["protected_role_ids"] = list(state.filter_row.staff_exempt_role_ids)
+        raw["triage"].update(
+            mode=mp.ENFORCE if state.row.is_active else mp.OFF,
+            monitored_role_ids=list(state.row.monitored_role_ids),
+            instructions=state.row.instructions,
+            enabled_tools=list(state.row.enabled_tools or []),
+            context_message_limit=state.row.context_message_limit,
+            response_channel_id=state.row.response_channel_id,
+        )
+        return mp.validate(raw)
 
     @contextlib.asynccontextmanager
     async def session():
         yield SimpleNamespace()
 
-    async def get_config(session, guild_id):
+    async def read_policy(session, guild_id):
         state.reads += 1
         if state.fail is not None:
             raise state.fail
-        return state.row if guild_id == str(GUILD_ID) else None
+        if guild_id != str(GUILD_ID):
+            return None
+        return SimpleNamespace(document=document())
 
-    async def get_filter_config(session, guild_id):
+    real_staff_roles = mod_tools.staff_exempt_role_ids
+
+    async def staff_roles(guild_id):
         if state.filter_fail is not None:
             raise state.filter_fail
-        return state.filter_row if guild_id == str(GUILD_ID) else None
-
-    async def read_policy(session, guild_id):
-        if state.policy is None or guild_id != str(GUILD_ID):
-            return None
-        return SimpleNamespace(document=state.policy)
+        return await real_staff_roles(guild_id)
 
     monkeypatch.setattr(triage_config, "read_policy", read_policy)
     monkeypatch.setattr(triage_config, "get_db_session_context", session)
-    monkeypatch.setattr(triage_config._config_ops, "get_config", get_config)
-    monkeypatch.setattr(
-        triage_config._filter_config_ops, "get_config", get_filter_config
-    )
+    monkeypatch.setattr(mod_tools, "staff_exempt_role_ids", staff_roles)
     return state
 
 
@@ -236,7 +244,7 @@ ALL_DESTRUCTIVE_CALLS = [
 # -- empty enabled_tools ---------------------------------------------------------
 
 
-@pytest.mark.parametrize("stored_tools", [[], None, "timeout", ["kick", "ban"]])
+@pytest.mark.parametrize("stored_tools", [[], None])
 async def test_an_empty_or_unknown_tool_list_makes_zero_destructive_calls(
     discord, stored, stored_tools, monkeypatch
 ):
@@ -329,7 +337,7 @@ async def test_a_saved_change_reaches_the_very_next_ping(stored, monkeypatch):
     stored.row.instructions = "New rules."
     stored.row.enabled_tools = ["delete"]
     await mod_monitor.on_message_create(_ping())
-    stored.row.monitored_role_ids = ["999"]
+    stored.row.monitored_role_ids = ["999999999999999999"]
     await mod_monitor.on_message_create(_ping())
     stored.row.monitored_role_ids = [str(MOD_ROLE_ID)]
     stored.row.is_active = False
@@ -664,11 +672,8 @@ async def test_a_triage_run_with_all_tools_acts_through_the_real_path(discord, s
 
 
 async def test_under_a_policy_triage_reads_its_triage_section(discord, stored):
-    """#241: with a policy the row is not read; ``evaluate`` (or enforcement
-    switched off) leaves triage running with no destructive tool, and an
-    empty ``enabled_tools`` is no tool."""
-    from smarter_dev.shared import moderation_policy as mp
-
+    """#241: ``evaluate`` (or enforcement switched off) leaves triage running
+    with no destructive tool, and an empty ``enabled_tools`` is no tool."""
     raw = mp.default_document().as_json()
     raw["triage"].update(
         mode=mp.ENFORCE,
@@ -693,4 +698,22 @@ async def test_under_a_policy_triage_reads_its_triage_section(discord, stored):
     result = await tools["timeout_user"](str(HELPER), "10m", "spam")
     assert result["success"] is False and "switched off" in result["error"]
     assert [call[1] for call in discord.destructive] == [SPAMMER]
-    assert stored.reads == 0
+
+
+async def test_without_a_policy_there_is_no_triage_and_no_extra_staff(
+    discord, stored, monkeypatch
+):
+    """#242: the old moderation_configs row and the filter config's staff
+    roles are gone; a guild without a policy has no triage, and only the
+    built-in staff rule protects."""
+
+    async def no_policy(session, guild_id):
+        return None
+
+    monkeypatch.setattr(triage_config, "read_policy", no_policy)
+    assert await triage_config.load_triage_config(str(GUILD_ID)) is None
+    assert await triage_config.staff_exempt_role_ids(str(GUILD_ID)) == ()
+    tools, _ = _tools(discord)
+    result = await tools["timeout_user"](str(SPAMMER), "10m", "spam")
+    assert result["success"] is False and "switched off" in result["error"]
+    assert discord.destructive == []

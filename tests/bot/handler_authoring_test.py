@@ -534,13 +534,13 @@ async def test_admin_pipeline_refuses_a_new_handler_that_punishes_members():
         judge=judge,
     )
     assert not result.ok
-    assert "can no longer punish members (ban_user)" in result.error
+    assert "can no longer use ban_user:" in result.error
     assert judged == []
 
 
 async def test_admin_pipeline_edit_of_a_live_punisher_is_refused():
-    """#255: a live script that sanctions is frozen. Rewording it keeps the
-    ban call but could change what it bans for, so it is refused too."""
+    """#242: an edit that keeps a removed sanction is refused like a new one,
+    whatever the live script it replaces did."""
     plan = _admin_plan(
         action="edit",
         target_handler_id="33333333-3333-3333-3333-333333333333",
@@ -554,7 +554,7 @@ async def test_admin_pipeline_edit_of_a_live_punisher_is_refused():
         judge=_judge_approving(),
     )
     assert not result.ok
-    assert "can no longer be changed" in result.error
+    assert "can no longer use ban_user:" in result.error
 
 
 async def test_admin_pipeline_edit_may_remove_a_live_handlers_sanctions():
@@ -592,8 +592,7 @@ async def test_admin_pipeline_edit_cannot_add_a_sanction():
         judge=_judge_approving(),
     )
     assert not result.ok
-    assert "can no longer be changed" in result.error
-    assert "timeout_user" in result.error
+    assert "can no longer use ban_user, timeout_user:" in result.error
 
 
 async def test_admin_pipeline_edit_unknown_target():

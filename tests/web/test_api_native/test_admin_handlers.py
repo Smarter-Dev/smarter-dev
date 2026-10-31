@@ -316,7 +316,7 @@ def test_replace_script_refuses_when_the_script_moved(client):
 
 
 BANNING = 'await ban_user(context["author_id"], "scam")\n'
-#: A different punishing script (scam-banner's old reference copy is gone).
+#: Another script naming a removed function.
 OTHER_PUNISHER = (
     'if "gift" in context["content"]:\n'
     '    await timeout_user(context["author_id"], 300, "review")\n'
@@ -324,10 +324,10 @@ OTHER_PUNISHER = (
 
 
 def test_create_refuses_a_handler_that_punishes_members(client):
-    """#239: no new parallel punisher beside the moderation coordinator."""
+    """#239/#242: the runtime has no sanctions; a script naming one is refused."""
     resp = client.post("/api/admin/handlers", json=_body(script=BANNING))
     assert resp.status_code == 422
-    assert "can no longer punish members (ban_user)" in resp.text
+    assert "can no longer use ban_user:" in resp.text
     assert client.get("/api/admin/handlers", params={"guild_id": "G1"}).json() == []
 
 
@@ -343,17 +343,16 @@ def test_edit_refuses_to_add_a_sanction(client):
         },
     )
     assert resp.status_code == 422
-    assert "(timeout_user)" in resp.text
+    assert "can no longer use timeout_user:" in resp.text
     assert _script_of(client, handler_id)["script"] == _body()["script"]
 
 
-async def test_a_live_punishing_script_is_frozen_even_on_scam_banner(
+async def test_a_live_sanctioning_script_can_only_be_saved_without_them(
     db_session, submitted, no_guards
 ):
-    """#255: a live script that sanctions cannot be rewritten (the condition
-    around its ban is the punisher), and since #240 scam-banner has no
-    reference copy to be put back to; any script may still be saved unchanged
-    or drop its sanctions."""
+    """#242: no frozen exception any more. A leftover row whose script still
+    names a sanction cannot be saved again with it, unchanged or not, through
+    either route; dropping the sanction is how it is saved."""
     record = AdminHandler(
         guild_id="G1",
         name="scam-banner",
@@ -367,27 +366,8 @@ async def test_a_live_punishing_script_is_frozen_even_on_scam_banner(
     db_session.add(record)
     await db_session.commit()
     handler_id = str(record.id)
-    reworded = BANNING.replace('"scam"', '"confirmed scam"')
-    reference = OTHER_PUNISHER
 
     async with _async_client(db_session) as client:
-        rewritten = await client.put(
-            f"/api/admin/handlers/{handler_id}/script",
-            json={"script": reworded, "expected_script": BANNING},
-        )
-        rewritten_in_full = await client.put(
-            f"/api/admin/handlers/{handler_id}",
-            json={
-                "description": "d",
-                "script": reworded,
-                "settings": {},
-                "channel_ids": [],
-            },
-        )
-        reapplied = await client.put(
-            f"/api/admin/handlers/{handler_id}/script",
-            json={"script": reference, "expected_script": BANNING},
-        )
         kept = await client.put(
             f"/api/admin/handlers/{handler_id}",
             json={
@@ -397,27 +377,29 @@ async def test_a_live_punishing_script_is_frozen_even_on_scam_banner(
                 "channel_ids": [],
             },
         )
+        reapplied = await client.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": OTHER_PUNISHER, "expected_script": BANNING},
+        )
         disarmed = await client.put(
             f"/api/admin/handlers/{handler_id}/script",
             json={"script": "x = 1\n", "expected_script": BANNING},
         )
 
-    assert rewritten.status_code == 422
-    assert "can no longer be changed" in rewritten.text
-    assert rewritten_in_full.status_code == 422
+    assert kept.status_code == 422
+    assert "can no longer use ban_user:" in kept.text
     assert reapplied.status_code == 422
-    assert "can no longer be changed" in reapplied.text
-    assert kept.status_code == 200
+    assert "can no longer use timeout_user:" in reapplied.text
     assert disarmed.status_code == 200
 
 
-async def test_saving_a_switched_off_punisher_does_not_re_arm_it(
+async def test_saving_a_switched_off_replaced_handler_does_not_re_arm_it(
     db_session, submitted, no_guards
 ):
     """#240: the cutover disables scam-banner. The full update enables on
-    every write, so saving the frozen script unchanged must leave it off; a
-    handler without sanctions is still enabled by a save, as before."""
-    punisher = AdminHandler(
+    every write, so saving it must leave it off; any other handler is still
+    enabled by a save, as before."""
+    replaced = AdminHandler(
         guild_id="G1",
         name="scam-banner",
         trigger_type="message",
@@ -439,25 +421,25 @@ async def test_saving_a_switched_off_punisher_does_not_re_arm_it(
         created_by_admin="A1",
         enabled=False,
     )
-    db_session.add_all([punisher, harmless])
+    db_session.add_all([replaced, harmless])
     await db_session.commit()
 
     async with _async_client(db_session) as client:
-        for record in (punisher, harmless):
+        for record in (replaced, harmless):
             response = await client.put(
                 f"/api/admin/handlers/{record.id}",
                 json={
                     "description": "saved",
-                    "script": record.script,
+                    "script": "x = 1\n",
                     "settings": {},
                     "channel_ids": [],
                 },
             )
             assert response.status_code == 200, response.text
 
-    await db_session.refresh(punisher)
+    await db_session.refresh(replaced)
     await db_session.refresh(harmless)
-    assert punisher.enabled is False
+    assert replaced.enabled is False
     assert harmless.enabled is True
 
 
@@ -537,7 +519,7 @@ async def test_a_switched_off_edit_ping_catch_cannot_be_renamed_back_on(
 
 def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
     """#255: rename a handler with no sanction to scam-banner, then put a
-    punishing script on it: refused as a new punisher."""
+    punishing script on it: refused like any script naming a sanction."""
     harmless = _body(name="notes")["script"]
     handler_id = client.post("/api/admin/handlers", json=_body(name="notes")).json()[
         "handler_id"
@@ -552,65 +534,19 @@ def test_a_renamed_handler_cannot_become_a_second_scam_banner(client):
             "channel_ids": [],
         },
     )
-    reference = OTHER_PUNISHER
     reapplied = client.put(
         f"/api/admin/handlers/{handler_id}/script",
-        json={"script": reference, "expected_script": harmless},
+        json={"script": OTHER_PUNISHER, "expected_script": harmless},
     )
 
     assert renamed.status_code == 200
     assert reapplied.status_code == 422
-    assert "can no longer punish members" in reapplied.text
+    assert "can no longer use timeout_user:" in reapplied.text
     assert _script_of(client, handler_id)["script"] == harmless
 
 
-async def test_a_live_punisher_cannot_be_renamed(db_session, submitted, no_guards):
-    """#255: renaming is how another punisher would take up scam-banner's
-    reference copy, so a handler that keeps a sanction keeps its name."""
-    record = AdminHandler(
-        guild_id="G1",
-        name="keyword-watch",
-        trigger_type="message",
-        settings={},
-        channel_ids=[],
-        description="bans keywords",
-        script=BANNING,
-        created_by_admin="A1",
-    )
-    db_session.add(record)
-    await db_session.commit()
-    handler_id = str(record.id)
-
-    async with _async_client(db_session) as client:
-        renamed = await client.put(
-            f"/api/admin/handlers/{handler_id}",
-            json={
-                "name": "scam-banner",
-                "description": "d",
-                "script": BANNING,
-                "settings": {},
-                "channel_ids": [],
-            },
-        )
-        disarmed_and_renamed = await client.put(
-            f"/api/admin/handlers/{handler_id}",
-            json={
-                "name": "keyword-notes",
-                "description": "d",
-                "script": "x = 1\n",
-                "settings": {},
-                "channel_ids": [],
-            },
-        )
-
-    assert renamed.status_code == 422
-    assert "can no longer be renamed" in renamed.text
-    assert disarmed_and_renamed.status_code == 200
-    assert disarmed_and_renamed.json()["name"] == "keyword-notes"
-
-
 def test_the_full_update_locks_the_row_it_checks(client, db_session, monkeypatch):
-    """#255: the sanction check reads the live script, so the full update
+    """#255: the retired-handler check reads the live row, so the full update
     loads it FOR UPDATE; a concurrent write cannot land between the check
     and this write (Postgres; SQLite ignores the lock)."""
     handler_id = client.post("/api/admin/handlers", json=_body()).json()["handler_id"]

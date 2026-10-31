@@ -1,38 +1,34 @@
-"""Moderation actions for admin handlers, via Discord REST (worker tier).
+"""Privileged operations for admin handlers, via Discord REST (worker tier).
 
-These are the privileged operations an admin-handler script can call as external
-functions: ban, kick, timeout, delete-message, delete-webhook, plus the mod-audit
-reads (``get_member_info`` / ``search_guild_members``). Standard (member)
-handlers never get an ``AdminActor`` and so can't reach any of this.
+These are what an admin-handler script reaches through its external functions:
+role changes (staff roles refused), thread upkeep, deleting a bot's or a
+webhook's message, the mod-audit reads (``get_member_info`` /
+``search_guild_members``), and handing a member to the moderators for review.
+Standard (member) handlers never get an ``AdminActor`` and so can't reach any
+of this.
 
-Ban, kick, timeout and a member's message delete go through the moderation
-gateway (``smarter_dev.web.moderation_gateway``), the one path every
-automated actor shares: it re-asks the shared staff-protection rule
-(:meth:`AdminActor.staff_refusal`), joins the action to its incident with
-whatever the bot's detectors already did, never applies a weaker or duplicate
-sanction, never shortens a timeout, and writes one ``moderation_actions`` row
-per confirmed effect. A protected target, or an action the incident already
-covers, is a no-op that returns a "not ..." result instead of raising, so the
-script carries on to its report. A message by a bot or a webhook has no member
-behind it to punish: deleting it is channel upkeep (the Disboard tracker clears
-Disboard's notices and its own reminders), goes straight to Discord and is not
-refused.
+None of it punishes a member. Bans, kicks, timeouts, warnings and removing a
+member's message are the moderation coordinator's, through the moderation
+gateway (``smarter_dev.web.moderation_gateway``). A handler that has something
+to tell the moderators about a member calls :meth:`AdminActor.report_for_review`:
+a review-only incident in that same gateway, with no effect and no
+``moderation_actions`` row, reported where the gateway reports every incident.
+A message by a bot or a webhook has no member behind it, so deleting it is
+channel upkeep (the Disboard tracker clears Disboard's notices and its own
+reminders) and goes straight to Discord; a member's message is refused.
 """
 
 from __future__ import annotations
 
-import contextlib
 import logging
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
 from datetime import timezone
 from typing import ClassVar
 from urllib.parse import quote
+from uuid import UUID
 from uuid import uuid4
-
-import httpx
 
 from smarter_dev.shared.staff_protection import A_BOT
 from smarter_dev.shared.staff_protection import BOT_ITSELF
@@ -46,14 +42,10 @@ from smarter_dev.shared.staff_protection import unknown
 from smarter_dev.web.discord_rest import DiscordBotClient
 from smarter_dev.web.discord_rest import DiscordRestError
 from smarter_dev.web.moderation_gateway import ModerationGateway
-from smarter_dev.web.moderation_gateway import Outcome
-from smarter_dev.web.moderation_gateway import Proposal
-from smarter_dev.web.moderation_gateway import Reservation
 from smarter_dev.web.moderation_gateway import Trigger
 from smarter_dev.web.moderation_gateway import types as gw
 from smarter_dev.web.moderation_gateway.port import ModerationPort
 from smarter_dev.web.moderation_gateway.rest_port import RestModerationPort
-from smarter_dev.web.webhook_urls import parse_discord_webhook_url
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +69,6 @@ def _snowflake_created_at(snowflake_id: str) -> str | None:
     except (TypeError, ValueError):
         return None
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
-
-
-def _timeout_expiry(response) -> datetime | None:
-    """``communication_disabled_until`` from a member response, None if unset."""
-    try:
-        raw = response.json().get("communication_disabled_until")
-        until = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-    except (AttributeError, TypeError, ValueError):
-        return None
-    return until if until.tzinfo else until.replace(tzinfo=timezone.utc)
 
 
 def _top_role_name(role_ids: list[str], roles_by_id: dict[str, dict]) -> str:
@@ -122,9 +104,9 @@ class HandlerFireFacts:
     """What one admin fire is about, for the incidents its actions join.
 
     ``message_id`` / ``author_id`` / ``content`` describe the message that
-    fired it (empty for a member event or a timer), so a ban the script
-    issues about that message joins the incident the bot's detectors opened
-    for the same message.
+    fired it (empty for a member event or a timer), so a review the script
+    asks for about that message's author joins the incident the moderation
+    coordinator opened for the same message.
     """
 
     handler_id: str
@@ -139,21 +121,20 @@ class HandlerFireFacts:
     fire_key: str = field(default_factory=lambda: uuid4().hex)
 
 
-def _refused_reason(outcome: Outcome) -> str:
-    return outcome.detail.removeprefix("protected: ")
+#: What ``report_for_review`` records as the incident's reason.
+REVIEW_REASON = "flagged for review"
 
 
 @dataclass(kw_only=True)
 class AdminActor(DiscordBotClient):
-    """Performs moderation actions for one guild via Discord REST."""
+    """Performs one admin fire's privileged operations via Discord REST."""
 
     guild_id: str
     fire: HandlerFireFacts | None = None
     #: The guild's configured extra staff roles (its moderation policy's
-    #: ``protected_role_ids``, or without one the filter config's
-    #: ``staff_exempt_role_ids``, which the filters, spam engine, spam ring,
-    #: triage and coordinator all treat as staff). None means they were not
-    #: read, and every staff and role check refuses.
+    #: ``protected_role_ids``, none without a policy; the content filter,
+    #: triage and coordinator treat the same roles as staff). None means they
+    #: were not read, and every staff and role check refuses.
     staff_exempt_role_ids: tuple[str, ...] | None = None
     #: Tests hand in a fake Discord; production talks REST through this actor.
     moderation_port: ModerationPort | None = None
@@ -161,12 +142,13 @@ class AdminActor(DiscordBotClient):
     # One fire's worth: an actor lives for a single handler fire.
     _own_user_id: str | None = field(default=None, init=False)
     _guild_facts: GuildFacts | None = field(default=None, init=False)
-    # Refusals stick for the fire, so stripping a staff role and then acting
-    # on the member in the same fire still refuses.
+    # A refusal, once read, holds for the rest of the fire.
     _refusals: dict[str, str] = field(default_factory=dict, init=False)
+    _port: ModerationPort | None = field(default=None, init=False)
     _gateway: ModerationGateway | None = field(default=None, init=False)
-    #: Incidents this fire's actions joined, newest last; a report the script
-    #: sends to an incident's report channel becomes part of that report.
+    #: Incidents this fire's review reports opened or joined, newest last; a
+    #: message the script then sends to the incident report channel becomes
+    #: part of that report.
     touched_incidents: list = field(default_factory=list, init=False)
 
     user_agent: ClassVar[str] = "SmarterDev-AdminHandlers/1.0"
@@ -174,12 +156,17 @@ class AdminActor(DiscordBotClient):
 
     # -- the gateway ---------------------------------------------------------
 
-    def gateway(self) -> ModerationGateway:
-        if self._gateway is None:
-            port = self.moderation_port or RestModerationPort(
+    def port(self) -> ModerationPort:
+        """Discord as the gateway sees it: REST through this actor, or a fake."""
+        if self._port is None:
+            self._port = self.moderation_port or RestModerationPort(
                 self, chain_depth=self.fire.chain_depth if self.fire else 0
             )
-            self._gateway = ModerationGateway(port)
+        return self._port
+
+    def gateway(self) -> ModerationGateway:
+        if self._gateway is None:
+            self._gateway = ModerationGateway(self.port())
         return self._gateway
 
     @property
@@ -187,14 +174,14 @@ class AdminActor(DiscordBotClient):
         return f"handler:{self.fire.handler_name}" if self.fire else "handler"
 
     def _trigger(
-        self,
-        target_user_id: str,
-        reason: str | None,
-        *,
-        message_id: str | None = None,
-        channel_id: str | None = None,
+        self, target_user_id: str, reason: str, *, report_channel_id: str | None
     ) -> Trigger:
-        """The fire as a trigger: its message when the target posted it."""
+        """The fire as a trigger: its message when the target posted it.
+
+        One fire's reports about one member are one incident (the fire
+        alias); a report about the author of the message that fired joins
+        the incident the coordinator opened for that message.
+        """
         fire = self.fire
         about_fire_message = (
             fire is not None
@@ -204,106 +191,90 @@ class AdminActor(DiscordBotClient):
         return Trigger(
             guild_id=str(self.guild_id),
             actor=self.actor_name,
-            reason=reason or "",
+            reason=reason,
             source=gw.SOURCE_HANDLER,
-            channel_id=channel_id or (fire.channel_id if about_fire_message else None),
-            message_id=fire.message_id if about_fire_message else message_id,
+            channel_id=fire.channel_id if about_fire_message else None,
+            message_id=fire.message_id if about_fire_message else None,
             author_id=str(target_user_id),
             content=fire.content if about_fire_message else None,
-            related_message_ids=(message_id,)
-            if about_fire_message and message_id and message_id != fire.message_id
-            else (),
             aliases=(f"handler-fire:{fire.fire_key}:{target_user_id}",)
             if fire is not None
             else (),
+            report_channel_id=report_channel_id,
             moderator_username=self.actor_name,
         )
 
-    async def _act(self, trigger: Trigger, proposal: Proposal) -> Outcome:
-        result = await self.gateway().act(trigger, [proposal])
-        if result.incident_id is not None and result.incident_id not in self.touched_incidents:
-            self.touched_incidents.append(result.incident_id)
-        return result.outcomes[0]
+    # -- review --------------------------------------------------------------
 
-    def _raise_for(self, outcome: Outcome, what: str) -> None:
-        """Failures still raise, as the REST calls did, so the fire records them."""
-        if outcome.state == gw.UNKNOWN:
-            raise AdminActionError(f"{what}: outcome unknown ({outcome.detail}); not retried")
-        if outcome.state == gw.FAILED:
-            raise AdminActionError(f"{what} failed: {outcome.detail}")
-
-    @contextlib.asynccontextmanager
-    async def reserve_warn(
-        self, user_id: str, reason: str, channel_id: str
-    ) -> AsyncIterator[Reservation]:
-        """The gateway's go-ahead for a warn whose notice the runtime posts.
-
-        The target's name for the permanent row is resolved here from
-        Discord, never taken from the script.
-        """
-        uid = str(user_id)
-        username = await self._resolve_username(uid)
-        trigger = self._trigger(uid, reason, channel_id=channel_id)
-        async with self.gateway().reserve(
-            trigger,
-            Proposal(
-                kind=gw.WARN,
-                target_user_id=uid,
-                target_username=username,
-                reason=reason,
-                channel_id=channel_id or None,
-            ),
-        ) as slot:
-            if slot.incident_id is not None and slot.incident_id not in self.touched_incidents:
-                self.touched_incidents.append(slot.incident_id)
-            yield slot
-
-    async def _resolve_username(self, user_id: str) -> str:
-        """The member's name for a permanent audit row; the id when unreadable."""
-        try:
-            info = await self.get_member_info(user_id)
-        except (AdminActionError, httpx.HTTPError):
-            # A rejection or transport failure degrades to the raw id rather
-            # than failing a warn; a programming error still surfaces.
-            logger.debug("warn could not resolve username for %s", user_id, exc_info=True)
-            return user_id
-        return info.get("username") or user_id
-
-    # -- sanctions -----------------------------------------------------------
-
-    async def ban_user(
-        self,
-        user_id: str,
-        reason: str | None = None,
-        delete_message_seconds: int = 0,
+    async def report_for_review(
+        self, user_id: str, summary: str, *, report_channel_id: str | None
     ) -> str:
-        """Ban a user through the gateway.
+        """Hand ``user_id`` to the moderators: a review-only incident.
 
-        A ban of someone the incident already banned, or who is already
-        banned, is a no-op ("not banned: ..."). Discord answering 404 means
-        the user does not exist; like a member who left before the call, that
-        must not abort the rest of the script. Other failures raise.
+        Opens (or joins) the incident through the gateway with no proposal,
+        so nothing is applied and no ``moderation_actions`` row is written;
+        ``summary`` is added as the incident's evidence entry. The report is posted in
+        ``report_channel_id`` — or, with None (the guild reports nowhere),
+        the incident is only recorded. Returns the report's message id, or
+        ``""`` when there is none.
         """
         uid = str(user_id)
-        outcome = await self._act(
-            self._trigger(uid, reason),
-            Proposal(
-                kind=gw.BAN,
-                target_user_id=uid,
-                reason=reason,
-                delete_message_seconds=int(delete_message_seconds),
-            ),
+        gateway = self.gateway()
+        incident_id: UUID = await gateway.ensure_incident(
+            self._trigger(uid, REVIEW_REASON, report_channel_id=report_channel_id),
+            subject=uid,
         )
-        if outcome.state == gw.CONFIRMED:
-            return f"banned {uid}"
-        if outcome.state == gw.SKIPPED:
-            if outcome.detail.startswith("protected: "):
-                return f"not banned: {uid} is protected ({_refused_reason(outcome)})"
-            return f"not banned: {uid} {outcome.detail}"
-        if outcome.state == gw.FAILED and outcome.detail == "the user does not exist":
-            return f"ban target {uid} already absent"
-        self._raise_for(outcome, f"ban of {uid}")
-        return f"not banned: {uid} {outcome.detail}"
+        if incident_id not in self.touched_incidents:
+            self.touched_incidents.append(incident_id)
+        await gateway.add_note(
+            incident_id,
+            source=self.actor_name,
+            text=summary,
+            # A script's words about a member, which may quote them: kept
+            # 90 days like a message the bot acted on, never permanently.
+            kind=gw.ENTRY_EVIDENCE,
+            report_channel_id=report_channel_id,
+            target_user_id=uid,
+        )
+        return await gateway.report_message_of(incident_id) or ""
+
+    # -- upkeep --------------------------------------------------------------
+
+    async def delete_bot_message(self, channel_id: str, message_id: str) -> str:
+        """Delete a bot's or a webhook's message; never a member's.
+
+        The message is read first. Gone: ``"message <id> already deleted"``.
+        Posted by a member: ``"not deleted: ..."`` and nothing is deleted
+        (the moderation coordinator removes members' messages). Posted by a
+        bot (this one included) or a webhook: deleted straight through
+        Discord, outside the moderation gateway — upkeep, not a sanction —
+        and ``"deleted message <id>"``. A refused or unknown delete raises.
+        """
+        port = self.port()
+        mid = str(message_id)
+        try:
+            author = await port.message_author(str(channel_id), mid)
+        except gw.EffectRejected as error:
+            raise AdminActionError(f"reading message {mid}: {error.detail}") from error
+        if author is None:
+            return f"message {mid} already deleted"
+        _author_id, _author_name, by_bot_or_webhook = author
+        if not by_bot_or_webhook:
+            return (
+                f"not deleted: message {mid} was posted by a member; handlers "
+                "delete only bots' and webhooks' messages"
+            )
+        deletion = await port.delete_messages(str(channel_id), [mid])
+        if deletion.deleted:
+            return f"deleted message {mid}"
+        if deletion.missing:
+            return f"message {mid} already deleted"
+        raise AdminActionError(
+            f"delete of message {mid} "
+            + ("refused" if deletion.refused else "outcome unknown")
+        )
+
+    # -- roles ---------------------------------------------------------------
 
     async def add_role(
         self, user_id: str, role_id: str, reason: str | None = None
@@ -321,13 +292,9 @@ class AdminActor(DiscordBotClient):
         """Revoke a role from a member. A gone member (404) -> False (no-op).
 
         A role that confers staff standing is refused (:meth:`role_refusal`),
-        so a script cannot strip a moderator's role in one fire and punish
-        them in a later one. Any other role may be removed from staff, but
-        their standing is checked first so it holds for the rest of the fire
-        (see ``_refusals``).
+        so a script can never take a moderator's standing away.
         """
         await self._refuse_staff_role(role_id)
-        await self.staff_refusal(user_id)
         return await self._mutate_role("DELETE", user_id, role_id, reason)
 
     async def role_refusal(self, role_id: str) -> str | None:
@@ -384,171 +351,6 @@ class AdminActor(DiscordBotClient):
                 return False
             raise
         return True
-
-    async def kick_user(self, user_id: str) -> str:
-        """Kick a member; a member who already left is a successful no-op."""
-        uid = str(user_id)
-        outcome = await self._act(
-            self._trigger(uid, None), Proposal(kind=gw.KICK, target_user_id=uid)
-        )
-        if outcome.state == gw.CONFIRMED:
-            return f"kicked {uid}"
-        if outcome.state == gw.SKIPPED and outcome.detail == "not a member":
-            return f"kick target {uid} already absent"
-        if outcome.state == gw.FAILED and outcome.detail == "not a member":
-            return f"kick target {uid} already absent"
-        if outcome.state == gw.SKIPPED:
-            if outcome.detail.startswith("protected: "):
-                return f"not kicked: {uid} is protected ({_refused_reason(outcome)})"
-            return f"not kicked: {uid} {outcome.detail}"
-        self._raise_for(outcome, f"kick of {uid}")
-        return f"not kicked: {uid} {outcome.detail}"
-
-    def _claim(self, name: str) -> str:
-        handler_id = self.fire.handler_id if self.fire else "handler"
-        return f"{handler_id}:{name}"
-
-    async def hold_timeout(
-        self, user_id: str, claim: str, duration_seconds: int, *, reason: str | None = None
-    ) -> Outcome:
-        """Time a member out under ``claim`` (a hold's key), through the gateway.
-
-        Never shortens a timeout already running longer (the claim is still
-        recorded, so it keeps the member timed out if that one is lifted), and
-        leaves a timeout somebody else placed alone. Raises when Discord
-        refused or the outcome is unknown.
-        """
-        uid = str(user_id)
-        outcome = await self._act(
-            self._trigger(uid, reason or "held while under review"),
-            Proposal(
-                kind=gw.TIMEOUT,
-                target_user_id=uid,
-                duration_seconds=int(duration_seconds),
-                claim=self._claim(claim),
-                reason=reason,
-                provisional=claim.startswith("hold:"),
-            ),
-        )
-        self._raise_for(outcome, f"timeout of {uid}")
-        return outcome
-
-    async def release_timeout(self, user_id: str, claim: str | None) -> Outcome:
-        """End ``claim`` (or every claim of the automation when None).
-
-        The member's timeout falls back to the longest claim left, or is
-        lifted when none is; a timeout somebody else placed is never touched.
-        """
-        uid = str(user_id)
-        outcome = await self._act(
-            self._trigger(uid, "review cleared" if claim else "timeout removed"),
-            Proposal(
-                kind=gw.UNTIMEOUT,
-                target_user_id=uid,
-                claim=self._claim(claim) if claim else None,
-            ),
-        )
-        self._raise_for(outcome, f"untimeout of {uid}")
-        return outcome
-
-    async def timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
-        """Timeout a member; a member who already left is a successful no-op."""
-        uid = str(user_id)
-        seconds = int(duration_seconds)
-        outcome = await self._act(
-            self._trigger(uid, None),
-            Proposal(
-                kind=gw.TIMEOUT,
-                target_user_id=uid,
-                duration_seconds=seconds,
-                claim=self._claim("timeout"),
-            ),
-        )
-        if outcome.state in (gw.CONFIRMED, gw.COVERED):
-            return f"timed out {uid} for {seconds}s"
-        if outcome.state == gw.SKIPPED and outcome.detail == "not a member":
-            return f"timeout target {uid} already absent"
-        if outcome.state == gw.SKIPPED:
-            if outcome.detail.startswith("protected: "):
-                return f"not timed out: {uid} is protected ({_refused_reason(outcome)})"
-            return f"not timed out: {uid} {outcome.detail}"
-        if outcome.state == gw.FAILED and outcome.detail == "not a member":
-            return f"timeout target {uid} already absent"
-        self._raise_for(outcome, f"timeout of {uid}")
-        return f"not timed out: {uid} {outcome.detail}"
-
-    async def timeout_until(self, user_id: str) -> datetime | None:
-        """When the member's timeout ends; None when free or not a member."""
-        try:
-            response = await self._request(
-                "GET", f"/guilds/{self.guild_id}/members/{user_id}"
-            )
-        except AdminActionError as error:
-            if error.status_code == 404:
-                return None
-            raise
-        until = _timeout_expiry(response)
-        if until is None or until <= datetime.now(timezone.utc):
-            return None
-        return until
-
-    async def remove_timeout(self, user_id: str) -> str:
-        """Lift the automation's timeout; never a moderator's, never a stranger's."""
-        uid = str(user_id)
-        outcome = await self.release_timeout(uid, None)
-        if outcome.state == gw.CONFIRMED:
-            return f"removed timeout for {uid}"
-        if outcome.detail == "not a member":
-            return f"untimeout target {uid} already absent"
-        return f"timeout for {uid} not removed: {outcome.detail}"
-
-    async def delete_message(self, channel_id: str, message_id: str) -> str:
-        """Delete a message; an already-deleted target is a successful no-op.
-
-        A member's message goes through the gateway: deleted only when its
-        author is not protected, and at most once however many detectors ask.
-        A bot's or a webhook's is upkeep and always deleted.
-        """
-        port = self.gateway().port
-        try:
-            author = await port.message_author(str(channel_id), str(message_id))
-        except gw.EffectRejected as error:
-            raise AdminActionError(f"reading message {message_id}: {error.detail}") from error
-        if author is None:
-            return f"message {message_id} already deleted"
-        author_id, author_name, upkeep = author
-        if upkeep:
-            deletion = await port.delete_messages(str(channel_id), [str(message_id)])
-            if deletion.deleted:
-                return f"deleted message {message_id}"
-            if deletion.missing:
-                return f"message {message_id} already deleted"
-            raise AdminActionError(
-                f"delete of message {message_id} "
-                + ("refused" if deletion.refused else "outcome unknown")
-            )
-        outcome = await self._act(
-            self._trigger(author_id, None, message_id=str(message_id), channel_id=str(channel_id)),
-            Proposal(
-                kind=gw.DELETE,
-                target_user_id=author_id,
-                target_username=author_name,
-                channel_id=str(channel_id),
-                message_ids=(str(message_id),),
-                target_is_bot=False,
-            ),
-        )
-        if outcome.state == gw.CONFIRMED:
-            return f"deleted message {message_id}"
-        if outcome.state in (gw.ABSENT,) or outcome.detail == "already deleted":
-            return f"message {message_id} already deleted"
-        if outcome.state == gw.SKIPPED and outcome.detail.startswith("protected: "):
-            return (
-                f"not deleted: the author of message {message_id} is protected "
-                f"({_refused_reason(outcome)})"
-            )
-        self._raise_for(outcome, f"delete of message {message_id}")
-        return f"message {message_id} not deleted: {outcome.detail}"
 
     async def staff_refusal(self, user_id: str, *, is_bot: bool | None = None) -> str | None:
         """Why automation may not act on this user, or None when it may.
@@ -637,34 +439,6 @@ class AdminActor(DiscordBotClient):
                 ),
             )
         return self._guild_facts
-
-    async def delete_webhook(self, webhook_url: str) -> bool:
-        """DELETE a leaked ``discord.com/api/webhooks/<id>/<token>`` URL.
-
-        The URL is validated host-side by
-        :func:`~smarter_dev.web.webhook_urls.parse_discord_webhook_url` FIRST: an
-        arbitrary host, a path-traversal attempt, or a missing token raises
-        :class:`AdminActionError` and issues NO request, so a laundered constant
-        can never become an arbitrary-URL DELETE. That validator normalizes
-        first, so the shapes leaks actually arrive in (no scheme, an uppercase
-        scheme or host, a trailing ``?wait=true``) are killed rather than
-        refused. A valid URL is deleted via its own token (no bot auth needed,
-        but we keep the bot-token client for its rate-limit handling). Returns
-        ``False`` on 404 (already dead) and ``True`` on success.
-        """
-        webhook = parse_discord_webhook_url(str(webhook_url))
-        if webhook is None:
-            raise AdminActionError(
-                f"delete_webhook target is not a Discord webhook URL: {webhook_url!r}"
-            )
-        endpoint = f"/webhooks/{webhook.webhook_id}/{webhook.token}"
-        try:
-            await self._request("DELETE", endpoint)
-        except AdminActionError as error:
-            if error.status_code == 404:
-                return False
-            raise
-        return True
 
     async def get_member_info(self, user_id: str) -> dict:
         """Profile a member; falls back to the bare user for departed members.
@@ -762,27 +536,9 @@ class AdminActor(DiscordBotClient):
         """Archive a thread. A gone thread (404) is a silent no-op -> False."""
         return await self._patch_thread(thread_id, {"archived": True})
 
-    async def lock_thread(self, thread_id: str) -> bool:
-        """Lock and archive a thread. A gone thread (404) -> False."""
-        return await self._patch_thread(
-            thread_id, {"locked": True, "archived": True}
-        )
-
     async def reopen_thread(self, thread_id: str) -> bool:
         """Unarchive a thread. A gone thread (404) -> False."""
         return await self._patch_thread(thread_id, {"archived": False})
-
-    async def delete_thread(self, thread_id: str) -> bool:
-        """Delete a thread. A gone thread (404) is a silent no-op -> False."""
-        if not await self._verify_thread_target(thread_id):
-            return False
-        try:
-            await self._request("DELETE", f"/channels/{thread_id}")
-        except AdminActionError as error:
-            if error.status_code == 404:
-                return False
-            raise
-        return True
 
     async def _patch_thread(self, thread_id: str, payload: dict) -> bool:
         """PATCH a thread channel; 404 (gone) -> False, other failures raise."""

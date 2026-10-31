@@ -57,7 +57,7 @@
                 <p><strong>Revision {{ stored.revision }}</strong>, saved {{ updated }}{% if stored.updated_by %} by <code>{{ stored.updated_by }}</code>{% endif %}.
                 Moderated by <strong>{{ ownership.owner }}</strong> (generation {{ ownership.generation }}; switched by the cutover Job only).</p>
                 {% else %}
-                <p><strong>No policy yet.</strong> This server still runs on the old settings pages. The import Job (<code>scripts/moderation_policy_import.py</code>) writes revision 1 from them; until then nothing here can be saved.</p>
+                <p><strong>No policy yet.</strong> Nothing moderates this server: no rule runs, there is no staff-ping triage and no incident is reported. Once the coordinator owns the server, the import Job (<code>scripts/moderation_policy_import.py</code>) writes revision 1 with every rule off; until then nothing here can be saved.</p>
                 {% endif %}
             </div>
         </div>
@@ -313,7 +313,7 @@
                             <td style="white-space:nowrap;">{{ rev.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td><code>{{ rev.changed_by or '—' }}</code></td>
                             <td>{{ rev.source }}</td>
-                            <td>{% if rev.source == 'import' %}imported from the old settings{% elif rev.changed_fields %}{% for f in rev.changed_fields %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}nothing{% endif %}</td>
+                            <td>{% if rev.source == 'import' %}created by the import{% elif rev.changed_fields %}{% for f in rev.changed_fields %}<code>{{ f }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% else %}nothing{% endif %}</td>
                         </tr>
                         {% endfor %}
                     </tbody>

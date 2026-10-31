@@ -1,10 +1,10 @@
 """Admin-handler firing as a worker job.
 
-Mirrors ``handlers_jobs`` but runs an admin handler with moderation powers: the
-runtime gets an :class:`AdminActor` (enabling ban/kick/timeout/delete and
-cross-channel send), the looser :func:`admin_budget`, and the host services in
-``handler_script_services``. Audited in ``handler_runs`` with
-``handler_kind="admin"``.
+Mirrors ``handlers_jobs`` but runs an admin handler with admin powers: the
+runtime gets an :class:`AdminActor` (enabling role and thread upkeep, bot-message
+deletes, review reports and cross-channel send), the looser :func:`admin_budget`,
+and the host services in ``handler_script_services``. Audited in
+``handler_runs`` with ``handler_kind="admin"``.
 
 pydantic-ai and Monty are imported lazily inside the job, never at module
 load: ``app.yaml`` lists this module under the worker ``imports`` block so the
@@ -24,6 +24,8 @@ from skrift.workers import RetryPolicy, WorkerContext, handler
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
+from smarter_dev.web.bump_channel_scope import bump_channel_ids
+from smarter_dev.web.bump_channel_scope import is_bump_tracker
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import (
     DM_USER_WINDOW_SECONDS,
@@ -42,7 +44,6 @@ from smarter_dev.web.handler_guild_memory import (
     load_guild_memory,
     persist_guild_memory,
 )
-from smarter_dev.web.handler_holds import MemberHolds
 from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_recent_messages import read_recent_messages
@@ -72,12 +73,12 @@ _recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
     # See handlers_jobs.run_handler_fire: retries keep a transient failure from
     # dead-lettering a fire and ending a recurring chain, and the
     # claim_fire_attempt marker keeps script side effects at-most-once so a
-    # retry can never repeat a ban/kick/send.
+    # retry can never repeat a role change, delete or send.
     retry_policy=RetryPolicy(max_attempts=3, backoff_seconds=30.0, jitter_seconds=10.0),
     visibility_timeout=180.0,
 )
 async def run_admin_handler_fire(payload: AdminHandlerFirePayload, context: WorkerContext) -> dict:
-    """Load, run (with moderation powers), audit one admin-handler firing.
+    """Load, run (with admin powers), audit one admin-handler firing.
 
     An error leaves without its message text (``redacted_job_errors``): Skrift
     keeps it for 7 days, and the fire holds a member's message.
@@ -112,13 +113,21 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         handler_name = record.name
         trigger_type = record.trigger_type
         channel_ids = list(record.channel_ids or [])
+        if is_bump_tracker(record):
+            # Its channels are the policy's; none is no bump channel, so the
+            # tracker does nothing (a reminder armed before that included).
+            channel_ids = await bump_channel_ids(session, record.guild_id)
+            if not channel_ids or (
+                payload.channel_id and payload.channel_id not in channel_ids
+            ):
+                return {"status": "out_of_scope"}
         handler_settings = dict(record.settings or {})
         memory = dict(record.memory or {})
         # Guild-shared store: snapshotted before the fire so guild_memory_* reads
         # see a consistent view; changed keys are persisted per key after.
         guild_memory = await load_guild_memory(session, guild_id)
         # The roles the bot's filters treat as staff (the policy's protected
-        # roles when the guild has one), so a script can neither strip one
+        # roles; none without a policy), so a script can neither strip one
         # from a moderator nor act on its holders.
         staff_exempt_role_ids = await protected_role_ids(session, guild_id)
 
@@ -193,8 +202,8 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
     # Snapshot: the script is handed this same dict and may write into it.
     # What may be KEPT of it is handler_run_audit's call, not this job's.
     trigger_context_at_fire = deepcopy(trigger_context)
-    # What this fire is about, so its moderation actions join the incident the
-    # bot's detectors opened for the same message.
+    # What this fire is about, so a review it reports joins the incident the
+    # moderation coordinator opened for the same message.
     actor.fire = HandlerFireFacts(
         handler_id=str(handler_id),
         handler_name=handler_name,
@@ -241,7 +250,7 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
     # The script-facing `claim(key, ttl)`: SET NX EX with the handler id bound
     # host-side, so a raw script key is namespaced per handler and one handler's
     # claims can never suppress another's. This is what dedupes CONCURRENT fires
-    # of this handler — the scam-banner double-warn — which memory_* cannot do
+    # of this handler, which memory_* cannot do
     # (it is read at fire start and written at fire end).
     claimer = partial(claim_handler_key, redis, str(handler_id))
     claim_reader = partial(handler_key_claimed, redis, str(handler_id))
@@ -268,7 +277,6 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
             ),
         ),
         mod_action_reader=services.read_mod_actions,
-        warn_counter=services.count_warns,
         report_channel_reader=services.incident_report_channel,
         rules_reader=services.read_rules,
         # Guild bound host-side: a script names only the member.
@@ -277,11 +285,6 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         timer_scheduler=timer_scheduler.schedule_timer,
         claimer=claimer,
         claim_reader=claim_reader,
-        # One member, one timeout, several fires: every write to it goes
-        # through the member's lock. Guild and handler bound host-side.
-        holds=MemberHolds(
-            redis=redis, guild_id=guild_id, handler_id=str(handler_id), actor=actor
-        ),
         timer_limiter=timer_limiter,
         dm_user_limiter=dm_user_limiter,
         budget=budget,

@@ -20,9 +20,10 @@ remains here is what the coordinator imports:
   (:func:`_to_transcript_message`, :func:`_resolve_author`) the coordinator's
   live path uses to build its view of a channel.
 
-A guild with no ``moderation_filter_configs`` row runs on the model defaults,
-which have the detector ON. The ``spam_ring_incidents`` table keeps the
-transcripts the old detector saved (see ``docs/data-retention.md``).
+The settings come from the guild's moderation policy (``rules.spam_ring``); a
+guild without a policy does not run the ring. The ``spam_ring_incidents``
+table keeps the transcripts the old detector saved (see
+``docs/data-retention.md``).
 """
 
 from __future__ import annotations
@@ -47,8 +48,6 @@ from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.bot.spam_engine import extract_links
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.exception_logging import log_exception
-from smarter_dev.web.models import ModerationFilterConfig
-from smarter_dev.web.moderation_gateway.config import first_channel
 
 if TYPE_CHECKING:
     from lightbulb import BotApp
@@ -81,7 +80,7 @@ _EVENT_WORDING = re.compile(
 
 @dataclass(frozen=True, slots=True)
 class SpamRingSettings:
-    """A guild's detector settings, snapshotted inside the DB session."""
+    """A guild's detector settings, from its moderation policy."""
 
     enabled: bool
     new_member_window: timedelta
@@ -90,32 +89,6 @@ class SpamRingSettings:
     followup: timedelta
     report_channel_id: str | None
     staff_exempt_role_ids: tuple[str, ...]
-
-    @classmethod
-    def from_config(
-        cls,
-        config: ModerationFilterConfig,
-        moderation_response_channel_id: str | None = None,
-    ) -> SpamRingSettings:
-        return cls(
-            enabled=bool(config.spam_ring_enabled),
-            new_member_window=timedelta(days=config.spam_ring_new_member_days),
-            timeout_seconds=clamp_timeout_seconds(config.spam_ring_timeout_seconds),
-            lookback=timedelta(minutes=config.spam_ring_lookback_minutes),
-            followup=timedelta(minutes=config.spam_ring_followup_minutes),
-            report_channel_id=resolve_report_channel_id(
-                config.spam_ring_report_channel_id,
-                config.mod_alert_channel_id,
-                config.mod_log_channel_id,
-                moderation_response_channel_id,
-            ),
-            staff_exempt_role_ids=tuple(
-                str(role_id) for role_id in (config.staff_exempt_role_ids or [])
-            ),
-        )
-
-
-resolve_report_channel_id = first_channel
 
 
 def clamp_timeout_seconds(seconds: int) -> int:

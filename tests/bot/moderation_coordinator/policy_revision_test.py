@@ -18,17 +18,16 @@ from smarter_dev.bot.moderation_coordinator.decide import enforceable
 from smarter_dev.bot.moderation_coordinator.model import RuleHit
 from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
-from smarter_dev.bot.moderation_coordinator.ownership import RULES
 from smarter_dev.bot.moderation_coordinator.ownership import Ownership
 from smarter_dev.bot.moderation_coordinator.policy import from_document
 from smarter_dev.shared import moderation_policy as mp
-from smarter_dev.web.models import DEFAULT_SCAM_LINK_DOMAINS
 from smarter_dev.web.moderation_gateway import types as gw
 from tests.bot.moderation_coordinator.act_test import REPORTS
 from tests.bot.moderation_coordinator.act_test import entries
 from tests.bot.moderation_coordinator.act_test import harness
 from tests.bot.moderation_coordinator.replay_cases import BUMP
 from tests.bot.moderation_coordinator.replay_cases import GUILD
+from tests.bot.moderation_coordinator.replay_cases import SCAM_LINK_DOMAINS
 from tests.bot.moderation_coordinator.replay_cases import scam_1749
 
 DESTRUCTIVE = {"timeout", "delete", "purge", "ban", "kick"}
@@ -39,7 +38,7 @@ def document(**over) -> mp.PolicyDocument:
     raw = mp.default_document().as_json()
     for rule in mp.RULES:
         raw["rules"][rule]["mode"] = mp.ENFORCE
-    raw["rules"]["spam_engine"]["scam_link_domains"] = list(DEFAULT_SCAM_LINK_DOMAINS)
+    raw["rules"]["spam_engine"]["scam_link_domains"] = list(SCAM_LINK_DOMAINS)
     raw["rules"]["attachment_filter"].update(
         ignored_extensions=[".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4"],
         warn_extensions=[".txt", ".pdf", ".py"],
@@ -56,7 +55,7 @@ def document(**over) -> mp.PolicyDocument:
 
 
 def owned(revision: int = 1) -> Ownership:
-    return Ownership(GUILD, COORDINATOR, 1, frozenset(RULES), policy_revision=revision)
+    return Ownership(GUILD, COORDINATOR, 1, policy_revision=revision)
 
 
 def policy_from(doc: mp.PolicyDocument, revision: int = 1):
