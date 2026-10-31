@@ -24,7 +24,7 @@ def _event(custom_id: str, input_data: str) -> Mock:
     response = Mock(status_code=200)
     response.json.return_value = {
         "input_data": input_data,
-        "challenge": {"title": "Power On!"},
+        "challenge": {"title": "Sample Challenge"},
     }
     api_client = Mock()
     api_client.get = AsyncMock(return_value=response)
@@ -49,7 +49,7 @@ async def _files(event: Mock) -> list[tuple[str, bytes]]:
 async def test_confirm_sends_a_single_gif64_input_as_a_gif():
     event = _event("confirm_get_input:abc", "gif64:" + _b64(GIF_A))
     await events.handle_challenge_confirm_get_input_interaction(event)
-    assert await _files(event) == [("power_on_.gif", GIF_A)]
+    assert await _files(event) == [("sample_challenge.gif", GIF_A)]
 
 
 async def test_existing_input_sends_a_gif64_list_as_numbered_gifs():
@@ -62,15 +62,15 @@ async def test_existing_input_sends_a_gif64_list_as_numbered_gifs():
 
     await events.handle_challenge_get_input_interaction(event)
     assert await _files(event) == [
-        ("power_on__1.gif", GIF_A),
-        ("power_on__2.gif", GIF_B),
+        ("sample_challenge_1.gif", GIF_A),
+        ("sample_challenge_2.gif", GIF_B),
     ]
 
 
 async def test_plain_input_is_still_a_txt_file():
     event = _event("confirm_get_input:abc", "line one\nline two")
     await events.handle_challenge_confirm_get_input_interaction(event)
-    assert await _files(event) == [("power_on_.txt", b"line one\nline two")]
+    assert await _files(event) == [("sample_challenge.txt", b"line one\nline two")]
 
 
 @pytest.mark.parametrize(
