@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import hikari
@@ -11,6 +14,7 @@ if TYPE_CHECKING:
     from smarter_dev.bot.services.api_client import APIClient
 
 from smarter_dev.bot.services.exceptions import APIError
+from smarter_dev.bot.services.exceptions import RateLimitError
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +162,19 @@ class SolutionSubmissionModalHandler:
             except hikari.errors.AlreadyRespondedError:
                 pass
 
+        except RateLimitError as e:
+            cooldown_message = _cooldown_message(e)
+            if cooldown_message is None:
+                logger.error(f"API error submitting solution: {e}")
+            try:
+                await interaction.create_initial_response(
+                    hikari.ResponseType.MESSAGE_CREATE,
+                    content=cooldown_message or "❌ Submission failed.",
+                    flags=hikari.MessageFlag.EPHEMERAL,
+                )
+            except hikari.errors.AlreadyRespondedError:
+                pass
+
         except APIError as e:
             logger.error(f"API error submitting solution: {e}")
             try:
@@ -179,3 +196,16 @@ class SolutionSubmissionModalHandler:
                 )
             except hikari.errors.AlreadyRespondedError:
                 pass
+
+
+def _cooldown_message(error: RateLimitError) -> str | None:
+    """The squad-cooldown reply for a 429 from the challenge submit route, else None."""
+    body = error.context.get("response")
+    retry_after = body.get("retry_after") if isinstance(body, dict) else None
+    if not isinstance(retry_after, int):
+        return None
+    retry_at = datetime.now(UTC) + timedelta(seconds=retry_after)
+    return (
+        "⏳ **Your squad is on cooldown** after a wrong answer.\n\n"
+        f"You can submit again <t:{int(retry_at.timestamp())}:R>."
+    )

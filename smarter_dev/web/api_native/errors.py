@@ -40,10 +40,13 @@ class BotApiException(Exception):
     error shapes, which have no natural type in the ``crud`` hierarchy.
     """
 
-    def __init__(self, status_code: int, body: dict) -> None:
+    def __init__(
+        self, status_code: int, body: dict, headers: dict[str, str] | None = None
+    ) -> None:
         super().__init__(f"{status_code}: {body}")
         self.status_code = status_code
         self.body = body
+        self.headers = headers
 
 
 def _request_id(request: Request) -> str:
@@ -163,7 +166,7 @@ def validate_discord_id(request: Request, value: str, field_name: str = "ID") ->
 
 def handle_bot_api_exception(request: Request, exc: BotApiException) -> Response:
     """Render a :class:`BotApiException` as its pre-built body."""
-    return Response(content=exc.body, status_code=exc.status_code)
+    return Response(content=exc.body, status_code=exc.status_code, headers=exc.headers)
 
 
 def handle_not_found(request: Request, exc: NotFoundError) -> Response:

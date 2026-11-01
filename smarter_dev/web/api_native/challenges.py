@@ -48,6 +48,7 @@ from smarter_dev.web.crud import (
     DatabaseOperationError,
     ScriptExecutionError,
     SquadOperations,
+    SubmissionCooldownError,
 )
 from smarter_dev.web.models import Campaign
 
@@ -610,6 +611,17 @@ class ChallengeController(Controller):
                 },
                 "submitted_at": "just_now",
             }
+        except SubmissionCooldownError as e:
+            raise BotApiException(
+                429,
+                {
+                    "detail": "Squad is on submission cooldown",
+                    "retry_after": e.retry_after,
+                    "retry_at": e.retry_at.isoformat(),
+                    "tier": e.tier,
+                },
+                headers={"Retry-After": str(e.retry_after)},
+            ) from e
         except DatabaseOperationError:
             raise plain_error(500, "Failed to submit solution")
         except BotApiException:

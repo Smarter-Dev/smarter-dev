@@ -16,7 +16,9 @@ from uuid import uuid4
 
 from litestar.testing import TestClient
 
-from smarter_dev.web.crud import DatabaseOperationError, ScriptExecutionError
+from smarter_dev.web.crud import DatabaseOperationError
+from smarter_dev.web.crud import ScriptExecutionError
+from smarter_dev.web.crud import SubmissionCooldownError
 
 _GUILD = "123456789012345678"
 _USER = "987654321098765432"
@@ -494,3 +496,30 @@ class TestSubmitSolution:
 
         assert response.status_code == 403
         assert response.json() == {"detail": "Challenge has not been released yet"}
+
+    def test_submit_on_cooldown_429(
+        self,
+        challenge_client: TestClient,
+        campaign_ops_mock,
+        challenge_squad_ops_mock,
+        challenge_submission_ops_mock,
+    ):
+        challenge_squad_ops_mock.get_user_squad.return_value = _squad_mock()
+        campaign_ops_mock.get_challenge_with_campaign.return_value = _challenge_mock()
+        retry_at = datetime(2026, 11, 1, 12, 5, tzinfo=timezone.utc)
+        challenge_submission_ops_mock.submit_solution.side_effect = (
+            SubmissionCooldownError(retry_at=retry_at, retry_after=118, tier=2)
+        )
+
+        response = challenge_client.post(
+            f"/api/challenges/{uuid4()}/submit-solution", json=self._body()
+        )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "118"
+        assert response.json() == {
+            "detail": "Squad is on submission cooldown",
+            "retry_after": 118,
+            "retry_at": "2026-11-01T12:05:00+00:00",
+            "tier": 2,
+        }
