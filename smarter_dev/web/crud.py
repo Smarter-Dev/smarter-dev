@@ -8,10 +8,11 @@ SQLAlchemy 2.0 syntax.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional, List, Dict, Any, Tuple
 from collections.abc import Iterable
 from uuid import UUID, uuid4
-from datetime import UTC, datetime, timezone, date
+from datetime import UTC, datetime, timedelta, timezone, date
 
 from sqlalchemy import select, update, delete, func, desc, and_, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -3402,6 +3403,34 @@ class ScriptExecutionError(Exception):
     pass
 
 
+# Wrong-answer cooldown for challenge submissions (#432). Wrong answers each
+# within the window of the one before form a streak; the latest wrong answer's
+# tier is its place in the streak, capped at the last entry. The squad may not
+# submit again until that answer plus the tier's delay. A gap longer than the
+# window starts a new streak at tier 1.
+SUBMISSION_COOLDOWN_WINDOW = timedelta(minutes=10)
+SUBMISSION_COOLDOWN_TIERS = (
+    timedelta(minutes=1),
+    timedelta(minutes=2),
+    timedelta(minutes=5),
+)
+
+
+class SubmissionCooldownError(Exception):
+    """Raised when a squad submits while on a wrong-answer cooldown."""
+
+    def __init__(self, retry_at: datetime, retry_after: int, tier: int):
+        super().__init__(f"Squad on submission cooldown for {retry_after}s (tier {tier})")
+        self.retry_at = retry_at
+        self.retry_after = retry_after
+        self.tier = tier
+
+
+def _as_utc(value: datetime) -> datetime:
+    # SQLite hands back naive datetimes; every stored submission time is UTC.
+    return value if value.tzinfo else value.replace(tzinfo=UTC)
+
+
 class ChallengeSubmissionOperations:
     """Database operations for challenge solution submission and success tracking.
     
@@ -3442,12 +3471,28 @@ class ChallengeSubmissionOperations:
             ValueError: If no expected result exists for this challenge/squad
         """
         try:
-            # Get the expected result from ChallengeInput
-            input_ops = ChallengeInputOperations(self.session)
-            challenge_input = await input_ops.get_input_by_squad(challenge_id, squad_id)
+            # Get the expected result from ChallengeInput. The row is locked
+            # (on PostgreSQL) so concurrent submissions from one squad queue
+            # behind each other and each sees the others' wrong answers.
+            result = await self.session.execute(
+                select(ChallengeInput)
+                .where(
+                    ChallengeInput.challenge_id == challenge_id,
+                    ChallengeInput.squad_id == squad_id,
+                )
+                .with_for_update()
+            )
+            challenge_input = result.scalar_one_or_none()
             
             if not challenge_input:
                 raise ValueError("No input/result data found for this challenge and squad. Generate input first.")
+            
+            now = datetime.now(UTC)
+            existing_success = await self._get_first_success_for_squad(challenge_id, squad_id)
+            
+            # A squad that has already solved keeps its pre-cooldown behaviour.
+            if existing_success is None:
+                await self._raise_if_on_cooldown(challenge_id, squad_id, now)
             
             # Compare submitted solution with expected result
             expected_result = challenge_input.result_data.strip()
@@ -3459,7 +3504,6 @@ class ChallengeSubmissionOperations:
             points_earned = None
             
             if is_correct:
-                existing_success = await self._get_first_success_for_squad(challenge_id, squad_id)
                 is_first_success = existing_success is None
                 
                 # Calculate points for first successful submission
@@ -3475,7 +3519,10 @@ class ChallengeSubmissionOperations:
                 submitted_solution=submitted_solution,
                 is_correct=is_correct,
                 is_first_success=is_first_success,
-                points_earned=points_earned
+                points_earned=points_earned,
+                # The cooldown reads submitted_at against this clock, so stamp
+                # it here rather than with the database's now().
+                submitted_at=now,
             )
             
             self.session.add(submission)
@@ -3485,9 +3532,38 @@ class ChallengeSubmissionOperations:
             
         except Exception as e:
             await self.session.rollback()
-            if isinstance(e, ValueError):
+            if isinstance(e, ValueError | SubmissionCooldownError):
                 raise
             raise DatabaseOperationError(f"Failed to submit solution: {e}") from e
+    
+    async def _raise_if_on_cooldown(
+        self,
+        challenge_id: UUID,
+        squad_id: UUID,
+        now: datetime,
+    ) -> None:
+        """Raise SubmissionCooldownError if the squad's latest wrong answer still blocks it."""
+        query = select(ChallengeSubmission.submitted_at).where(
+            ChallengeSubmission.challenge_id == challenge_id,
+            ChallengeSubmission.squad_id == squad_id,
+            ChallengeSubmission.is_correct.is_(False),
+        ).order_by(ChallengeSubmission.submitted_at.desc()).limit(len(SUBMISSION_COOLDOWN_TIERS))
+        result = await self.session.execute(query)
+        wrong_times = [_as_utc(t) for t in result.scalars().all()]
+        if not wrong_times:
+            return
+        
+        tier = 1
+        for later, earlier in zip(wrong_times, wrong_times[1:]):
+            if later - earlier > SUBMISSION_COOLDOWN_WINDOW:
+                break
+            tier += 1
+        retry_at = wrong_times[0] + SUBMISSION_COOLDOWN_TIERS[tier - 1]
+        if retry_at <= now:
+            return
+        
+        retry_after = max(1, math.ceil((retry_at - now).total_seconds()))
+        raise SubmissionCooldownError(retry_at=retry_at, retry_after=retry_after, tier=tier)
     
     async def _get_first_success_for_squad(
         self, 
