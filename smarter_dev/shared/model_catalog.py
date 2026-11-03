@@ -357,28 +357,43 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
-    # --- Open weights via OpenCode Zen (OpenAI-compatible /chat/completions) ---
-    # Zen wire ids verified against GET https://opencode.ai/zen/v1/models. Note
-    # they do NOT all match the DO ids for the same model: DeepSeek is
-    # "deepseek-v4-flash" here but "deepseek-4-flash" on DO, and the DO-era id
-    # is still what historical usage rows carry (see llm_pricing).
-    # Reasoning: Qwen keeps the low/medium/high knob its 3.5 sibling exposes.
-    # Kimi K3 and MiniMax M3 declare NO knob — their reasoning support is
-    # unverified, and declaring none sends no effort field at all, which every
-    # OpenAI-compatible endpoint accepts. Add the ladder once it is confirmed.
+    # Kimi K3 and MiniMax M3 left OpenCode Zen on 2026-11-03, when the Zen key
+    # expired and nothing else was still served there (Qwen, GLM and DeepSeek
+    # had already moved on 2026-08-13). Zen was reselling the authors' own
+    # endpoints at the authors' own rates, and OpenRouter carries those same
+    # endpoints at the same rates — Moonshot at $3/$15 with $0.30 cache reads,
+    # MiniMax at $0.30/$1.20 with $0.06 — so this is a provider change with no
+    # price change. Neither author declares a quantization, so a precision
+    # allow-list would exclude the reference build itself; order puts the
+    # authors first and the price ceiling keeps every fallback at or below
+    # their rate, which rules out the pricier fp8/unknown resellers but admits
+    # the cheap fp4 pool only as failover.
+    # Reasoning: both declare NO knob — their reasoning support is unverified,
+    # and declaring none sends no effort field at all. Add the ladder once it is
+    # confirmed.
     CatalogModel(
         key="kimi-k3",
         label="Kimi K3 (Moonshot)",
         family="Kimi",
-        provider=ModelProvider.OPENCODE_ZEN,
-        model_id="kimi-k3",
+        provider=ModelProvider.OPENROUTER,
+        model_id="moonshotai/kimi-k3",
+        openrouter_routing=OpenRouterRouting(
+            order=("moonshotai",),
+            max_price_input_mtok=3.00,
+            max_price_output_mtok=15.00,
+        ),
     ),
     CatalogModel(
         key="minimax-m3",
         label="MiniMax M3",
         family="MiniMax",
-        provider=ModelProvider.OPENCODE_ZEN,
-        model_id="minimax-m3",
+        provider=ModelProvider.OPENROUTER,
+        model_id="minimax/minimax-m3",
+        openrouter_routing=OpenRouterRouting(
+            order=("minimax",),
+            max_price_input_mtok=0.30,
+            max_price_output_mtok=1.20,
+        ),
     ),
     # Qwen3.6 Plus left Zen on 2026-08-13: Alibaba, the model's author, is the
     # ONLY endpoint OpenRouter carries for it, at $0.325/$1.95 against Zen's

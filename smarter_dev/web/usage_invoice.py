@@ -107,6 +107,11 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3-flash-preview", "google")
 # Laguna S briefly ran on Zen's free tier before its rate limiting sent it
 # back to OpenRouter; rows from that window carry the free id.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("laguna-s-2.1-free", "opencode_zen")
+# Kimi K3 and MiniMax M3 left Zen for OpenRouter on 2026-11-03 when the Zen key
+# expired; the catalog now maps "moonshotai/kimi-k3" and "minimax/minimax-m3",
+# and rows written before the move still carry the bare Zen ids.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("kimi-k3", "opencode_zen")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("minimax-m3", "opencode_zen")
 # The whole Claude family left the catalog on 2026-09-03 for lack of traffic.
 # Settled usage rows still carry these wire ids and still price against the
 # Claude patches in llm_pricing, so without these they would drop out of the

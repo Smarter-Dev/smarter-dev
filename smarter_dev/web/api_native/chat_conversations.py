@@ -121,6 +121,9 @@ _MOVED_WIRE_IDS: dict[str, tuple[str, str]] = {
     # Sonnet and Haiku 5.5 left OpenRouter for the direct API on 2026-10-17.
     "anthropic/claude-sonnet-5.5": ("openrouter", "claude-sonnet-5-5"),
     "anthropic/claude-haiku-5.5": ("openrouter", "claude-haiku-5-5"),
+    # Kimi K3 and MiniMax M3 left OpenCode Zen for OpenRouter on 2026-11-03.
+    "kimi-k3": ("opencode_zen", "kimi-k3"),
+    "minimax-m3": ("opencode_zen", "minimax-m3"),
 }
 
 

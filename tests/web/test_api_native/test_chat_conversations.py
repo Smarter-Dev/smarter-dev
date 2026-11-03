@@ -607,7 +607,7 @@ class TestTurnUsageCostRows:
             client,
             engagement,
             request_id="req-usage",
-            chat_model_name="kimi-k3",
+            chat_model_name="moonshotai/kimi-k3",
             chat_reasoning_level="high",
             chat_tokens_input=1000,
             chat_tokens_output=500,
@@ -622,9 +622,9 @@ class TestTurnUsageCostRows:
         assert row.discord_user_id == engagement.activation_user_id
         assert row.conversation_id == engagement.id
         assert row.root_turn_id == turn.id
-        assert row.provider_key == "opencode_zen"
+        assert row.provider_key == "openrouter"
         assert row.catalog_model_key == "kimi-k3"
-        assert row.model_id == "kimi-k3"
+        assert row.model_id == "moonshotai/kimi-k3"
         assert row.reasoning_level == "high"
         assert row.input_tokens == 1000
         assert row.output_tokens == 500
@@ -632,6 +632,28 @@ class TestTurnUsageCostRows:
         assert row.cache_write_tokens == 7
         assert row.cost_usd == turn.chat_cost_usd
         assert row.details == {"request_id": "req-usage"}
+
+    async def test_a_late_zen_row_keeps_the_provider_that_billed_it(
+        self, client: AsyncClient, session
+    ):
+        # Kimi K3 moved from OpenCode Zen to OpenRouter on 2026-11-03. A turn
+        # still reporting the bare Zen wire id was billed by Zen and must not be
+        # attributed to OpenRouter or fall to "unknown".
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            request_id="req-usage",
+            chat_model_name="kimi-k3",
+            chat_tokens_input=10,
+            chat_tokens_output=5,
+        )
+
+        row = await _stored_usage_cost_row(session, "primary")
+        assert row.provider_key == "opencode_zen"
+        assert row.catalog_model_key == "kimi-k3"
+        assert row.model_id == "kimi-k3"
 
     async def test_voice_model_files_a_voice_row(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)

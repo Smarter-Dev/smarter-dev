@@ -354,8 +354,33 @@ class TestOpenRouterPricing:
         assert cost == Decimal("0.92")
 
 
+class TestKimiAndMiniMaxOnOpenRouter:
+    """Authors-first routing at the authors' rate, so these match the old Zen rows."""
+
+    def test_kimi_k3_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "moonshotai/kimi-k3") == Decimal(
+            "18.00"
+        )
+
+    def test_minimax_m3_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "minimax/minimax-m3") == Decimal(
+            "1.50"
+        )
+
+    def test_minimax_cache_read_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="openrouter:minimax/minimax-m3",
+        )
+        # 400k fresh @ $0.30 + 600k cached @ $0.06, the same as Zen charged.
+        assert cost == Decimal("0.156")
+
+
 class TestOpenCodeZenPricing:
-    """Zen rates, and the one wire id that collides with Digital Ocean's table."""
+    """Historical Zen rates, and the one wire id that collides with DO's table."""
 
     def test_kimi_k3_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "kimi-k3") == Decimal("18.00")
