@@ -27,7 +27,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "pyyaml>=6.0",
     "python-dotenv>=1.0.0",
-    "pillow>=11.3.0",
+    "pillow>=13.0.0",
     "itsdangerous>=2.2.0",
     "python-multipart>=0.0.20",
     "alembic>=1.16.4",
@@ -114,14 +114,7 @@ test = [
 
 # GIF creation (existing)
 gif-creation = [
-    "pillow>=11.3.0",
-]
-
-# Video/movie generation
-movie = [
-    "moviepy>=1.0.3",
-    "imageio>=2.9.0",
-    "imageio-ffmpeg>=0.4.0",
+    "pillow>=13.0.0",
 ]
 
 # Interactive reveal
