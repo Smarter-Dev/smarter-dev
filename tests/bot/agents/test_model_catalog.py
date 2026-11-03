@@ -454,20 +454,31 @@ def test_qwen3_8_routes_through_openrouter_not_digital_ocean():
     assert model.default_reasoning is ReasoningLevel.MEDIUM
 
 
-def test_opencode_zen_models_carry_their_verified_wire_ids():
-    # Verified against GET https://opencode.ai/zen/v1/models. DeepSeek is the
-    # trap: Zen's id differs from the DO id the same model used to carry.
-    # Qwen3.6 Plus, GLM and DeepSeek left Zen on 2026-08-13 for endpoints that
-    # match their authors' published precision, so only these two remain.
+def test_nothing_is_served_from_opencode_zen():
+    # Kimi K3 and MiniMax M3 were the last Zen models; they left on 2026-11-03
+    # when the Zen key expired. The provider stays in the enum and router for
+    # historical usage rows, but no catalog entry may route there.
+    assert not [m for m in MODEL_CATALOG if m.provider is ModelProvider.OPENCODE_ZEN]
+
+
+def test_kimi_and_minimax_route_to_their_authors_on_openrouter():
+    # Verified against GET /api/v1/models/{id}/endpoints on 2026-11-03: the
+    # authors' endpoints (tags "moonshotai" and "minimax") are at exactly the
+    # Zen rate, and neither declares a quantization, so order + price ceiling
+    # is the whole constraint.
     expected = {
-        "kimi-k3": "kimi-k3",
-        "minimax-m3": "minimax-m3",
+        "kimi-k3": ("moonshotai/kimi-k3", "moonshotai", 3.00, 15.00),
+        "minimax-m3": ("minimax/minimax-m3", "minimax", 0.30, 1.20),
     }
-    for key, model_id in expected.items():
+    for key, (model_id, author, in_cap, out_cap) in expected.items():
         model = get_model(key)
         assert model is not None, key
         assert model.model_id == model_id
-        assert model.provider is ModelProvider.OPENCODE_ZEN
+        assert model.provider is ModelProvider.OPENROUTER
+        assert model.openrouter_routing.as_provider_block() == {
+            "order": [author],
+            "max_price": {"prompt": in_cap, "completion": out_cap},
+        }
 
 
 def test_prompted_output_follows_the_model_not_the_endpoint():
@@ -478,13 +489,18 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
     OpenRouter, while Grok — which shares that provider and DOES handle
     native tool output — must not be forced onto it.
     """
-    for key in ("gemma-4-31b", "glm-5-3-flash", "deepseek-v4", "qwen3-6-plus"):
+    for key in (
+        "gemma-4-31b",
+        "glm-5-3-flash",
+        "deepseek-v4",
+        "qwen3-6-plus",
+        "kimi-k3",
+        "minimax-m3",
+    ):
         model = get_model(key)
         assert model.provider is ModelProvider.OPENROUTER, key
         assert model.needs_prompted_output is True, key
 
-    for key in ("kimi-k3", "minimax-m3"):
-        assert get_model(key).needs_prompted_output is True, key
     assert get_model("qwen3-5-397b").needs_prompted_output is True
 
     # Proprietary models keep native structured output, including Grok, which

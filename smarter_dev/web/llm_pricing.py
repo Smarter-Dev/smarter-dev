@@ -647,10 +647,27 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         output_mtok=Decimal("0.1733"),
         cache_read_mtok=Decimal("0.0173"),
     ),
+    # Kimi K3 and MiniMax M3 moved from Zen on 2026-11-03. Both route to the
+    # authors' own endpoints first with a price ceiling at the authors' rate,
+    # so these are the exact figures Zen charged for the same endpoints; a
+    # fallback can only come in at or below them.
+    "moonshotai/kimi-k3": types.ModelPrice(
+        input_mtok=Decimal("3.00"),
+        output_mtok=Decimal("15.00"),
+        cache_read_mtok=Decimal("0.30"),
+    ),
+    "minimax/minimax-m3": types.ModelPrice(
+        input_mtok=Decimal("0.30"),
+        output_mtok=Decimal("1.20"),
+        cache_read_mtok=Decimal("0.06"),
+    ),
 }
 
 # OpenCode Zen models. USD per million tokens, from
-# https://opencode.ai/docs/zen/#pricing (2026-07). "laguna-s-2.1-free" is a
+# https://opencode.ai/docs/zen/#pricing (2026-07). Nothing has been served from
+# Zen since 2026-11-03 (Kimi K3 and MiniMax M3 were the last to leave); every
+# row here is historical and kept so usage rows written while a model WAS on
+# Zen still price instead of falling through. "laguna-s-2.1-free" is a
 # limited-time free tier and prices at zero on every axis; it is listed
 # explicitly rather than omitted so a free turn resolves to Decimal("0")
 # instead of falling through to genai-prices, which does not know the id.

@@ -52,7 +52,15 @@ _ANTHROPIC_NO_REASONING_MODEL = CatalogModel(
     model_id="claude-haiku-4-5",
     supports_vision=True,
 )
-_OPENCODE_ZEN_MODEL = get_model("kimi-k3")
+# No catalog model routes through Zen since 2026-11-03; the branch stays for
+# historical rows, so it is exercised with a synthetic entry.
+_OPENCODE_ZEN_MODEL = CatalogModel(
+    key="zen-test",
+    label="Zen test",
+    family="Kimi",
+    provider=ModelProvider.OPENCODE_ZEN,
+    model_id="kimi-k3",
+)
 _OPENROUTER_MODEL = get_model("qwen3-8-2-4t")
 _OPENROUTER_REASONING_MODEL = get_model("grok-4-7")
 
