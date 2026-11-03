@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import sys
 from typing import TYPE_CHECKING
 
 import httpx2
@@ -62,18 +61,18 @@ def _openrouter_key_present() -> bool:
 
 
 def resolve_agent_model_id(requested: str) -> str:
-    """Route kimi-k3 through OpenRouter when no OpenCode Zen key is set."""
-    if requested != "kimi-k3" or os.getenv("OPENCODE_ZEN_API_KEY"):
+    """Map the bare ``kimi-k3`` id to its OpenRouter wire id.
+
+    Kimi K3 moved from OpenCode Zen to OpenRouter on 2026-11-03, so the bare
+    id no longer matches a catalog entry. An OpenRouter key is required; the
+    Zen key is ignored even when it is still in the environment.
+    """
+    if requested != "kimi-k3":
         return requested
     if _openrouter_key_present():
-        print(
-            "No OPENCODE_ZEN_API_KEY — routing Kimi K3 via OpenRouter as "
-            f"{KIMI_OPENROUTER_MODEL_ID}",
-            file=sys.stderr,
-        )
         return KIMI_OPENROUTER_MODEL_ID
     raise SystemExit(
-        "kimi-k3 needs OPENCODE_ZEN_API_KEY or an OpenRouter key "
+        "kimi-k3 needs an OpenRouter key "
         "(OPENROUTER_API_KEY / OPEN_ROUTER_API_KEY) in the environment."
     )
 

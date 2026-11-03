@@ -216,15 +216,17 @@ def test_typesafe_cost_uses_public_list_price_by_default(monkeypatch):
     ) == pytest.approx(0.042)
 
 
-def test_kimi_routes_via_openrouter_without_zen_key(monkeypatch):
+def test_kimi_routes_via_openrouter_even_with_a_zen_key(monkeypatch):
     from scripts.proactive_eval.twopass import models
 
     monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
     monkeypatch.setenv("OPEN_ROUTER_API_KEY", "test-key")
     assert models.resolve_agent_model_id("kimi-k3") == "moonshotai/kimi-k3"
 
+    # The Zen key is still injected in production but nothing is served
+    # from Zen any more; the bare id must not leak through to the catalog.
     monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "zen-key")
-    assert models.resolve_agent_model_id("kimi-k3") == "kimi-k3"
+    assert models.resolve_agent_model_id("kimi-k3") == "moonshotai/kimi-k3"
 
 
 def test_fixture_name_for_record_is_data_dir_relative(tmp_path):
@@ -251,5 +253,5 @@ def test_kimi_fails_fast_with_no_provider_keys(monkeypatch):
     for name in ("OPENCODE_ZEN_API_KEY", "OPENROUTER_API_KEY",
                  "OPEN_ROUTER", "OPEN_ROUTER_API_KEY"):
         monkeypatch.delenv(name, raising=False)
-    with pytest.raises(SystemExit, match="OPENCODE_ZEN_API_KEY"):
+    with pytest.raises(SystemExit, match="OpenRouter key"):
         models.resolve_agent_model_id("kimi-k3")
