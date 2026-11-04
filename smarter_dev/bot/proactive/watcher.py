@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from dataclasses import field
+from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel
@@ -74,18 +75,9 @@ class JevWatcherJudgments(BaseModel):
     )
 
 
-WATCHER_SYSTEM_PROMPT = """\
-You are the watch pass of a two-pass Discord bot. You review new channel
-messages and decide whether to wake the chat agent (a slower, smarter
-model). You never write channel messages yourself.
-
-Wake the agent when a new message is directed at the bot (mention or
-reply), when the wake criteria below say so, or when a conversation the
-agent could genuinely help with is happening. Most bursts of chat are
-between specific people or ambient noise: do not wake for those.
-
-When you wake the agent, list the message ids it must look at and write a
-one-paragraph summary of what is going on."""
+WATCHER_SYSTEM_PROMPT = (
+    Path(__file__).parent / "prompts" / "watcher_watcher_system_prompt.md"
+).read_text(encoding="utf-8")
 
 
 def build_watcher_prompt(
@@ -440,11 +432,9 @@ class JevWatcherRunner:
         return decision, jev_usage
 
 
-SKIM_SYSTEM_PROMPT = """\
-You skim Discord transcripts for a chat agent. Summarize what is happening
-in a short paragraph, then list the load-bearing messages VERBATIM as
-`[id=<message id>] <display name> (user id <author id>): <content>` lines.
-Keep it brief; the agent can look up anything by id."""
+SKIM_SYSTEM_PROMPT = (
+    Path(__file__).parent / "prompts" / "watcher_skim_system_prompt.md"
+).read_text(encoding="utf-8")
 
 
 @dataclass

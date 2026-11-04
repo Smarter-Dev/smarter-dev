@@ -25,6 +25,7 @@ import os
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -50,20 +51,11 @@ DEFAULT_MODEL = "claude-haiku-5-5"
 MODEL_ENV_VAR = "HANDLER_AGENT_MODEL"
 
 _GATHER_PROMPT = (
-    "You are a gathering assistant for a Discord automation. Do exactly what the "
-    "instruction asks and reply with PLAIN TEXT only — no markdown scaffolding, no "
-    "preamble. You cannot send messages or react; your reply is handed back to the "
-    "script that called you. Be concise. Use your tools sparingly: search or read "
-    "only when the instruction genuinely needs current or external information. "
-    "web_read works on ANY url — web pages, PDFs, images, and audio — so you can "
-    "read a screenshot or document by passing its url."
-)
+    Path(__file__).parent / "prompts" / "handler_agent_gather_prompt.md"
+).read_text(encoding="utf-8")
 _TRANSFORM_PROMPT = (
-    "You transform text for a Discord automation. Do exactly what the instruction "
-    "asks and reply with PLAIN TEXT only. You have no tools and no external access — "
-    "work solely from the text in the prompt. Your reply is handed back to the "
-    "script that called you."
-)
+    Path(__file__).parent / "prompts" / "handler_agent_transform_prompt.md"
+).read_text(encoding="utf-8")
 
 
 class _GatherDeps:

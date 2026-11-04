@@ -1,0 +1,1 @@
+Follow the GUIDE. A result is at least level 1 when the snippet gives useful information for the REQUEST or any part of it, including a page about the same error or problem. It is level 0 when it only shares words, is navigation or a store or job listing, only asks for more details, or is outside a time the REQUEST names.

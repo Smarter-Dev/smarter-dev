@@ -1,0 +1,1 @@
+This conversation has not been named yet. Early in this turn, call set_chat_title(title) once with a brief name for it — a few words describing the subject, in title case, no trailing punctuation, under 60 characters. Name what the conversation is about, not what you are about to do. Do not mention the title in your reply, and do not call the tool again once it is named.

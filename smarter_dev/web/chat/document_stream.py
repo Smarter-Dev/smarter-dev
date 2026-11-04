@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from time import monotonic
 from uuid import UUID
 
@@ -31,13 +32,8 @@ from smarter_dev.web.chat.runtime import run_cancellable
 
 # The fork's whole prompt. Terse on purpose: the model already knows what it
 # asked for and why, because everything it has thought so far is on this branch.
-FORK_INSTRUCTION = (
-    "File created: {filename}\n\n"
-    "Output the complete contents of this file as your next message, and "
-    "nothing else. No preamble, no closing remarks, no surrounding code fence. "
-    "Markdown only, starting at the first line of the file. Your message is "
-    "written straight into the file as you produce it, and the reader is "
-    "watching it appear."
+FORK_INSTRUCTION = (Path(__file__).parent / "prompts" / "document_stream.md").read_text(
+    encoding="utf-8"
 )
 
 # A sibling tool call in the same model response still has to be answered for

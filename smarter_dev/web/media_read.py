@@ -18,6 +18,7 @@ import hashlib
 import logging
 import os
 from contextvars import ContextVar
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
@@ -60,14 +61,9 @@ _EXT_MEDIA_TYPE = {
 IMAGE_EXTS = tuple(e for e, mt in _EXT_MEDIA_TYPE.items() if mt.startswith("image/"))
 AUDIO_EXTS = tuple(e for e, mt in _EXT_MEDIA_TYPE.items() if mt.startswith("audio/"))
 
-_MEDIA_SYSTEM_PROMPT = """\
-You examine a single attached media file — an image or an audio clip — to satisfy a specific
-INSTRUCTION from another assistant. Obey the INSTRUCTION precisely. For an IMAGE: describe only
-what is actually visible — objects, people, UI, diagrams, charts, and any readable text;
-transcribe on-screen text accurately when relevant. For AUDIO: transcribe or summarize what is
-said/heard. Stay grounded — never invent details not present. Be concise (at most ~5 paragraphs).
-If the media can't be meaningfully read (blank, corrupt, or it doesn't contain what the
-INSTRUCTION asks for), say so plainly rather than fabricating."""
+_MEDIA_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "media_read.md").read_text(
+    encoding="utf-8"
+)
 
 _media_agent = None
 _audio_agent = None

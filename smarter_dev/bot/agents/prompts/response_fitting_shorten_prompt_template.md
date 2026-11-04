@@ -1,0 +1,1 @@
+<length-notice>Your drafted reply could not be sent: it is {length} characters and Discord caps messages at 2000. Rewrite it to under 1500 characters — keep the essential answer and any code or links that are load-bearing, cut the rest. Respond again with the rewritten message, targeting the same message as before.</length-notice>
