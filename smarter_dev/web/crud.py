@@ -5551,6 +5551,7 @@ async def upsert_guild_memory_blob(
     dreamed_at: datetime,
     behavior: str | None = None,
     personality: str | None = None,
+    facts: str | None = None,
 ) -> ChatAgentGuildMemory:
     """Write the night's blob for ``guild_id``, bumping ``revision`` atomically.
 
@@ -5562,7 +5563,7 @@ async def upsert_guild_memory_blob(
     UNIQUE violation.
 
     ``memory_enabled`` is deliberately absent from the update set — a dream must
-    never undo the per-guild pause switch. ``behavior`` and ``personality``
+    never undo the per-guild pause switch. ``behavior``, ``personality`` and ``facts``
     left as ``None`` are absent from it too, so a caller that does not name a
     block can never wipe it. ``public_page_enabled`` (#103) always is.
     """
@@ -5572,6 +5573,7 @@ async def upsert_guild_memory_blob(
         content=content,
         behavior=behavior or "",
         personality=personality or "",
+        facts=facts or "",
         revision=1,
         last_dream_at=dreamed_at,
         notes_consumed=notes_consumed,
@@ -5590,6 +5592,8 @@ async def upsert_guild_memory_blob(
         update_set["behavior"] = behavior
     if personality is not None:
         update_set["personality"] = personality
+    if facts is not None:
+        update_set["facts"] = facts
     statement = statement.on_conflict_do_update(
         index_elements=["guild_id"], set_=update_set
     )
@@ -5769,6 +5773,7 @@ async def record_memory_revision(
     model_name: str | None,
     behavior: str = "",
     personality: str = "",
+    facts: str = "",
 ) -> ChatAgentMemoryRevision:
     """Append one night's dream output to the guild's revision history."""
     record = ChatAgentMemoryRevision(
@@ -5776,6 +5781,7 @@ async def record_memory_revision(
         content=content,
         behavior=behavior,
         personality=personality,
+        facts=facts,
         revision=revision,
         notes_consumed=notes_consumed,
         model_name=model_name,

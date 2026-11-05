@@ -2,7 +2,7 @@
 
 Before #104 the agent named people as ``username (id N)``; now it writes
 ``<N:username>`` so the public page can mask them. This converts what is
-already stored, for every guild: the memory, behavior and personality blocks
+already stored, for every guild: the memory, behavior, personality and facts blocks
 and every pending note. A ``<@N>`` mention becomes a tag too when its name is
 known, from an old-form or tagged reference to the same id in the same text or
 from the username that id started a conversation under in the guild; one
@@ -42,6 +42,7 @@ from smarter_dev.web.crud import lock_guild_memory
 from smarter_dev.web.crud import prune_memory_revisions
 from smarter_dev.web.crud import record_memory_revision
 from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
+from smarter_dev.web.models import MAX_FACTS_CHARS
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.models import MAX_PERSONALITY_CHARS
@@ -55,6 +56,7 @@ BLOCK_LIMITS = {
     "content": MAX_MEMORY_BLOB_CHARS,
     "behavior": MAX_BEHAVIOR_CHARS,
     "personality": MAX_PERSONALITY_CHARS,
+    "facts": MAX_FACTS_CHARS,
 }
 NOTES = "notes"
 
@@ -188,6 +190,7 @@ async def apply_guild(session: AsyncSession, guild_id: str) -> GuildRetag:
             content=memory.content,
             behavior=memory.behavior or "",
             personality=memory.personality or "",
+            facts=memory.facts or "",
             revision=memory.revision,
             notes_consumed=0,
             model_name=RETAG_MODEL_NAME,
@@ -257,8 +260,8 @@ class NameTagging:
 async def tag_name_in_blocks(
     session: AsyncSession, guild_id: str, username: str, user_id: str | None
 ) -> NameTagging:
-    """Tag every whole-word ``username`` in the guild's memory, behavior and
-    personality, and commit, recording a memory revision as the retag does.
+    """Tag every whole-word ``username`` in the guild's memory, behavior,
+    personality and facts, and commit, recording a memory revision as the retag does.
 
     Under the guild's memory lock, so a dream or purge cannot write between
     the read and the write. Notes are left alone. A change that would put any
@@ -298,6 +301,7 @@ async def tag_name_in_blocks(
         content=memory.content,
         behavior=memory.behavior or "",
         personality=memory.personality or "",
+        facts=memory.facts or "",
         revision=memory.revision,
         notes_consumed=0,
         model_name=ADMIN_TAG_MODEL_NAME,

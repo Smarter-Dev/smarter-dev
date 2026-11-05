@@ -232,14 +232,16 @@ def _render_memory_chunks(
     long_term_memory_updated_at: datetime | None,
     behavior: str | None,
     personality: str | None,
+    facts: str | None,
     memory_notes: list[MemoryNote],
     guild_events: list[GuildEventView],
     guild_events_window: str,
 ) -> list[str]:
     """The memory blocks, far-to-near, omitting any that is empty.
 
-    The dream's three durable blocks come first, most stable first:
-    ``<my-personality>``, ``<how-i-behave>``, then ``<what-i-remember>``. After
+    The dream's four durable blocks come first, most stable first:
+    ``<my-personality>``, ``<how-i-behave>``, ``<my-facts>``, then
+    ``<what-i-remember>``. After
     them today's notes and this hour's actions.
 
     An empty memory tag is worse than no tag: it hands the model a rendered
@@ -250,6 +252,7 @@ def _render_memory_chunks(
     for tag, block in (
         ("my-personality", personality),
         ("how-i-behave", behavior),
+        ("my-facts", facts),
     ):
         text = (block or "").strip()
         if text:
@@ -390,6 +393,7 @@ def render_metadata_xml(
     long_term_memory_updated_at: datetime | None = None,
     behavior: str | None = None,
     personality: str | None = None,
+    facts: str | None = None,
     memory_notes: list[MemoryNote] | None = None,
     guild_events: list[GuildEventView] | None = None,
     guild_events_window: str = EVENT_WINDOW_FULL,
@@ -408,6 +412,7 @@ def render_metadata_xml(
         long_term_memory_updated_at=long_term_memory_updated_at,
         behavior=behavior,
         personality=personality,
+        facts=facts,
         memory_notes=memory_notes,
         guild_events=guild_events,
         guild_events_window=guild_events_window,
@@ -431,6 +436,7 @@ def _memory_arguments(
             "long_term_memory_updated_at": agent_input.long_term_memory_updated_at,
             "behavior": agent_input.behavior,
             "personality": agent_input.personality,
+            "facts": agent_input.facts,
             "memory_notes": agent_input.memory_notes,
             "guild_events": agent_input.guild_events,
             "guild_events_window": EVENT_WINDOW_FULL,
@@ -440,6 +446,7 @@ def _memory_arguments(
         "long_term_memory_updated_at": agent_input.long_term_memory_updated_at,
         "behavior": agent_input.behavior,
         "personality": agent_input.personality,
+        "facts": agent_input.facts,
         "memory_notes": None,
         "guild_events": agent_input.new_guild_events,
         "guild_events_window": EVENT_WINDOW_DELTA,
@@ -537,6 +544,7 @@ def _render_metadata(
     long_term_memory_updated_at: datetime | None = None,
     behavior: str | None = None,
     personality: str | None = None,
+    facts: str | None = None,
     memory_notes: list[MemoryNote] | None = None,
     guild_events: list[GuildEventView] | None = None,
     guild_events_window: str = EVENT_WINDOW_FULL,
@@ -594,6 +602,7 @@ def _render_metadata(
             long_term_memory_updated_at=long_term_memory_updated_at,
             behavior=behavior,
             personality=personality,
+            facts=facts,
             memory_notes=list(memory_notes or []),
             guild_events=list(guild_events or []),
             guild_events_window=guild_events_window,

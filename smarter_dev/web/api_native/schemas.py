@@ -1017,6 +1017,10 @@ class ChatMemoryBundleRead(BaseAPIModel):
         None,
         description="Who the agent is here and how it wants to be felt about, or null",
     )
+    facts: str | None = Field(
+        None,
+        description="Durable facts about the agent, its setup and the server, or null if none",
+    )
     revision: int | None = Field(
         None, description="How many dreams have written the blob, or null"
     )

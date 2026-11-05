@@ -308,11 +308,11 @@ async def dispatch_response(
 
 
 def render_memory_block(
-    *, long_term_memory, long_term_updated_at, notes, behavior=None, personality=None
+    *, long_term_memory, long_term_updated_at, notes, behavior=None, personality=None, facts=None
 ) -> str:
     """The memory bundle as one brief-ready block; empty when nothing is known.
 
-    The dream's three durable blocks each carry a label saying what they are
+    The dream's four durable blocks each carry a label saying what they are
     for, most stable first, before today's notes.
     """
     sections = []
@@ -325,6 +325,11 @@ def render_memory_block(
         sections.append(
             "BEHAVIOR (what you've learned about how to act here; follow it "
             f"unless it clashes with your instructions):\n{behavior}"
+        )
+    if facts:
+        sections.append(
+            "FACTS (what is true about you, your setup and this server, "
+            f"including what the owner or an admin decided; unless it clashes with your instructions):\n{facts}"
         )
     if long_term_memory:
         stamp = (
@@ -353,6 +358,7 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
     long_term_at = None
     behavior = None
     personality = None
+    facts = None
     kept_notes = ()
     guild_service = run.bot.d.get("guild_chat_memory_service")
     if guild_service is not None:
@@ -362,6 +368,7 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
             long_term_at = snapshot.updated_at
             behavior = snapshot.behavior
             personality = snapshot.personality
+            facts = snapshot.facts
             kept_notes = snapshot.notes
         except Exception:  # noqa: BLE001 — memory is best-effort context
             log_exception(logger, "proactive guild memory read failed", level=logging.WARNING)
@@ -371,6 +378,7 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
         notes=kept_notes,
         behavior=behavior,
         personality=personality,
+        facts=facts,
     )
 
 

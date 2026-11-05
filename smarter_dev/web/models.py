@@ -51,6 +51,11 @@ MAX_MEMORY_BLOB_CHARS = 2000
 # and how it wants people to feel about it, and changes least of the three.
 MAX_BEHAVIOR_CHARS = 750
 MAX_PERSONALITY_CHARS = 250
+# Facts are what stays true: about the bot itself, its setup or the server, and
+# what the owner or an admin decided or corrected. They outlive the dream's
+# usual forgetting, so they get a block of their own rather than a share of
+# the blob.
+MAX_FACTS_CHARS = 1000
 # One mid-term note is one thought, not a transcript excerpt.
 MAX_MEMORY_NOTE_CHARS = 500
 # Runaway guard on the ``remember`` tool: a day that wants more than this is a
@@ -5442,7 +5447,7 @@ class ChatAgentCompactionEvent(Base):
 class ChatAgentGuildMemory(Base):
     """What the chat agent remembers about one guild, long-term.
 
-    Exactly one row per guild holding three durable blocks, all loaded whole at
+    Exactly one row per guild holding four durable blocks, all loaded whole at
     every chat activation and edited only by the nightly dream session:
 
     - ``content`` — the memory: a markdown document of at most
@@ -5452,6 +5457,9 @@ class ChatAgentGuildMemory(Base):
       instructions for how to act in this guild.
     - ``personality`` — at most :data:`MAX_PERSONALITY_CHARS` characters about
       itself and how it wants others to feel about it.
+    - ``facts`` — at most :data:`MAX_FACTS_CHARS` characters of durable facts
+      about the bot, its setup and the server, and what the owner or an admin
+      decided.
 
     The public ``/chat-agent`` page (#103) shows the three blocks with every
     person masked (#104), only for the guild whose ``public_page_enabled`` is
@@ -5489,6 +5497,13 @@ class ChatAgentGuildMemory(Base):
         default="",
         server_default="",
         doc="Who the agent is and how it wants to be felt about; changed sparingly.",
+    )
+    facts: Mapped[str] = mapped_column(
+        String(MAX_FACTS_CHARS),
+        nullable=False,
+        default="",
+        server_default="",
+        doc="Durable facts about the bot, its setup and the server; never aged out.",
     )
     revision: Mapped[int] = mapped_column(
         Integer,
@@ -5622,6 +5637,9 @@ class ChatAgentMemoryRevision(Base):
     )
     personality: Mapped[str] = mapped_column(
         String(MAX_PERSONALITY_CHARS), nullable=False, default="", server_default=""
+    )
+    facts: Mapped[str] = mapped_column(
+        String(MAX_FACTS_CHARS), nullable=False, default="", server_default=""
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     notes_consumed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

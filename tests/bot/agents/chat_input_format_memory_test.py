@@ -388,3 +388,22 @@ def test_followup_re_emits_behavior_and_personality_with_the_blob():
 
     assert PERSONALITY in prompt
     assert BEHAVIOR in prompt
+
+
+def test_facts_render_labelled_between_behavior_and_the_blob():
+    prompt, _ = build_agent_call(
+        _initial(long_term_memory=BLOB, behavior=BEHAVIOR, facts="Server is Pine."), []
+    )
+
+    assert "<my-facts>\nServer is Pine.\n</my-facts>" in prompt
+    assert (
+        prompt.index("<how-i-behave>")
+        < prompt.index("<my-facts>")
+        < prompt.index("<what-i-remember>")
+    )
+
+
+def test_empty_facts_omit_their_tag():
+    prompt, _ = build_agent_call(_initial(long_term_memory=BLOB, facts="  "), [])
+
+    assert "my-facts" not in prompt

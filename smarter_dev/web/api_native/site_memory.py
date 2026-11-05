@@ -62,6 +62,7 @@ class SiteBlocksRead(BaseAPIModel):
     content: str | None = None
     behavior: str | None = None
     personality: str | None = None
+    facts: str | None = None
     last_dream_at: datetime | None = None
     revision: int | None = None
     memory_enabled: bool = True
@@ -85,6 +86,8 @@ class SitePublicRead(BaseAPIModel):
     personality: str
     behavior: str
     memory: str
+    # Additive (#454): an older client that ignores the field keeps working.
+    facts: str = ""
     last_dream_at: datetime | None
     revision: int
     # Whether each block has anything to show once masked, as the /chat-agent
@@ -92,6 +95,7 @@ class SitePublicRead(BaseAPIModel):
     has_personality: bool
     has_behavior: bool
     has_memory: bool
+    has_facts: bool = False
 
 
 def _discord_id(value: str) -> str:
@@ -184,9 +188,14 @@ class SiteMemoryController(Controller):
         if not memory.memory_enabled:
             return SiteBlocksRead(guild_id=guild_id, memory_enabled=False)
         gate = await load_gate(db_session)
-        texts = [memory.content or "", memory.behavior or "", memory.personality or ""]
+        texts = [
+            memory.content or "",
+            memory.behavior or "",
+            memory.personality or "",
+            memory.facts or "",
+        ]
         names = await blocked_member_names(db_session, gate, guild_id, *texts)
-        content, behavior, personality = (
+        content, behavior, personality, facts = (
             _without_blocked_lines(text, gate, names) or None for text in texts
         )
         return SiteBlocksRead(
@@ -194,6 +203,7 @@ class SiteMemoryController(Controller):
             content=content,
             behavior=behavior,
             personality=personality,
+            facts=facts,
             revision=memory.revision,
             last_dream_at=memory.last_dream_at,
         )

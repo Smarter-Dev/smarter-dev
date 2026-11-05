@@ -77,6 +77,14 @@
         <p>The behavior is not shown right now.</p>
         {% endif %}
 
+        {% if facts %}
+        <h3>Facts</h3>
+        <blockquote>{{ facts|markdown|safe }}</blockquote>
+        {% elif has_facts %}
+        <h3>Facts</h3>
+        <p>The facts are not shown right now.</p>
+        {% endif %}
+
         <h3>Memory</h3>
         {% if memory %}
         <blockquote>{{ memory|markdown|safe }}</blockquote>

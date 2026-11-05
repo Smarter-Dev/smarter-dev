@@ -256,9 +256,10 @@ class ChannelEngine:
     # text every turn rather than asking the cheap drafter to relay it.
     _long_term_memory: str | None = None
     _long_term_memory_updated_at: datetime | None = None
-    # The dream's two smaller durable blocks, held and re-emitted with the blob.
+    # The dream's smaller durable blocks, held and re-emitted with the blob.
     _behavior: str | None = None
     _personality: str | None = None
+    _facts: str | None = None
 
     # Set when a turn's compaction drained history. Compaction summarises away
     # the turn that carried ``<what-i-remember>``, which would silently amputate
@@ -629,6 +630,7 @@ class ChannelEngine:
                     self._long_term_memory_updated_at = snapshot.updated_at
                     self._behavior = snapshot.behavior
                     self._personality = snapshot.personality
+                    self._facts = snapshot.facts
                     agent_input = await build_initial_input(
                         bot=self.bot,
                         channel_id=self.channel_id,
@@ -639,6 +641,7 @@ class ChannelEngine:
                         long_term_memory_updated_at=snapshot.updated_at,
                         behavior=snapshot.behavior,
                         personality=snapshot.personality,
+                        facts=snapshot.facts,
                         memory_notes=list(snapshot.notes),
                         guild_events=await self._drain_guild_events(),
                     )
@@ -664,6 +667,7 @@ class ChannelEngine:
                         self._long_term_memory_updated_at = snapshot.updated_at
                         self._behavior = snapshot.behavior
                         self._personality = snapshot.personality
+                        self._facts = snapshot.facts
                         self._reemit_long_term_memory = True
                     reemit_memory = self._reemit_long_term_memory
                     self._reemit_long_term_memory = False
@@ -681,6 +685,7 @@ class ChannelEngine:
                         ),
                         behavior=self._behavior if reemit_memory else None,
                         personality=self._personality if reemit_memory else None,
+                        facts=self._facts if reemit_memory else None,
                         new_guild_events=await self._drain_guild_events(),
                     )
                     (
@@ -984,6 +989,7 @@ class ChannelEngine:
                         long_term_memory=self._long_term_memory,
                         behavior=self._behavior,
                         personality=self._personality,
+                        facts=self._facts,
                         meter=turn_meter,
                     )
             except Exception as error:
@@ -1888,6 +1894,7 @@ class ChannelEngine:
         long_term_memory: str | None = None,
         behavior: str | None = None,
         personality: str | None = None,
+        facts: str | None = None,
         meter: UsageMeter | None = None,
     ) -> tuple[TurnDecision, RequestTokens, list]:
         """Assemble a two-stage turn's output: run the tool-less primary WRITER on
@@ -1899,8 +1906,8 @@ class ChannelEngine:
         ``long_term_memory`` is the guild's memory blob, injected into the writer
         prompt verbatim from here rather than being routed through the brief: the
         drafter is a cheap model, and letting it paraphrase the persona would
-        rewrite who the bot is on every single turn. ``behavior`` and
-        ``personality`` travel the same verbatim route for the same reason. Returns
+        rewrite who the bot is on every single turn. ``behavior``,
+        ``personality`` and ``facts`` travel the same verbatim route for the same reason. Returns
         ``(decision, writer_usage, writer_messages)``: the writer run's tokens,
         cache counts included, and its messages, whose responses carry each
         request's own counts (a structured-output retry is another request).
@@ -1927,6 +1934,7 @@ class ChannelEngine:
                     long_term=long_term_memory,
                     behavior=behavior,
                     personality=personality,
+                    facts=facts,
                 ),
                 **run_through(meter, writer_agent),
             )
@@ -2505,6 +2513,7 @@ class ChannelEngine:
         self._long_term_memory_updated_at = None
         self._behavior = None
         self._personality = None
+        self._facts = None
         self._guild_memory_stale = True
 
     async def _privacy_purge_running(self) -> bool:

@@ -738,3 +738,80 @@ async def test_dream_consumes_site_originated_note(db_session):
     assert "shared a shader project on the site" in agent.prompts[0]
     assert "#site" in agent.prompts[0]
     assert await db_session.get(ChatAgentMemoryNote, note_id) is None
+
+
+# -- the facts block -----------------------------------------------------------
+
+
+async def _dream_facts(db_session, facts):
+    await _seed_blob(db_session, content="## Who's here\nkai (id 7)")
+    await _write_note(db_session, content=_KAI_NOTE)
+    agent = _StubDreamAgent(
+        output=DreamOutput(memory="## Who's here\nkai (id 7) ships.", facts=facts)
+    )
+    return await run_guild_dream(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=agent,
+    )
+
+
+async def test_dream_stores_a_facts_block_and_its_revision(db_session):
+    result = await _dream_facts(db_session, "The server's name is Pine.")
+
+    assert result.outcome is DreamOutcome.DREAMED
+    blob = await get_guild_memory_blob(db_session, _GUILD)
+    assert blob.facts == "The server's name is Pine."
+    revision = (await db_session.scalars(select(ChatAgentMemoryRevision))).one()
+    assert revision.facts == "The server's name is Pine."
+
+
+async def test_null_facts_keeps_the_block(db_session):
+    await _dream_facts(db_session, "The server's name is Pine.")
+    await _write_note(db_session, content="another", created_at=_CUTOFF + timedelta(hours=1))
+    await _write_note(db_session, content="a third", created_at=_CUTOFF + timedelta(hours=2))
+    later = _CUTOFF + timedelta(days=1)
+    agent = _StubDreamAgent(
+        output=DreamOutput(memory="## Who's here\nkai (id 7) ships.", facts=None)
+    )
+
+    await run_guild_dream(
+        db_session, guild_id=_GUILD, cutoff=later, dreamed_at=later, agent=agent
+    )
+
+    blob = await get_guild_memory_blob(db_session, _GUILD)
+    assert blob.facts == "The server's name is Pine."
+
+
+async def test_a_new_facts_block_replaces_the_old(db_session):
+    await _dream_facts(db_session, "The server's name is Pine.")
+    await _write_note(db_session, content="renamed", created_at=_CUTOFF + timedelta(hours=1))
+    later = _CUTOFF + timedelta(days=1)
+    agent = _StubDreamAgent(
+        output=DreamOutput(memory="## Who's here\nkai (id 7) ships.", facts="It is Oak now.")
+    )
+
+    await run_guild_dream(
+        db_session, guild_id=_GUILD, cutoff=later, dreamed_at=later, agent=agent
+    )
+
+    assert (await get_guild_memory_blob(db_session, _GUILD)).facts == "It is Oak now."
+
+
+async def test_over_limit_facts_are_refused_and_keep_the_night(db_session):
+    result = await _dream_facts(db_session, "x" * 1001)
+
+    assert result.outcome is DreamOutcome.KEPT_PREVIOUS
+    blob = await get_guild_memory_blob(db_session, _GUILD)
+    assert not blob.facts
+    assert (await db_session.scalars(select(ChatAgentMemoryNote.id))).all()
+
+
+def test_compose_blocks_asks_again_for_over_limit_facts():
+    context = DreamContext(previous_blob="", notes=["n"])
+    output = DreamOutput(memory="m", facts="x" * 1001)
+
+    with pytest.raises(ModelRetry):
+        chat_memory_dream.compose_blocks(output, context, retries_left=1)

@@ -781,6 +781,8 @@ async def test_public_has_flags_leak_nothing_about_hidden_text(
         "personality",
         "behavior",
         "memory",
+        "facts",
+        "has_facts",
         "last_dream_at",
         "revision",
         *HAS_FIELDS.values(),

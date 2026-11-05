@@ -84,6 +84,7 @@ from smarter_dev.web.crud import lock_guild_memory
 from smarter_dev.web.crud import prune_memory_revisions
 from smarter_dev.web.crud import record_memory_revision
 from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
+from smarter_dev.web.models import MAX_FACTS_CHARS
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.models import MAX_PERSONALITY_CHARS
@@ -102,15 +103,17 @@ PURGE_CALL_TIMEOUT_SECONDS = 900.0
 # changed while the agent was working.
 PURGE_SNAPSHOT_ATTEMPTS = 3
 
-BLOCK_NAMES = ("memory", "behavior", "personality")
+BLOCK_NAMES = ("memory", "behavior", "personality", "facts")
 _BLOCK_LIMITS = {
     "memory": MAX_MEMORY_BLOB_CHARS,
     "behavior": MAX_BEHAVIOR_CHARS,
     "personality": MAX_PERSONALITY_CHARS,
+    "facts": MAX_FACTS_CHARS,
 }
 _BLOCK_HEADINGS = {
     "personality": "# My personality",
     "behavior": "# My behavior",
+    "facts": "# My facts",
     "memory": "# What I remember",
 }
 
@@ -143,6 +146,7 @@ class PurgeContext:
     memory: str = ""
     behavior: str = ""
     personality: str = ""
+    facts: str = ""
     notes: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -171,6 +175,7 @@ class PurgedBlocks:
     memory: str
     behavior: str
     personality: str
+    facts: str
     changed_blocks: frozenset[str] = frozenset()
     rewritten_notes: dict[str, str] = field(default_factory=dict)
     dropped_notes: tuple[str, ...] = ()
@@ -197,7 +202,7 @@ PURGE_SYSTEM_PROMPT = (
 def build_purge_user_message(context: PurgeContext) -> str:
     names = ", ".join(context.target.names) or "(no names known)"
     parts = [f"# The person\n\nDiscord user ID {context.target.user_id}; names: {names}"]
-    for name in ("personality", "behavior", "memory"):
+    for name in ("personality", "behavior", "facts", "memory"):
         if name in context.editable:
             parts.append(f"{_BLOCK_HEADINGS[name]}\n\n{getattr(context, name)}")
     mentioning = [(i, c) for i, c in context.notes if context.target.mentions(c)]
@@ -321,6 +326,7 @@ def compose_purge(
         memory=final["memory"],
         behavior=final["behavior"],
         personality=final["personality"],
+        facts=final["facts"],
         changed_blocks=frozenset(changed),
         rewritten_notes=rewritten,
         dropped_notes=tuple(dropped),
@@ -330,7 +336,10 @@ def compose_purge(
 
 def _untouched(context: PurgeContext) -> PurgedBlocks:
     return PurgedBlocks(
-        memory=context.memory, behavior=context.behavior, personality=context.personality
+        memory=context.memory,
+        behavior=context.behavior,
+        personality=context.personality,
+        facts=context.facts,
     )
 
 
@@ -449,8 +458,8 @@ SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSessio
 class _Snapshot:
     """What a purge pass read, as plain values: the compare-and-set baseline."""
 
-    blob: tuple[str, str, str, int] | None = None
-    revisions: tuple[tuple[str, int, str, str, str], ...] = ()
+    blob: tuple[str, str, str, str, int] | None = None
+    revisions: tuple[tuple[str, int, str, str, str, str], ...] = ()
     notes: tuple[tuple[str, str], ...] = ()
 
     @property
@@ -458,19 +467,26 @@ class _Snapshot:
         return self.blob is None and not self.revisions and not self.notes
 
 
-def _blob_key(memory) -> tuple[str, str, str, int] | None:
+def _blob_key(memory) -> tuple[str, str, str, str, int] | None:
     if memory is None:
         return None
-    return (memory.content or "", memory.behavior or "", memory.personality or "", memory.revision)
+    return (
+        memory.content or "",
+        memory.behavior or "",
+        memory.personality or "",
+        memory.facts or "",
+        memory.revision,
+    )
 
 
-def _revision_key(revision) -> tuple[str, int, str, str, str]:
+def _revision_key(revision) -> tuple[str, int, str, str, str, str]:
     return (
         str(revision.id),
         revision.revision,
         revision.content or "",
         revision.behavior or "",
         revision.personality or "",
+        revision.facts or "",
     )
 
 
@@ -518,6 +534,7 @@ async def _plan_notes(
                 memory=first_context.memory,
                 behavior=first_context.behavior,
                 personality=first_context.personality,
+                facts=first_context.facts,
                 notes=batch,
             )
         else:
@@ -589,22 +606,27 @@ async def purge_guild_memory(
             memory=snapshot.blob[0] if snapshot.blob else "",
             behavior=snapshot.blob[1] if snapshot.blob else "",
             personality=snapshot.blob[2] if snapshot.blob else "",
+            facts=snapshot.blob[3] if snapshot.blob else "",
         )
         await _plan_notes(purge_agent, target, snapshot.notes, plan, first_context=live)
         # Revisions are copies of the same memory: each distinct one that
         # mentions the target gets its own pass, one identical to the live
         # blocks reuses the live result, and one that does not mention the
         # target is never sent and never written.
-        by_blocks: dict[tuple[str, str, str], PurgedBlocks] = {
-            (live.memory, live.behavior, live.personality): plan.blocks
+        by_blocks: dict[tuple[str, str, str, str], PurgedBlocks] = {
+            (live.memory, live.behavior, live.personality, live.facts): plan.blocks
         }
-        for rev_id, rev_number, content, behavior, personality in snapshot.revisions:
+        for rev_id, rev_number, content, behavior, personality, facts in snapshot.revisions:
             context = PurgeContext(
-                target=target, memory=content, behavior=behavior, personality=personality
+                target=target,
+                memory=content,
+                behavior=behavior,
+                personality=personality,
+                facts=facts,
             )
             if not context.editable:
                 continue
-            key = (content, behavior, personality)
+            key = (content, behavior, personality, facts)
             if key not in by_blocks:
                 result, calls = await _purge_once(purge_agent, context)
                 plan.model_calls += calls
@@ -665,11 +687,13 @@ async def purge_guild_memory(
                     revision.content = purged.memory
                     revision.behavior = purged.behavior
                     revision.personality = purged.personality
+                    revision.facts = purged.facts
             if blocks_changed and memory is not None:
                 model_name = os.getenv(DREAM_MODEL_ENV_VAR, DEFAULT_DREAM_MODEL)
                 memory.content = plan.blocks.memory
                 memory.behavior = plan.blocks.behavior
                 memory.personality = plan.blocks.personality
+                memory.facts = plan.blocks.facts
                 memory.revision = memory.revision + 1
                 memory.model_name = model_name
                 memory.updated_at = now
@@ -680,6 +704,7 @@ async def purge_guild_memory(
                     content=plan.blocks.memory,
                     behavior=plan.blocks.behavior,
                     personality=plan.blocks.personality,
+                    facts=plan.blocks.facts,
                     revision=memory.revision,
                     notes_consumed=0,
                     model_name=model_name,
