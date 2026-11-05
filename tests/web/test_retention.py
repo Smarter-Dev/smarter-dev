@@ -750,6 +750,58 @@ class TestChatAgentMemoryIsExempt:
     def test_table_has_no_scrubber(self, table_name):
         assert table_name not in SCRUBBERS
 
+    @staticmethod
+    def _note(guild_id, created_at):
+        return ChatAgentMemoryNote(
+            guild_id=guild_id,
+            channel_id="222",
+            channel_name="dev-help",
+            content="a note",
+            engagement_id=uuid4(),
+            created_at=created_at,
+            updated_at=created_at,
+        )
+
+    async def test_notes_of_unowned_guilds_go_after_two_days(
+        self, db_session, monkeypatch
+    ):
+        monkeypatch.setenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", "111, 333")
+        old = NOW - timedelta(days=2, minutes=1)
+        recent = NOW - timedelta(days=1)
+        db_session.add_all(
+            [
+                self._note("111", old),  # owned: the dream's to delete
+                self._note("999", old),  # unowned, past two days: deleted
+                self._note("999", recent),  # unowned, inside two days: kept
+            ]
+        )
+        await db_session.flush()
+
+        result = await run_retention_sweep(db_session, now=NOW)
+
+        left = (await db_session.execute(select(ChatAgentMemoryNote))).scalars().all()
+        assert sorted(n.guild_id for n in left) == ["111", "999"]
+        assert {n.guild_id: n.created_at.replace(tzinfo=UTC) for n in left} == {
+            "111": old,
+            "999": recent,
+        }
+        assert result.counts["unowned_memory_notes"] == 1
+
+    @pytest.mark.parametrize("value", [None, "", " , "])
+    async def test_no_owned_guilds_configured_deletes_nothing(
+        self, db_session, monkeypatch, value
+    ):
+        if value is None:
+            monkeypatch.delenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", raising=False)
+        else:
+            monkeypatch.setenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", value)
+        db_session.add(self._note("999", NOW - timedelta(days=30)))
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        assert len((await db_session.execute(select(ChatAgentMemoryNote))).all()) == 1
+
     def test_exempt_tables_carry_no_purge_marker(self):
         for model in (
             ChatAgentGuildMemory,
@@ -758,7 +810,8 @@ class TestChatAgentMemoryIsExempt:
         ):
             assert not hasattr(model, "content_purged_at")
 
-    async def test_sweep_leaves_stale_memory_untouched(self, db_session):
+    async def test_sweep_leaves_stale_memory_untouched(self, db_session, monkeypatch):
+        monkeypatch.setenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", "111")
         db_session.add(
             ChatAgentGuildMemory(
                 guild_id="111",

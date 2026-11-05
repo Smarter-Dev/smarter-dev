@@ -58,8 +58,11 @@ rather than message text it read: no verbatim quotes, no private or sensitive
 detail, only who these people are to it. Scrubbing that on the retention
 window would not protect anyone's words, it would just give the bot amnesia
 several times a day. The mid-term notes are exempt for a different reason — they are
-deleted outright by the nightly dream session that consumes them, so they live
-well under a day by construction and never reach a retention cutoff. Adding a
+deleted outright by the nightly dream that consumes them, so they live
+well under a day by construction and never reach a retention cutoff. The one
+exception is a guild the proactive agent does not own
+(``PROACTIVE_AGENT_EXTERNAL_GUILD_IDS``): no dream runs there, so
+``delete_unowned_memory_notes`` removes its notes after two days. Adding a
 scrubber for any of the three needs the same explicit sign-off the exemption
 got, plus a matching row in ``docs/data-retention.md``.
 
@@ -81,8 +84,9 @@ skipped, so re-running the sweep costs one indexed lookup per table.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import case, delete, exists, or_, select, update
@@ -97,6 +101,7 @@ from smarter_dev.web.models import (
     ChatAgentCompactionEvent,
     ChatAgentEngagement,
     ChatAgentError,
+    ChatAgentMemoryNote,
     ChatAgentTurn,
     ForumAgentResponse,
     HandlerRun,
@@ -347,6 +352,33 @@ async def scrub_moderation_actions(
         now=now,
         values={"ai_context_summary": None},
     )
+
+
+UNOWNED_NOTE_MAX = timedelta(days=2)
+
+
+async def delete_unowned_memory_notes(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete chat memory notes no dream will ever fold in.
+
+    The agent-run dream only covers the guilds in
+    ``PROACTIVE_AGENT_EXTERNAL_GUILD_IDS``; for any other guild the notes would
+    pile up with no consumer. Ignores the in-flight ``cutoff``. Does nothing
+    when the variable is unset or empty, so a job without the ConfigMap cannot
+    mistake every guild for an unowned one.
+    """
+    raw = os.getenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", "")
+    owned = {value.strip() for value in raw.split(",") if value.strip()}
+    if not owned:
+        return 0
+    result = await session.execute(
+        delete(ChatAgentMemoryNote).where(
+            ChatAgentMemoryNote.guild_id.not_in(owned),
+            ChatAgentMemoryNote.created_at <= now - UNOWNED_NOTE_MAX,
+        )
+    )
+    return result.rowcount or 0
 
 
 async def delete_spam_ring_incidents(
@@ -630,6 +662,7 @@ SCRUBBERS: dict[str, Any] = {
     "chat_agent_errors": scrub_chat_agent_errors,
     "forum_agent_responses": scrub_forum_agent_responses,
     "moderation_actions": scrub_moderation_actions,
+    "unowned_memory_notes": delete_unowned_memory_notes,
     "spam_ring_incidents": delete_spam_ring_incidents,
     "moderation_incident_entries": prune_moderation_incident_entries,
     "moderation_outbox": prune_moderation_outbox,
