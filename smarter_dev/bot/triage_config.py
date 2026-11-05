@@ -7,7 +7,7 @@ role, and each destructive triage tool reads it again right before it acts
 run that is already going.
 
 ``off`` does not run, ``evaluate`` runs with no destructive tool and posts
-nothing public, ``enforce`` with the policy's ``enabled_tools`` (an empty list
+no rule citations, ``enforce`` with the policy's ``enabled_tools`` (an empty list
 is no destructive tool) and, when the guild has rules, rule citations.
 The report goes to ``triage.response_channel_id``, or to the channel the ping
 came from when that is empty; the protected roles are the policy's. The caps

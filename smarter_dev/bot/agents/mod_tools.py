@@ -265,11 +265,11 @@ def create_moderation_tools(
             action joins its incident. Defaults to one built from the ids.
         rules: The guild's rules, as the model was shown them. Empty offers
             no ``cite_rule``.
+        context_messages: The messages the model was shown; the only ones
+            ``cite_rule`` may cite.
         enforcing: Triage is in enforce mode. ``cite_rule`` posts publicly, so
             it is offered only then (and re-checked at call time), whatever
             ``enabled_tools`` says.
-        context_messages: The messages the model was shown; the only ones
-            ``cite_rule`` may cite.
 
     Returns:
         Tuple of (tools list, ActionTracker)

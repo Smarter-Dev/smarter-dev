@@ -557,16 +557,16 @@ SCENARIOS: list[Scenario] = [
         name="allowed_self_promo",
         description="Member shares their project where the rules allow it",
         context_messages=[
-            _msg("Maker", "Just shipped my CLI tool for log parsing, here is the repo https://github.com/maker/logparse — feedback welcome in #showcase!", 2, "13001"),
+            _msg("Maker", "[posted in #showcase] Just shipped my CLI tool for log parsing, here is the repo https://github.com/maker/logparse", 2, "13001"),
             _msg("Dev1", "nice, will try it", 1, "13002"),
         ],
-        trigger_message="@Moderator is it okay that Maker posted a link to their own project?",
+        trigger_message="@Moderator is it okay that Maker posted a link to their own project in #showcase?",
         trigger_author="Dev1",
         guild_instructions="Sharing your own work in #showcase is allowed. Remove only what the rules forbid.",
         expected_action="message_only",
         expected_target_id=None,
         severity="high",
-        notes="Self-promotion the server rules allow — false positives are worse than false negatives",
+        notes="Self-promotion in the #showcase channel the rules allow — false positives are worse than false negatives",
     ),
 
     # ── 14. Help ping, project link only in context — no action ──────

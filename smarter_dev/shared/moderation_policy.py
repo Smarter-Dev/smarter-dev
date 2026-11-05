@@ -375,8 +375,8 @@ class Triage(_Section):
     """The staff-ping review: a message that mentions a monitored role.
 
     ``enforce`` runs it with ``enabled_tools`` and posts rule citations when
-    the guild has rules; ``evaluate`` runs it with no destructive tool and no
-    public post (it still assesses and reports); ``off`` does not run
+    the guild has rules; ``evaluate`` runs it with no destructive tool and posts no
+    rule citations (it still assesses and reports); ``off`` does not run
     it."""
 
     mode: Mode = OFF

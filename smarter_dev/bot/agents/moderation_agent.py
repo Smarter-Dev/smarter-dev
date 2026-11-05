@@ -101,7 +101,8 @@ async def _enforce_channel_message(
         parts.append(f"Deleted message {d['message_id']}: {d['reason']}")
     for c in tracker.cites:
         listed = ", ".join(str(index) for index in c["rule_indexes"])
-        parts.append(f"Cited rule(s) {listed} on message {c['message_id']}: {c['reason']}")
+        verb = "Possibly cited" if c.get("possibly_applied") else "Cited"
+        parts.append(f"{verb} rule(s) {listed} on message {c['message_id']}: {c['reason']}")
     actions_summary = "\n".join(parts) if parts else "Actions were taken."
 
     try:

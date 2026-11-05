@@ -965,7 +965,7 @@ def _cite_tool(discord, **kw):
     return {t.name: t.function for t in tools}, tracker
 
 
-async def test_evaluate_mode_offers_no_cite_tool_and_posts_nothing(discord, stored):
+async def test_evaluate_mode_offers_no_cite_tool_and_posts_no_citation(discord, stored):
     seen: list = []
 
     _, tracker = await _triage_incident(
