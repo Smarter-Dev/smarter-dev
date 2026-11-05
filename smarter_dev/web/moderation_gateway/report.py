@@ -229,24 +229,32 @@ def _effect_words(guild_id: str, op: ReportOperation) -> str:
     return op.kind
 
 
-def _done_words(guild_id: str, op: ReportOperation, held: set[str]) -> str:
+def _done_words(guild_id: str, op: ReportOperation, held: dict[str, int]) -> str:
     """What happened, for a confirmed effect. ``held``: targets whose review
-    hold is still on, so a longer timeout upgrades it and a lift ends it."""
+    hold is still on (with its length), so a longer timeout upgrades it and a
+    lift ends it."""
     who = _who(op)
     until = f" (until <t:{int(op.expires_at)}:f>)" if op.expires_at else ""
     duration = _span(op.duration_seconds)
     if op.kind == t.TIMEOUT:
         if op.provisional:
-            held.add(op.target_user_id)
+            held[op.target_user_id] = op.duration_seconds or 0
             return f"Held {who} for {duration}"
         if op.target_user_id in held:
-            held.discard(op.target_user_id)
+            hold = held[op.target_user_id]
+            if (op.duration_seconds or 0) < hold:
+                # One timeout per member: the longer hold keeps them held.
+                return (
+                    f"Timed out {who} for {duration}; the {_span_adjective(hold)} hold "
+                    f"keeps them held{until}"
+                )
+            held.pop(op.target_user_id)
             adjective = _span_adjective(op.duration_seconds)
             return f"Hold on {who} upgraded to a {adjective} timeout{until}"
         return f"Timed out {who} for {duration}{until}"
     if op.kind == t.UNTIMEOUT:
         if op.target_user_id in held:
-            held.discard(op.target_user_id)
+            held.pop(op.target_user_id)
             return f"Hold on {who} lifted"
         return f"Timeout on {who} lifted"
     if op.kind in t.CLEANUP_KINDS:
@@ -372,7 +380,7 @@ def _lead(facts: ReportFacts, reasons: list[str]) -> str:
 
 
 def _summary(
-    facts: ReportFacts, reasons: list[str], pinned: int, held: set[str]
+    facts: ReportFacts, reasons: list[str], pinned: int, held: dict[str, int]
 ) -> str:
     """One line: what it was, what was done, whether the member was told,
     and their history."""
@@ -401,6 +409,8 @@ def _summary(
             parts.append(f"{len(targets)} members {verb}")
         elif kind == t.TIMEOUT:
             longest = max(op.duration_seconds or 0 for op in ops)
+            # A hold still on outlasts a shorter timeout: one per member.
+            longest = max(longest, held.get(next(iter(targets)), 0))
             parts.append(f"{verb} for {_span(longest)}")
         else:
             parts.append(verb)
@@ -545,7 +555,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     order = 0
     effects: list[_Line] = []
     given: list[str] = []
-    held: set[str] = set()
+    held: dict[str, int] = {}
     posts = deleted_posts(facts)
     for op in facts.operations:
         if _idle(op):

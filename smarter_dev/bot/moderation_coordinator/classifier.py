@@ -14,7 +14,7 @@ one request on one backend (:func:`choose_backend`):
 Never Jev then Haiku, and one request for the same revision, with a single
 exception: when Haiku refuses a request that carried other members' messages,
 the author's own labels are asked once more without them
-(:meth:`Classifier._ask_again_alone`), within the budget:
+(:meth:`ModerationClassifier._ask_again_alone`), within the budget:
 
 * no tools, no web search, no tool loop (``UsageLimits(request_limit=1)``);
 * no retries at any layer: pydantic-ai ``retries=0``, the Anthropic SDK and
