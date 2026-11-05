@@ -1,7 +1,7 @@
 """Public page about the chat agent at /chat-agent (#103).
 
 The prose (the two modes, how memory and dreaming work, opting out) lives in
-the template. Below it the page shows the agent's personality, behavior and
+the template. Below it the page shows the agent's personality, behavior, facts and
 memory for the one guild an admin has switched the page on for, with the time
 of its last dream. The page 404s while no guild has it on.
 
@@ -78,9 +78,11 @@ async def chat_agent_page(request: Request, db_session: AsyncSession) -> Templat
             "page_title": _TITLE,
             "personality": blocks["personality"].shown(viewer_ids),
             "behavior": blocks["behavior"].shown(viewer_ids),
+            "facts": blocks["facts"].shown(viewer_ids),
             "memory": blocks["memory"].shown(viewer_ids),
             "has_personality": bool(blocks["personality"].masked),
             "has_behavior": bool(blocks["behavior"].masked),
+            "has_facts": bool(blocks["facts"].masked),
             "has_memory": bool(blocks["memory"].masked),
             "last_dream_at": memory.last_dream_at,
             "privacy_path": PRIVACY_PATH,

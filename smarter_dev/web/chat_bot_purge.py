@@ -1181,7 +1181,7 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
 
     for memory in (await session.scalars(select(ChatAgentGuildMemory))).all():
         checked += 1
-        for field_name in ("content", "behavior", "personality"):
+        for field_name in ("content", "behavior", "personality", "facts"):
             text = getattr(memory, field_name) or ""
             hit = _hit(
                 "chat_agent_guild_memory",
@@ -1204,7 +1204,12 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
     for revision in (await session.scalars(select(ChatAgentMemoryRevision))).all():
         checked += 1
         ids, names = target.value_hits(
-            [revision.content or "", revision.behavior or "", revision.personality or ""]
+            [
+                revision.content or "",
+                revision.behavior or "",
+                revision.personality or "",
+                revision.facts or "",
+            ]
         )
         hit = _hit(
             "chat_agent_memory_revisions",

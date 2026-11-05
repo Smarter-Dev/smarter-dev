@@ -119,9 +119,9 @@ async def test_the_dry_run_counts_and_writes_nothing(db_session):
     plan = await plan_guild(db_session, _GUILD)
     await db_session.rollback()
 
-    assert plan.converted == {"content": 2, "behavior": 1, "personality": 0, "notes": 1}
+    assert plan.converted == {"content": 2, "behavior": 1, "personality": 0, "facts": 0, "notes": 1}
     # "kai cheered" in the note is still a known name outside a tag.
-    assert plan.untagged == {"content": 0, "behavior": 0, "personality": 0, "notes": 1}
+    assert plan.untagged == {"content": 0, "behavior": 0, "personality": 0, "facts": 0, "notes": 1}
     assert not plan.refused
     db_session.expire_all()
     memory = await get_guild_memory_blob(db_session, _GUILD)

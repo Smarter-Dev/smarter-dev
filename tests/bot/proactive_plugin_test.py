@@ -2245,3 +2245,13 @@ async def test_reaction_in_disabled_channel_is_ignored(wake_setup):
     await proactive.on_guild_reaction(_reaction_event())
 
     assert wake_setup.runtime.guild_state_for(2).queue.items == []
+
+
+def test_render_memory_block_includes_facts_and_counts_them_as_content():
+    block = proactive.render_memory_block(
+        long_term_memory=None,
+        long_term_updated_at=None,
+        notes=(),
+        facts="Server is Pine.",
+    )
+    assert "FACTS" in block and "Server is Pine." in block

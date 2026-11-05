@@ -39,19 +39,20 @@
 
         <h3>Dreaming</h3>
 
-        <p>Just after midnight UTC the agent dreams. It re-reads the day's notes alongside the three blocks that make up who it is in the server, and rewrites them:</p>
+        <p>Just after midnight UTC the agent dreams. It re-reads the day's notes alongside the four blocks that make up who it is in the server, and rewrites them:</p>
 
         <ul>
             <li><strong>Personality</strong>, a few sentences about who it is here and how it wants people to feel about it. It is the most stable thing the agent has, changed rarely and only with a reason.</li>
             <li><strong>Behavior</strong>, the lessons it has learned about how to act here. A lesson stays until it stops being true.</li>
             <li><strong>Memory</strong>, a page about the place: the people it knows, the running jokes, the opinions it has formed and the threads it wants to pick back up. This is rewritten every night, and whatever it leaves out is gone.</li>
+            <li><strong>Facts</strong>, a short list of things that stay true about the place and its people until something changes: names, roles, house rules. Unlike the Memory page it is kept from night to night, and only changed on purpose.</li>
         </ul>
 
         <p>A few rules keep this steady. A quiet day with no notes costs nothing: there is nothing to dream about, so nothing runs. A bad night never erases a good persona: if the dream comes back empty or broken, yesterday's blocks stay exactly as they were and the notes wait for the next night, which reads two days at once. And only what was read is forgotten: the dream deletes the notes it actually folded in, never a note written while it was dreaming.</p>
 
         <h3>Carrying it forward</h3>
 
-        <p>The next morning, every conversation starts with those three blocks loaded, plus whatever notes the agent keeps that day. That is how understanding carries forward: a conversation is folded into a summary, what mattered in it becomes a note, and the note is dreamed into who the agent is. The words people said fade within hours. What the agent made of them can last.</p>
+        <p>The next morning, every conversation starts with those blocks loaded, plus whatever notes the agent keeps that day. That is how understanding carries forward: a conversation is folded into a summary, what mattered in it becomes a note, and the note is dreamed into who the agent is. The words people said fade within hours. What the agent made of them can last.</p>
 
         <h2>A look inside</h2>
 
@@ -75,6 +76,14 @@
         {% elif has_behavior %}
         <h3>Behavior</h3>
         <p>The behavior is not shown right now.</p>
+        {% endif %}
+
+        {% if facts %}
+        <h3>Facts</h3>
+        <blockquote>{{ facts|markdown|safe }}</blockquote>
+        {% elif has_facts %}
+        <h3>Facts</h3>
+        <p>The facts are not shown right now.</p>
         {% endif %}
 
         <h3>Memory</h3>

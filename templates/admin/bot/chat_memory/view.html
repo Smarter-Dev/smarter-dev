@@ -21,7 +21,7 @@
 
         <p class="sk-text-muted">
             The chat agent's three memory layers for this guild. The long-term layer is three
-            blocks the nightly dream edits: personality, behavior and memory. Short-term memory is the
+            blocks the nightly dream edits: personality, behavior, facts and memory. Short-term memory is the
             conversation itself &mdash; see
             <a href="/admin/chat-conversations?guild_id={{ guild.id }}">its conversations</a>.
         </p>
@@ -29,6 +29,7 @@
         {% for label, role, text, limit in [
             ("Personality", "Who the agent is here and how it wants people to feel about it. Changed sparingly.", blob.personality if blob else "", 250),
             ("Behavior", "What the agent has learned about how to act here. Generally retained.", blob.behavior if blob else "", 750),
+            ("Facts", "Durable facts about the agent, its setup and the server. Kept until superseded or no longer true.", blob.facts if blob else "", 1000),
         ] %}
         <div class="sk-panel" style="margin-bottom:1.5rem;">
             <div class="sk-panel-head">{{ label }} <span class="sk-text-muted" style="font-size:0.85rem;">{{ (text or "")|length }} / {{ limit }}</span></div>
@@ -85,7 +86,7 @@
                     described well enough to recognise.
                 </p>
                 {% if public_blocks %}
-                {% for key, label in [("personality", "Personality"), ("behavior", "Behavior"), ("memory", "Memory")] %}
+                {% for key, label in [("personality", "Personality"), ("behavior", "Behavior"), ("facts", "Facts"), ("memory", "Memory")] %}
                 {% set block = public_blocks[key] %}
                 <h4 style="margin:1rem 0 0.5rem;">{{ label }}</h4>
                 {% if block.problem %}
@@ -123,7 +124,7 @@
 
                 <h4 style="margin:1.5rem 0 0.5rem;">Tag this name</h4>
                 <p class="sk-text-muted" style="font-size:0.85rem;">
-                    Turns every whole-word use of a name in the personality, behavior and memory blocks into a member
+                    Turns every whole-word use of a name in the personality, behavior, facts and memory blocks into a member
                     tag, so the page masks it. Leave the Discord id empty for someone the agent has no id for.
                     Tags already there and the notes are left alone; the change is recorded in the dream history.
                 </p>
@@ -197,6 +198,10 @@
                     {% if rev.behavior %}
                     <p style="margin:0.5rem 0 0;"><strong>Behavior</strong></p>
                     <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.25rem; white-space:pre-wrap;">{{ rev.behavior }}</div>
+                    {% endif %}
+                    {% if rev.facts %}
+                    <p style="margin:0.5rem 0 0;"><strong>Facts</strong></p>
+                    <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.25rem; white-space:pre-wrap;">{{ rev.facts }}</div>
                     {% endif %}
                     <p style="margin:0.5rem 0 0;"><strong>Memory</strong></p>
                     <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.25rem;">

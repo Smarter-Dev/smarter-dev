@@ -63,6 +63,7 @@ async def build_initial_input(
     long_term_memory_updated_at: datetime | None = None,
     behavior: str | None = None,
     personality: str | None = None,
+    facts: str | None = None,
     memory_notes: list[MemoryNote] | None = None,
     guild_events: list[GuildEventView] | None = None,
 ) -> InitialAgentInput:
@@ -75,7 +76,7 @@ async def build_initial_input(
 
     The persistent-memory arguments are the engine's activation read, passed
     through unchanged: ``long_term_memory`` is the guild's blob (with the date
-    its dream wrote it), ``behavior`` and ``personality`` its two smaller
+    its dream wrote it), ``behavior``, ``personality`` and ``facts`` its smaller
     durable blocks, ``memory_notes`` are the thoughts the agent kept since
     midnight UTC, and ``guild_events`` is the full rolling hour of what the
     bot's own account did. All are optional — an activation with nothing to
@@ -121,6 +122,7 @@ async def build_initial_input(
         long_term_memory_updated_at=long_term_memory_updated_at,
         behavior=behavior,
         personality=personality,
+        facts=facts,
         memory_notes=list(memory_notes or []),
         guild_events=list(guild_events or []),
     )
@@ -137,6 +139,7 @@ async def build_followup_input(
     long_term_memory_updated_at: datetime | None = None,
     behavior: str | None = None,
     personality: str | None = None,
+    facts: str | None = None,
     new_guild_events: list[GuildEventView] | None = None,
 ) -> FollowupAgentInput:
     """Build the input for a follow-up turn inside an active engagement.
@@ -147,7 +150,7 @@ async def build_followup_input(
 
     ``new_guild_events`` is only what the bot's account did since the last turn —
     the full hour went out at activation and is still in history. ``long_term_memory``
-    (with ``behavior`` and ``personality``) is normally ``None`` for the same
+    (with ``behavior``, ``personality`` and ``facts``) is normally ``None`` for the same
     reason; the engine sets them only to re-emit the blocks after a compaction
     drained the history that carried them.
     """
@@ -170,6 +173,7 @@ async def build_followup_input(
         long_term_memory_updated_at=long_term_memory_updated_at,
         behavior=behavior,
         personality=personality,
+        facts=facts,
         new_guild_events=list(new_guild_events or []),
     )
 

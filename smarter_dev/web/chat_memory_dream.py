@@ -2,7 +2,7 @@
 
 Once a day, just after midnight UTC, the bot re-reads everything it chose to
 keep during the previous day (``chat_agent_memory_notes``) alongside the
-three durable blocks it wrote before, and decides what it still wants to be
+four durable blocks it wrote before, and decides what it still wants to be
 true about itself in that server:
 
 - **memory** — at most :data:`~smarter_dev.web.models.MAX_MEMORY_BLOB_CHARS`
@@ -11,7 +11,11 @@ true about itself in that server:
   characters of learned instructions for how to act, generally retained;
 - **personality** — at most
   :data:`~smarter_dev.web.models.MAX_PERSONALITY_CHARS` characters about
-  itself, changed deliberately and rarely.
+  itself, changed deliberately and rarely;
+- **facts** — at most :data:`~smarter_dev.web.models.MAX_FACTS_CHARS`
+  characters of durable facts about itself, its setup and the server, and what
+  the owner or an admin decided. Never aged out; revised only when superseded,
+  contradicted or no longer true.
 
 Every block names a person only as a tag, ``<userid:username>`` (#104), so
 the public ``/chat-agent`` page can mask them all. Text the model writes
@@ -21,7 +25,7 @@ and logged, because a username that is also a common word must not freeze the
 memory, and the page masks a known name left outside a tag. Blocks the dream
 leaves alone keep whatever form they were written in.
 
-Behavior and personality are only ever replaced by an explicit, valid
+Behavior, personality and facts are only ever replaced by an explicit, valid
 revision: an omitted field keeps the block verbatim. Only the notes the dream
 actually read are deleted.
 
@@ -97,6 +101,7 @@ from smarter_dev.web.crud import prune_memory_revisions
 from smarter_dev.web.crud import record_memory_revision
 from smarter_dev.web.crud import upsert_guild_memory_blob
 from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
+from smarter_dev.web.models import MAX_FACTS_CHARS
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
@@ -163,6 +168,7 @@ class DreamOutput(BaseModel):
     # ``None`` (and an omitted field) keeps the block verbatim; text replaces it.
     behavior: str | None = None
     personality: str | None = None
+    facts: str | None = None
     personality_reason: str | None = None
 
 
@@ -172,6 +178,7 @@ class DreamContext:
     notes: list[str]
     previous_behavior: str = ""
     previous_personality: str = ""
+    previous_facts: str = ""
     # The blocked-users list as the dream read it (#100); None checks nothing.
     gate: OptOutGate | None = None
     # Each block's limit tonight: its column's, less the room the lines
@@ -179,17 +186,19 @@ class DreamContext:
     memory_limit: int = MAX_MEMORY_BLOB_CHARS
     behavior_limit: int = MAX_BEHAVIOR_CHARS
     personality_limit: int = MAX_PERSONALITY_CHARS
+    facts_limit: int = MAX_FACTS_CHARS
     # Members the dream knows of, who may be named only in a tag (#104).
     member_names: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
 class DreamBlocks:
-    """The three durable blocks a night's output resolves to."""
+    """The four durable blocks a night's output resolves to."""
 
     memory: str
     behavior: str
     personality: str
+    facts: str = ""
     # What was refused on the last attempt. Any refusal means the memory half
     # of the output may assume an edit that never happened, so none of it saves.
     refusals: tuple[str, ...] = ()
@@ -414,7 +423,7 @@ def _carried_by_a_block(trait: str, blocks: tuple[str, ...]) -> bool:
 def compose_blocks(
     output: DreamOutput, context: DreamContext, *, retries_left: int
 ) -> DreamBlocks:
-    """Resolve all three blocks for one night's output.
+    """Resolve all four blocks for one night's output.
 
     Behavior and personality resolve first, because an Identity & Voice trait
     may leave memory only when its text is in one of the blocks as resolved.
@@ -433,6 +442,14 @@ def compose_blocks(
     )
     personality = resolve_personality(
         output, context, retries_left=retries_left, refusals=refusals
+    )
+    facts = resolve_block(
+        output.facts,
+        context.previous_facts,
+        name="facts",
+        limit=context.facts_limit,
+        retries_left=retries_left,
+        refusals=refusals,
     )
     moved_traits: list[str] = []
     # A trait listed twice is one move; removing it twice would fail the dream.
@@ -457,12 +474,14 @@ def compose_blocks(
         context,
         behavior=behavior,
         personality=personality,
+        facts=facts,
         retries_left=retries_left,
     )
     return DreamBlocks(
         memory=memory,
         behavior=behavior,
         personality=personality,
+        facts=facts,
         refusals=tuple(refusals),
     )
 
@@ -478,12 +497,17 @@ MAX_NAMES_IN_RETRY = 5
 
 
 def untagged_names(
-    output: DreamOutput, context: DreamContext, *, behavior: str, personality: str
+    output: DreamOutput,
+    context: DreamContext,
+    *,
+    behavior: str,
+    personality: str,
+    facts: str = "",
 ) -> dict[str, list[str]]:
     """Per block, the known members tonight's own writing names outside a tag.
 
     Only what the model wrote tonight is read: the memory sections, new
-    identity traits, and behavior or personality where it revised them. What
+    identity traits, and behavior, personality or facts where it revised them. What
     code carries over (identity traits, an unchanged block, withheld lines)
     keeps whatever form it was stored in. The names are every one the dream
     knows of plus every one tonight's output gives a person.
@@ -496,6 +520,7 @@ def untagged_names(
         "personality": (
             personality if personality != context.previous_personality else ""
         ),
+        "facts": facts if facts != context.previous_facts else "",
     }
     names = context.member_names | member_names(*written.values())
     found = {block: names_outside_tags(text, names) for block, text in written.items()}
@@ -508,6 +533,7 @@ def check_member_tags(
     *,
     behavior: str,
     personality: str,
+    facts: str = "",
     retries_left: int,
 ) -> None:
     """Ask again for a block that names a known member outside a tag.
@@ -517,7 +543,7 @@ def check_member_tags(
     night, and the public page hides a block that still names someone.
     """
     found = untagged_names(
-        output, context, behavior=behavior, personality=personality
+        output, context, behavior=behavior, personality=personality, facts=facts
     )
     if not found:
         return
@@ -647,6 +673,7 @@ def build_dream_user_message(
     day: date,
     previous_behavior: str = "",
     previous_personality: str = "",
+    previous_facts: str = "",
 ) -> str:
     """Assemble the night's user message: yesterday's self, then today.
 
@@ -658,14 +685,16 @@ def build_dream_user_message(
     remembered = previous_blob.strip()
     behavior = previous_behavior.strip()
     personality = previous_personality.strip()
+    facts = previous_facts.strip()
     today = "\n".join(note_lines)
     sections = [
         f"# My personality\n\n{personality or EMPTY_BLOCK_PLACEHOLDER}",
         f"# My behavior\n\n{behavior or EMPTY_BLOCK_PLACEHOLDER}",
+        f"# My facts\n\n{facts or EMPTY_BLOCK_PLACEHOLDER}",
         f"# What I remember so far\n\n{remembered or EMPTY_BLOB_PLACEHOLDER}",
         f"# Today — {day.isoformat()} UTC\n\n{today}",
     ]
-    if not (remembered or behavior or personality):
+    if not (remembered or behavior or personality or facts):
         sections.append(FIRST_NIGHT_NUDGE)
     return "\n\n".join(sections)
 
@@ -724,7 +753,7 @@ def names_a_blocked_id(blocks: DreamBlocks, gate: OptOutGate | None) -> bool:
         return False
     return any(
         gate.redact(block) != block
-        for block in (blocks.memory, blocks.behavior, blocks.personality)
+        for block in (blocks.memory, blocks.behavior, blocks.personality, blocks.facts)
     )
 
 
@@ -783,28 +812,41 @@ def get_dream_agent() -> Agent[DreamContext, DreamOutput]:
 # -- one guild -----------------------------------------------------------------
 
 
-async def run_guild_dream(
-    session: AsyncSession,
-    *,
-    guild_id: str,
-    cutoff: datetime,
-    dreamed_at: datetime,
-    agent: DreamAgent | None = None,
-    meter: UsageMeter | None = None,
-) -> GuildDreamResult:
-    """Dream one guild's night inside one transaction, in this exact order.
+@dataclass(frozen=True)
+class DreamInputs:
+    """Everything one guild's night reads, as :func:`prepare_guild_dream` found it.
 
-    Load the three blocks and every note written before ``cutoff`` (oldest first) →
-    stamp and stop if there are none → run the model → refuse a degenerate
-    answer → upsert the blob (revision+1) → record and prune the revision
-    history → delete exactly the notes that were read → commit.
+    ``context`` and ``user_message`` are what the model is given; the rest is
+    what :func:`commit_guild_dream` needs to put withheld lines back, delete
+    exactly the notes that were read, and stamp the row.
+    """
 
-    The delete is last and by explicit id, and the commit is the only thing
-    that makes any of it real: anything raised on the way through leaves the
-    blob and every note exactly as they were.
+    guild_id: str
+    cutoff: datetime
+    context: DreamContext
+    user_message: str
+    notes: list[ChatAgentMemoryNote]
+    unread: list[ChatAgentMemoryNote]
+    revision: int | None
+    stored_blob: str
+    stored_behavior: str
+    stored_personality: str
+    stored_facts: str
+    withheld_blob: list[str]
+    withheld_behavior: list[str]
+    withheld_personality: list[str]
+    withheld_facts: list[str]
 
-    ``meter`` keeps every response the model sent, whatever the night's
-    outcome: a kept-previous night or a failed one was billed all the same.
+
+async def prepare_guild_dream(
+    session: AsyncSession, *, guild_id: str, cutoff: datetime, dreamed_at: datetime
+) -> DreamInputs | GuildDreamResult:
+    """Lock the guild and read its night: the inputs, or why there is nothing to do.
+
+    Returns a :class:`GuildDreamResult` when the guild is paused or has no notes
+    a model may read; in the second case the row is stamped and any unreadable
+    notes are consumed, and the session is committed. The guild stays locked
+    until the session ends either way.
     """
     # Shared with the admin purge: neither may write over the other's blocks.
     await lock_guild_memory(session, guild_id)
@@ -821,6 +863,7 @@ async def run_guild_dream(
     stored_blob = memory.content if memory is not None else ""
     stored_behavior = (memory.behavior or "") if memory is not None else ""
     stored_personality = (memory.personality or "") if memory is not None else ""
+    stored_facts = (memory.facts or "") if memory is not None else ""
     pending = await list_notes_before(session, guild_id, cutoff)
     # Who opted out, by the names they go by here, for tags with no id.
     blocked_names = await blocked_member_names(
@@ -830,6 +873,7 @@ async def run_guild_dream(
         stored_blob,
         stored_behavior,
         stored_personality,
+        stored_facts,
         *(note.content for note in pending),
     )
     # A note about someone who opted out is never shown to the model. It is
@@ -858,6 +902,7 @@ async def run_guild_dream(
         stored_blob,
         stored_behavior,
         stored_personality,
+        stored_facts,
         *(note.content for note in [*notes, *unread]),
     )
     previous_blob, withheld_blob = withhold_blocked_lines(
@@ -869,49 +914,106 @@ async def run_guild_dream(
     previous_personality, withheld_personality = withhold_blocked_lines(
         stored_personality, gate, blocked_names
     )
+    previous_facts, withheld_facts = withhold_blocked_lines(
+        stored_facts, gate, blocked_names
+    )
     user_message = build_dream_user_message(
         previous_blob=previous_blob,
         note_lines=[render_note_line(note) for note in notes],
         day=dream_day(cutoff),
         previous_behavior=previous_behavior,
         previous_personality=previous_personality,
+        previous_facts=previous_facts,
     )
-    dream_agent = agent if agent is not None else get_dream_agent()
     context = DreamContext(
         previous_blob=previous_blob,
         notes=[note.content for note in notes],
         previous_behavior=previous_behavior,
         previous_personality=previous_personality,
+        previous_facts=previous_facts,
         gate=gate,
         memory_limit=room_for(MAX_MEMORY_BLOB_CHARS, withheld_blob),
         behavior_limit=room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
         personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
+        facts_limit=room_for(MAX_FACTS_CHARS, withheld_facts),
         member_names=names,
     )
-    run_options = {}
-    if meter is not None and isinstance(dream_agent, Agent):
-        run_options["model"] = meter.wrap(dream_agent.model)
-    result = await dream_agent.run(user_prompt=user_message, deps=context, **run_options)
+    return DreamInputs(
+        guild_id=guild_id,
+        cutoff=cutoff,
+        context=context,
+        user_message=user_message,
+        notes=notes,
+        unread=unread,
+        revision=memory.revision if memory is not None else None,
+        stored_blob=stored_blob,
+        stored_behavior=stored_behavior,
+        stored_personality=stored_personality,
+        stored_facts=stored_facts,
+        withheld_blob=withheld_blob,
+        withheld_behavior=withheld_behavior,
+        withheld_personality=withheld_personality,
+        withheld_facts=withheld_facts,
+    )
+
+
+async def commit_guild_dream(
+    session: AsyncSession,
+    inputs: DreamInputs,
+    output: DreamOutput,
+    *,
+    dreamed_at: datetime,
+    strict: bool = False,
+    model_name: str | None = None,
+) -> GuildDreamResult:
+    """Validate ``output`` against ``inputs`` and, if it stands, store the night.
+
+    The order the plan specifies: validate → refuse a degenerate answer →
+    upsert the blob (revision+1) → record and prune the revision history →
+    delete exactly the notes that were read → commit.
+
+    ``strict`` is for a caller that can ask again (the agent-run dream): every
+    problem the model could fix raises :class:`ModelRetry` with a message that
+    names no stored text, and nothing is written. Otherwise (the cron) a night
+    that cannot be saved comes back as ``KEPT_PREVIOUS``, with the notes left
+    for tomorrow.
+    """
+    context = inputs.context
+    guild_id = inputs.guild_id
+    notes = inputs.notes
     # Validate again at the persistence boundary, including injected agents.
-    blocks = compose_blocks(result.output, context, retries_left=0)
-    if names_a_blocked_id(blocks, gate):
+    blocks = compose_blocks(output, context, retries_left=1 if strict else 0)
+    if names_a_blocked_id(blocks, context.gate):
+        if strict:
+            raise ModelRetry(BLOCKED_ID_RETRY_MESSAGE)
         logger.warning(
-            "Dream for guild %s named a blocked id; keeping all three blocks "
+            "Dream for guild %s named a blocked id; keeping all four blocks "
             "and its %d notes",
             guild_id,
             len(notes),
         )
         return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
     blocks = DreamBlocks(
-        memory=carry_over(blocks.memory, previous_blob, stored_blob, withheld_blob),
+        memory=carry_over(
+            blocks.memory, context.previous_blob, inputs.stored_blob, inputs.withheld_blob
+        ),
         behavior=carry_over(
-            blocks.behavior, previous_behavior, stored_behavior, withheld_behavior
+            blocks.behavior,
+            context.previous_behavior,
+            inputs.stored_behavior,
+            inputs.withheld_behavior,
         ),
         personality=carry_over(
             blocks.personality,
-            previous_personality,
-            stored_personality,
-            withheld_personality,
+            context.previous_personality,
+            inputs.stored_personality,
+            inputs.withheld_personality,
+        ),
+        facts=carry_over(
+            blocks.facts,
+            context.previous_facts,
+            inputs.stored_facts,
+            inputs.withheld_facts,
         ),
         refusals=blocks.refusals,
     )
@@ -922,7 +1024,7 @@ async def run_guild_dream(
         # a lesson taken out of memory for a behavior block that never took it.
         # Save none of it, and let tomorrow read two days.
         logger.warning(
-            "Dream for guild %s had refused edits (%s); keeping all three "
+            "Dream for guild %s had refused edits (%s); keeping all four "
             "blocks and its %d notes",
             guild_id,
             ", ".join(blocks.refusals),
@@ -930,24 +1032,30 @@ async def run_guild_dream(
         )
         return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
 
-    if should_keep_previous_blob(new_blob, stored_blob):
+    if should_keep_previous_blob(new_blob, inputs.stored_blob):
         logger.warning(
             "Dream for guild %s returned %d chars against a %d-char blob; "
             "keeping yesterday's memory and its %d notes",
             guild_id,
             len(new_blob),
-            len(stored_blob),
+            len(inputs.stored_blob),
             len(notes),
         )
+        if strict:
+            raise ModelRetry(
+                "`memory` is far shorter than yesterday's. Return the whole "
+                "revised memory, carrying forward what is still alive."
+            )
         return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
 
-    model_name = os.getenv(DREAM_MODEL_ENV_VAR, DEFAULT_DREAM_MODEL)
+    model_name = model_name or os.getenv(DREAM_MODEL_ENV_VAR, DEFAULT_DREAM_MODEL)
     written = await upsert_guild_memory_blob(
         session,
         guild_id=guild_id,
         content=new_blob,
         behavior=blocks.behavior,
         personality=blocks.personality,
+        facts=blocks.facts,
         notes_consumed=len(notes),
         model_name=model_name,
         dreamed_at=dreamed_at,
@@ -958,18 +1066,19 @@ async def run_guild_dream(
         content=new_blob,
         behavior=blocks.behavior,
         personality=blocks.personality,
+        facts=blocks.facts,
         revision=written.revision,
         notes_consumed=len(notes),
         model_name=model_name,
     )
     await prune_memory_revisions(session, guild_id)
-    await delete_notes_by_id(session, [note.id for note in [*notes, *unread]])
+    await delete_notes_by_id(session, [note.id for note in [*notes, *inputs.unread]])
     await session.commit()
-    if blocks.personality != stored_personality:
+    if blocks.personality != inputs.stored_personality:
         logger.info(
             "Dream for guild %s revised its personality: %s",
             guild_id,
-            (result.output.personality_reason or "first personality").strip(),
+            (output.personality_reason or "first personality").strip(),
         )
 
     return GuildDreamResult(
@@ -978,6 +1087,42 @@ async def run_guild_dream(
         notes_consumed=len(notes),
         revision=written.revision,
     )
+
+
+async def run_guild_dream(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    cutoff: datetime,
+    dreamed_at: datetime,
+    agent: DreamAgent | None = None,
+    meter: UsageMeter | None = None,
+) -> GuildDreamResult:
+    """Dream one guild's night inside one transaction, in this exact order.
+
+    Load the four blocks and every note written before ``cutoff`` (oldest first) →
+    stamp and stop if there are none → run the model → :func:`commit_guild_dream`.
+
+    The delete is last and by explicit id, and the commit is the only thing
+    that makes any of it real: anything raised on the way through leaves the
+    blob and every note exactly as they were.
+
+    ``meter`` keeps every response the model sent, whatever the night's
+    outcome: a kept-previous night or a failed one was billed all the same.
+    """
+    inputs = await prepare_guild_dream(
+        session, guild_id=guild_id, cutoff=cutoff, dreamed_at=dreamed_at
+    )
+    if isinstance(inputs, GuildDreamResult):
+        return inputs
+    dream_agent = agent if agent is not None else get_dream_agent()
+    run_options = {}
+    if meter is not None and isinstance(dream_agent, Agent):
+        run_options["model"] = meter.wrap(dream_agent.model)
+    result = await dream_agent.run(
+        user_prompt=inputs.user_message, deps=inputs.context, **run_options
+    )
+    return await commit_guild_dream(session, inputs, result.output, dreamed_at=dreamed_at)
 
 
 # -- the whole session ---------------------------------------------------------

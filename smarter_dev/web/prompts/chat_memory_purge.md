@@ -16,7 +16,7 @@ sentence, or a part of a sentence). For every segment listed under
 
 Everything that is not a listed segment stays exactly as written; you cannot
 change it, and you cannot add anything. Never remove every segment of a block
-(`memory`, `behavior`, `personality`) that has text: keep or rewrite at least
+(`memory`, `behavior`, `personality`, `facts`) that has text: keep or rewrite at least
 one. A note may lose every segment; it is then deleted. Do not write that
 someone was removed, forgotten or asked anything.
 
@@ -24,7 +24,7 @@ someone was removed, forgotten or asked anything.
 them. If one is about this person without naming them, list it in `unresolved`
 as `note:<id>` with a short reason, so the admin can look.
 
-`unresolved` items are `location` (`memory`, `behavior`, `personality` or
+`unresolved` items are `location` (`memory`, `behavior`, `personality`, `facts` or
 `note:<id>`) and a short `reason`. Never quote the text and never write the
 person's name or ID in a reason.
 

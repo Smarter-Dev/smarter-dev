@@ -893,3 +893,25 @@ async def test_a_model_timeout_fails_the_guild_with_every_row_untouched(
             agent=_ScriptedPurgeAgent(before_answer=stall),
         )
     assert await _snapshot(db_session) == before
+
+
+async def test_purge_rewrites_the_facts_block_too(db_session, session_factory):
+    await _seed(db_session)
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    memory.facts = f"Server is Pine.\n{KAI_LINE}"
+    await db_session.commit()
+
+    result = await purge_guild_memory(
+        session_factory,
+        guild_id=_GUILD,
+        target=KAI,
+        now=_NOW,
+        agent=_ScriptedPurgeAgent(),
+    )
+
+    assert result.outcome == "purged"
+    db_session.expire_all()
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    assert memory.facts == "Server is Pine."
+    revisions = (await db_session.scalars(select(ChatAgentMemoryRevision))).all()
+    assert not any(KAI.id_hits(r.facts or "") for r in revisions)

@@ -1,6 +1,6 @@
 """What the public ``/chat-agent`` page may show of the agent's memory (#103, #104).
 
-The page shows the real personality, behavior and memory blocks with every
+The page shows the real personality, behavior, facts and memory blocks with every
 person masked: each ``<userid:username>`` tag (and the old ``username (id N)``
 form, and any ``<@N>`` mention) becomes "a member". A line about someone who
 opted out is left out first, as it is for every agent. A name of a member the
@@ -75,7 +75,7 @@ _HTML_TAG = re.compile(r"<[A-Za-z/!]")
 # Shorter than this a name is a letter, not a person.
 MIN_NAME_CHARS = 2
 # The blocks the page shows, in order.
-PUBLIC_BLOCKS = ("personality", "behavior", "memory")
+PUBLIC_BLOCKS = ("personality", "behavior", "facts", "memory")
 
 
 def member_names(*texts: str, usernames: Iterable[str] = ()) -> frozenset[str]:
@@ -215,6 +215,7 @@ async def stored_tagged_names(session: AsyncSession) -> set[str]:
             ChatAgentMemoryRevision.content,
             ChatAgentMemoryRevision.behavior,
             ChatAgentMemoryRevision.personality,
+            ChatAgentMemoryRevision.facts,
         )
     )
     for row in revisions:
@@ -398,12 +399,13 @@ def public_block(
 async def check_public_blocks(
     session: AsyncSession, memory: ChatAgentGuildMemory
 ) -> dict[str, PublicBlock]:
-    """Personality, behavior and memory, each masked and checked against every
+    """Personality, behavior, facts and memory, each masked and checked against every
     name :func:`page_member_names` knows, and the opt-out gate."""
     gate = await load_gate(session)
     texts = {
         "personality": memory.personality or "",
         "behavior": memory.behavior or "",
+        "facts": memory.facts or "",
         "memory": memory.content or "",
     }
     names = await page_member_names(session, memory.guild_id, *texts.values())
@@ -429,6 +431,7 @@ async def cached_public_blocks(db_session, memory) -> dict[str, PublicBlock]:
         memory.guild_id,
         memory.personality or "",
         memory.behavior or "",
+        memory.facts or "",
         memory.content or "",
     )
     now = time.monotonic()

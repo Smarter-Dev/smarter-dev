@@ -108,6 +108,7 @@ def build_writer_prompt(
     long_term: str | None = None,
     behavior: str | None = None,
     personality: str | None = None,
+    facts: str | None = None,
 ) -> str:
     """Render ``brief`` into the writer's user message (pure function).
 
@@ -124,8 +125,8 @@ def build_writer_prompt(
     is situational: the lines from today's notes and this hour's actions that the
     drafter judged the reply would be worse without. Both are laid out before the
     conversation so the ordering runs far to near, and both are framed as the
-    writer's own memory rather than as findings to cite. ``personality`` and
-    ``behavior``, the dream's two other durable blocks, come verbatim by the
+    writer's own memory rather than as findings to cite. ``personality``,
+    ``behavior`` and ``facts``, the dream's other durable blocks, come verbatim by the
     same route as ``long_term`` and ahead of it.
     """
     sections: list[str] = [
@@ -142,6 +143,12 @@ def build_writer_prompt(
         sections.append(
             "How you've learned to behave here (follow it unless it clashes "
             f"with your core instructions):\n{behavior.strip()}"
+        )
+
+    if facts and facts.strip():
+        sections.append(
+            "What is true about you and this place (unless it clashes with "
+            f"your core instructions):\n{facts.strip()}"
         )
 
     if long_term and long_term.strip():

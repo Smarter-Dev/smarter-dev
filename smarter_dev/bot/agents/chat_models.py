@@ -231,6 +231,13 @@ class InitialAgentInput(BaseModel):
             "turn only, like the blob."
         ),
     )
+    facts: str | None = Field(
+        default=None,
+        description=(
+            "Durable facts about the bot, its setup and the server. Initial "
+            "turn only, like the blob."
+        ),
+    )
     memory_notes: list[MemoryNote] = Field(
         default_factory=list,
         description="Notes the agent kept since midnight UTC, newest capped server-side.",
@@ -279,6 +286,10 @@ class FollowupAgentInput(BaseModel):
         description="Normally None; re-emitted with the blob after a compaction.",
     )
     personality: str | None = Field(
+        default=None,
+        description="Normally None; re-emitted with the blob after a compaction.",
+    )
+    facts: str | None = Field(
         default=None,
         description="Normally None; re-emitted with the blob after a compaction.",
     )

@@ -115,6 +115,7 @@ def _blob_row(**overrides) -> SimpleNamespace:
         "content": "## Who's here\nkai (id 7) is deep in embedded rust.",
         "behavior": "",
         "personality": "",
+        "facts": "",
         "revision": 4,
         "memory_enabled": True,
         "updated_at": datetime(2026, 8, 6, 0, 20, tzinfo=UTC),
@@ -414,3 +415,18 @@ class TestCreateChatMemoryNote:
     def test_missing_channel_id_is_422(self, chat_memory_client: TestClient):
         response = chat_memory_client.post(_NOTES_URL, json={"content": "a thought"})
         assert response.status_code == 422
+
+
+class TestFactsInBundle:
+    def test_returns_facts_beside_the_other_blocks(
+        self, chat_memory_client, chat_memory_crud_mock
+    ):
+        chat_memory_crud_mock.get_blob.return_value = _blob_row(facts="Server is Pine.")
+        body = chat_memory_client.get(_BUNDLE_URL).json()
+        assert body["facts"] == "Server is Pine."
+
+    def test_empty_facts_read_back_as_null(
+        self, chat_memory_client, chat_memory_crud_mock
+    ):
+        chat_memory_crud_mock.get_blob.return_value = _blob_row()
+        assert chat_memory_client.get(_BUNDLE_URL).json()["facts"] is None

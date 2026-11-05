@@ -297,8 +297,8 @@ allowed — that is a keyword watch, not a command.
 
   | Table | What it holds | Why it is exempt |
   | --- | --- | --- |
-  | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. Beside it, a ≤750-character behavior block (how the bot has learned to act there) and a ≤250-character personality block (who it is there). | Prose the bot wrote about itself, not message text it read. |
-  | `chat_agent_memory_revisions` | The last five nights of that document and its two blocks, per guild. | Same — it is the history of the bot's own writing. |
+  | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. Beside it, a ≤750-character behavior block (how the bot has learned to act there) a ≤250-character personality block (who it is there) and a ≤1000-character facts block (durable facts about the bot, its setup and the server, kept until superseded or no longer true). | Prose the bot wrote about itself, not message text it read. |
+  | `chat_agent_memory_revisions` | The last five nights of that document and its three blocks, per guild. | Same — it is the history of the bot's own writing. |
   | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document, so they normally live under a day. A note about someone on the block list (below) is deleted by the same job without being folded in. A night whose dream fails keeps its notes for the next night, and a guild whose memory is paused (below) keeps them indefinitely, because the dream that consumes them is skipped. |
 
   The rule the bot is held to when writing any of it is *remember the person,
@@ -610,3 +610,20 @@ requests, keyed by the key's id, expiring 15 minutes after the last request.
 
 The `security_logs` table that used to hold these, one row per bytes API call
 with the Discord ids in request paths, has been dropped along with its rows.
+
+## Agent-run dream endpoints
+
+The proactive agent can run the nightly dream itself through three bot-API
+routes (`smarter_dev/web/api_native/chat_memory_dream.py`): `GET
+/api/chat-memory/dream/guilds`, `GET /api/guilds/{id}/chat-memory/dream`
+(inputs, with opted-out lines withheld) and `POST` to the same path (the
+answer). The POST runs the same validation as the cron in strict mode, so a
+refusal is a 200 with `accepted: false` and a reason that names no stored text;
+nothing is written. A submission naming a moved revision or a different note set
+is refused as `stale`, and so is one whose `inputs_digest` no longer matches:
+the GET returns a sha256 over the revision, each note's id and text, and the
+stored and withheld text of every block, so a privacy purge or retag that
+rewrites a note in place (without moving the revision) between the read and the
+submit is caught. Notes are deleted only on an accepted night. The GET is not
+free of side effects: when the guild has no notes the model may read it stamps
+`last_dream_at` and deletes the unreadable notes, as the cron does.
