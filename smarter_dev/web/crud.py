@@ -5558,7 +5558,7 @@ async def upsert_guild_memory_blob(
     ``INSERT ... ON CONFLICT (guild_id) DO UPDATE`` (dialect-switched exactly
     like :func:`smarter_dev.web.handler_guild_memory.persist_guild_memory`) so
     the revision is incremented *by the database* rather than read-then-written:
-    a retried CronJob overlapping a manual dream can never have both runs write
+    a retried agent run overlapping an admin purge can never have both write
     the same revision number, and a guild's first-ever dream can never lose to a
     UNIQUE violation.
 

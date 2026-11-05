@@ -36,7 +36,6 @@ from smarter_dev.web.chat_memory_dream import compose_dream
 from smarter_dev.web.chat_memory_dream import dream_cutoff
 from smarter_dev.web.chat_memory_dream import dream_day
 from smarter_dev.web.chat_memory_dream import enforce_blob_limit
-from tests.web._dream_night import dream_one_night
 from smarter_dev.web.chat_memory_dream import should_keep_previous_blob
 from smarter_dev.web.chat_memory_dream import truncate_to_last_line
 from smarter_dev.web.crud import create_memory_note
@@ -45,6 +44,7 @@ from smarter_dev.web.crud import upsert_guild_memory_blob
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
 from smarter_dev.web.models import ChatAgentMemoryRevision
+from tests.web._dream_night import dream_one_night
 
 _GUILD = "123456789012345678"
 _OTHER_GUILD = "222222222222222222"
@@ -482,6 +482,90 @@ async def test_a_guild_with_a_memory_row_and_no_notes_is_still_dreamed(db_sessio
     assert stored.last_dream_at.replace(tzinfo=UTC) == _DREAMED_AT
     assert stored.content == "## Who's here\nkai (id 7), still shipping."
     assert stored.revision == 2
+
+
+async def test_a_quiet_night_stamps_the_row_and_adds_no_revision(db_session):
+    seeded = await _seed_blob(db_session, content="## Who's here\nkai (id 7)")
+    agent = _StubDreamAgent(output="## Who's here\nkai (id 7)")
+
+    result = await dream_one_night(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=agent,
+    )
+
+    assert result.outcome is DreamOutcome.DREAMED
+    stored = await get_guild_memory_blob(db_session, _GUILD)
+    assert stored.revision == seeded.revision
+    assert stored.last_dream_at.replace(tzinfo=UTC) == _DREAMED_AT
+    revisions = (await db_session.scalars(select(ChatAgentMemoryRevision))).all()
+    assert revisions == []
+
+
+async def test_a_second_visit_the_same_night_does_not_dream_again(db_session):
+    await _seed_blob(db_session, content="## Who's here\nkai (id 7)")
+    agent = _StubDreamAgent(output="## Who's here\nkai (id 7), still shipping.")
+    for _ in range(2):
+        await dream_one_night(
+            db_session,
+            guild_id=_GUILD,
+            cutoff=_CUTOFF,
+            dreamed_at=_DREAMED_AT,
+            agent=agent,
+        )
+
+    assert agent.call_count == 1
+
+
+async def test_a_note_after_the_stamp_is_dreamed_again(db_session):
+    await _seed_blob(db_session, content="## Who's here\nkai (id 7)")
+    agent = _StubDreamAgent(output="## Who's here\nkai (id 7), still shipping.")
+    await dream_one_night(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=agent,
+    )
+    await _write_note(db_session, content=_KAI_NOTE)
+    await dream_one_night(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=agent,
+    )
+
+    assert agent.call_count == 2
+
+
+def test_a_line_copied_from_the_stored_memory_is_not_a_tag_error():
+    stored = "## Channels\nSee #dev-help for questions."
+    context = DreamContext(
+        previous_blob=stored, notes=[], member_names=frozenset({"dev"})
+    )
+    kept = DreamOutput(memory=stored + "\nkai shipped the shader.")
+    assert (
+        chat_memory_dream.untagged_names(
+            kept, context, behavior="", personality="", facts=""
+        )
+        == {}
+    )
+    fresh = DreamOutput(memory=stored + "\nAsk dev about the shader.")
+    assert chat_memory_dream.untagged_names(
+        fresh, context, behavior="", personality="", facts=""
+    )
+
+
+def test_default_dream_model_is_gpt_6_1_sol_with_high_reasoning(monkeypatch):
+    monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
+
+    model = chat_memory_dream._dream_catalog_model()
+
+    assert model.model_id == "gpt-6.1-sol"
+    assert chat_memory_dream.DREAM_REASONING_LEVEL in model.reasoning_levels
 
 
 async def test_a_guild_with_no_memory_row_and_no_notes_costs_nothing(db_session):

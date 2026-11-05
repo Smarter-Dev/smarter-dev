@@ -5515,8 +5515,10 @@ class ChatAgentGuildMemory(Base):
         DateTime(timezone=True),
         nullable=True,
         doc=(
-            "When a dream last ran for this guild — stamped when a night had "
-            "nothing the model may read, so a repeat visit is a no-op."
+            "When a dream last ran for this guild: stamped by a night that wrote "
+            "a revision, a quiet night that changed nothing, and a night with "
+            "nothing the model may read, so a repeat visit the same night is "
+            "a no-op."
         ),
     )
     notes_consumed: Mapped[int] = mapped_column(

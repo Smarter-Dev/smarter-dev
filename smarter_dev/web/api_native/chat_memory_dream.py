@@ -283,8 +283,8 @@ class ChatMemoryDreamController(Controller):
                 accepted=False,
                 reason="refused",
                 message=(
-                    "That night was not saved. Keep what is still true, "
-                    "make only edits you can support from the notes, and try again."
+                    "That night was not saved. Return the four memory sections "
+                    "again."
                 ),
             )
         return DreamSubmitResult(
