@@ -245,6 +245,7 @@ class _FakeRest:
         self._maybe_fail("delete_messages")
 
     async def create_message(self, channel, content=hikari.UNDEFINED, **kwargs):
+        self._maybe_fail("create_message")
         self._discord.sent.append((str(channel), content, kwargs))
         return SimpleNamespace(id=999 + len(self._discord.sent))
 

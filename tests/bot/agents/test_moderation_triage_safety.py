@@ -38,6 +38,7 @@ from smarter_dev.bot.agents import moderation_agent
 from smarter_dev.bot.plugins import mod_monitor
 from smarter_dev.bot.purge_core import DISCORD_EPOCH_MS
 from smarter_dev.shared import moderation_policy as mp
+from smarter_dev.web.guild_rules import parse_guild_rules
 from tests.bot.fake_discord import BOT_ID
 from tests.bot.fake_discord import GUILD_ID
 from tests.bot.fake_discord import OWNER_ID
@@ -717,3 +718,307 @@ async def test_without_a_policy_there_is_no_triage_and_no_extra_staff(
     result = await tools["timeout_user"](str(SPAMMER), "10m", "spam")
     assert result["success"] is False and "switched off" in result["error"]
     assert discord.destructive == []
+
+
+# -- server rules: cite, then delete (#466) --------------------------------------
+
+RECRUITER = 3101
+RECRUIT_MESSAGE = 424300
+PING_MESSAGE = 424301
+RULES = parse_guild_rules(
+    "## Be respectful\nNo harassment.\n\n"
+    "## No self-promotion\nNo ads, recruitment or unsolicited DMs.\n"
+)
+
+
+def _incident(discord):
+    """A recruitment post from a young account, then a bare @mods ping."""
+    discord.add_member(RECRUITER, username="recruiter")
+    discord.add_message(
+        RECRUIT_MESSAGE,
+        RECRUITER,
+        content="DM me about additional income, a partnership, you need a PC",
+    )
+    discord.add_message(PING_MESSAGE, HELPER, content="@mods ^")
+    stamp = datetime.now(UTC)
+    return [
+        moderation_agent.DiscordMessage(
+            author="recruiter",
+            author_id=str(RECRUITER),
+            message_id=str(RECRUIT_MESSAGE),
+            timestamp=stamp,
+            content="DM me about additional income, a partnership, you need a PC",
+        ),
+        moderation_agent.DiscordMessage(
+            author="helper",
+            author_id=str(HELPER),
+            message_id=str(PING_MESSAGE),
+            timestamp=stamp,
+            content="@mods ^",
+        ),
+    ]
+
+
+async def _triage_incident(discord, model, **kw):
+    kwargs = {
+        "bot": discord,
+        "guild_id": str(GUILD_ID),
+        "channel_id": str(CHANNEL_ID),
+        "trigger_message_content": "@mods ^",
+        "trigger_author": "helper",
+        "trigger_author_id": str(HELPER),
+        "context_messages": _incident(discord),
+        "guild_instructions": "",
+        "enabled_tools": ["timeout", "purge", "delete"],
+        "trigger_message_id": str(PING_MESSAGE),
+        "guild_rules": RULES,
+        "enforcing": True,
+        **kw,
+    }
+    with moderation_agent.get_moderation_agent().override(model=model):
+        return await moderation_agent.run_moderation_agent(**kwargs)
+
+
+CITE_AND_DELETE = [
+    [
+        (
+            "cite_rule",
+            {
+                "message_id": str(RECRUIT_MESSAGE),
+                "rule_indexes": [2],
+                "reason": "Recruitment pitch asking for DMs.",
+            },
+        )
+    ],
+    [
+        (
+            "delete_message",
+            {"message_id": str(RECRUIT_MESSAGE), "reason": "Unsolicited recruitment"},
+        )
+    ],
+    [("send_mod_message", {"message": "I've removed that post."})],
+    [("final", {"assessment": "MLM-style recruitment; cited and removed."})],
+]
+
+
+async def test_a_recruitment_post_and_a_bare_ping_gets_a_cited_rule_and_a_delete(
+    discord, stored, audit
+):
+    seen: list = []
+
+    _, tracker = await _triage_incident(discord, _scripted(*CITE_AND_DELETE, seen=seen))
+
+    assert tracker.failure is None
+    prompt = "\n".join(
+        part.content
+        for messages, _ in seen[:1]
+        for message in messages
+        for part in message.parts
+        if hasattr(part, "content") and isinstance(part.content, str)
+    )
+    assert "## server_rules\n1. Be respectful" in prompt
+    assert "2. No self-promotion" in prompt
+    assert f"[msg:{RECRUIT_MESSAGE}]" in prompt
+    # The rule goes out verbatim as a silent reply, before the delete.
+    (channel, content, kwargs) = discord.sent[0]
+    assert channel == str(CHANNEL_ID)
+    assert "**2. No self-promotion**" in content and "No ads, recruitment" in content
+    assert "Be respectful" not in content
+    assert kwargs["reply"].id == RECRUIT_MESSAGE
+    assert kwargs["mentions_reply"] is False
+    assert discord.destructive == [("delete_message", RECRUIT_MESSAGE)]
+    assert tracker.cites == [
+        {
+            "message_id": str(RECRUIT_MESSAGE),
+            "rule_indexes": [2],
+            "reason": "Recruitment pitch asking for DMs.",
+        }
+    ]
+    assert tracker.deletions[0]["message_id"] == str(RECRUIT_MESSAGE)
+    notes = [text for _, text in mod_tools.triage_notes(tracker, "x")]
+    assert any("Cited rule(s) 2" in text for text in notes)
+
+
+async def test_without_the_delete_tool_the_rule_is_still_cited(discord, stored):
+    stored.row.enabled_tools = []
+    steps = [CITE_AND_DELETE[0], CITE_AND_DELETE[2], CITE_AND_DELETE[3]]
+
+    _, tracker = await _triage_incident(
+        discord, _scripted(*steps), enabled_tools=[]
+    )
+
+    assert len(tracker.cites) == 1
+    assert discord.destructive == []
+    notes = [text for _, text in mod_tools.triage_notes(tracker, "x")]
+    assert not any("no immediate action" in text for text in notes)
+
+
+async def test_no_rules_means_no_cite_tool(discord, stored):
+    seen: list = []
+
+    await _triage_incident(
+        discord, _scripted([("final", {"assessment": "ok"})], seen=seen), guild_rules=()
+    )
+
+    assert "cite_rule" not in {tool.name for tool in seen[0][1].function_tools}
+    prompt = str(seen[0][0])
+    assert "No server rules are configured." in prompt
+
+
+@pytest.mark.parametrize(
+    ("message_id", "rule_indexes", "expect"),
+    [
+        (str(RECRUIT_MESSAGE), [9], "do not exist"),
+        (str(RECRUIT_MESSAGE), [0], "do not exist"),
+        (str(RECRUIT_MESSAGE), [], "at least one rule"),
+        ("999999", [2], "not one of the messages"),
+        (str(PING_MESSAGE), [2], "not one of the messages"),  # the ping itself
+    ],
+)
+async def test_cite_rule_refuses_what_validation_rejects(
+    discord, stored, message_id, rule_indexes, expect
+):
+    tools, tracker = mod_tools.create_moderation_tools(
+        discord,
+        guild_id=str(GUILD_ID),
+        channel_id=str(CHANNEL_ID),
+        trigger_message_id=str(PING_MESSAGE),
+        enabled_tools=[],
+        rules=RULES,
+        enforcing=True,
+        context_messages=_incident(discord),
+    )
+    cite = next(t.function for t in tools if t.name == "cite_rule")
+
+    result = await cite(message_id, rule_indexes, "why")
+
+    assert result["success"] is False and expect in result["error"]
+    assert discord.sent == [] and tracker.cites == []
+
+
+async def test_cite_rule_never_cites_the_bot_or_staff(discord, stored):
+    discord.add_message(424400, BOT_ID, content="a bot reply")
+    discord.add_message(424401, STAFF_BY_ROLE, content="mod talking")
+    stamp = datetime.now(UTC)
+    context = [
+        moderation_agent.DiscordMessage(
+            author=name, author_id=str(uid), message_id=str(mid), timestamp=stamp,
+            content=text,
+        )
+        for name, uid, mid, text in (
+            ("smarter-dev", BOT_ID, 424400, "a bot reply"),
+            ("mod", STAFF_BY_ROLE, 424401, "mod talking"),
+        )
+    ]
+    tools, tracker = mod_tools.create_moderation_tools(
+        discord,
+        guild_id=str(GUILD_ID),
+        channel_id=str(CHANNEL_ID),
+        trigger_message_id=str(PING_MESSAGE),
+        enabled_tools=[],
+        rules=RULES,
+        enforcing=True,
+        context_messages=context,
+    )
+    cite = next(t.function for t in tools if t.name == "cite_rule")
+
+    bot_result = await cite("424400", [1], "why")
+    staff_result = await cite("424401", [1], "why")
+
+    assert bot_result["success"] is False and "own message" in bot_result["error"]
+    assert staff_result["success"] is False
+    assert staff_result["error"].startswith("Cannot moderate this user")
+    assert discord.sent == [] and tracker.cites == []
+
+
+async def test_cite_rule_posts_each_message_once(discord, stored):
+    tools, tracker = mod_tools.create_moderation_tools(
+        discord,
+        guild_id=str(GUILD_ID),
+        channel_id=str(CHANNEL_ID),
+        trigger_message_id=str(PING_MESSAGE),
+        enabled_tools=[],
+        rules=RULES,
+        enforcing=True,
+        context_messages=_incident(discord),
+    )
+    cite = next(t.function for t in tools if t.name == "cite_rule")
+
+    first = await cite(str(RECRUIT_MESSAGE), [2], "why")
+    again = await cite(str(RECRUIT_MESSAGE), [2], "why")
+
+    assert first["success"] and again["success"]
+    assert len(discord.sent) == 1 and len(tracker.cites) == 1
+
+
+def _cite_tool(discord, **kw):
+    tools, tracker = mod_tools.create_moderation_tools(
+        discord,
+        guild_id=str(GUILD_ID),
+        channel_id=str(CHANNEL_ID),
+        trigger_message_id=str(PING_MESSAGE),
+        enabled_tools=kw.pop("enabled_tools", []),
+        rules=RULES,
+        context_messages=_incident(discord),
+        **kw,
+    )
+    return {t.name: t.function for t in tools}, tracker
+
+
+async def test_evaluate_mode_offers_no_cite_tool_and_posts_no_citation(discord, stored):
+    seen: list = []
+
+    _, tracker = await _triage_incident(
+        discord,
+        _scripted([("final", {"assessment": "ok"})], seen=seen),
+        enforcing=False,
+    )
+
+    assert "cite_rule" not in {tool.name for tool in seen[0][1].function_tools}
+    assert discord.sent == [] and tracker.cites == []
+
+
+async def test_cite_is_offered_whatever_enabled_tools_says(discord, stored):
+    tools, _ = _cite_tool(discord, enforcing=True, enabled_tools=[])
+
+    assert "cite_rule" in tools
+
+
+async def test_cite_is_refused_when_enforcement_is_switched_off_mid_run(
+    discord, stored
+):
+    raw = mp.default_document().as_json()
+    raw["triage"].update(mode=mp.ENFORCE, monitored_role_ids=[str(MOD_ROLE_ID)])
+    stored.policy = mp.validate(raw)
+    tools, tracker = _cite_tool(discord, enforcing=True)
+    raw["triage"]["mode"] = mp.EVALUATE
+    stored.policy = mp.validate(raw)
+
+    result = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+
+    assert result["success"] is False and "only posted while triage is enforcing" in result["error"]
+    assert discord.sent == [] and tracker.cites == []
+
+    raw["triage"]["mode"] = mp.OFF
+    stored.policy = mp.validate(raw)
+    result = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+    assert result["success"] is False and discord.sent == []
+
+
+async def test_cite_that_times_out_is_possibly_posted_and_not_retried(discord, stored):
+    raw = mp.default_document().as_json()
+    raw["triage"].update(mode=mp.ENFORCE, monitored_role_ids=[str(MOD_ROLE_ID)])
+    stored.policy = mp.validate(raw)
+    tools, tracker = _cite_tool(discord, enforcing=True)
+    discord.fail["create_message"] = TimeoutError("slow")
+
+    first = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+    discord.fail.clear()
+    retry = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+
+    assert first["success"] is False
+    assert retry["success"] is False and "may already be posted" in retry["error"]
+    assert discord.sent == []
+    assert tracker.cites[0]["possibly_applied"] is True
+    notes = [text for _, text in mod_tools.triage_notes(tracker, "x")]
+    assert any("Possibly cited" in text for text in notes)

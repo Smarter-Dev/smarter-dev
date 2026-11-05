@@ -28,6 +28,7 @@ import asyncio
 import logging
 from collections.abc import Awaitable
 from collections.abc import Callable
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -35,10 +36,20 @@ import hikari
 import lightbulb
 from pydantic_ai import Tool
 
+from smarter_dev.bot.agents.models import DiscordMessage
+from smarter_dev.bot.agents.rule_matcher import RejectedCitation
+from smarter_dev.bot.agents.rule_matcher import RuleCitation
+from smarter_dev.bot.agents.rule_matcher import RuleMatchMessage
+from smarter_dev.bot.agents.rule_matcher import candidate_target_ids
+from smarter_dev.bot.agents.rule_matcher import validate_rule_citation
 from smarter_dev.bot.moderation_port import bot_gateway
+from smarter_dev.bot.plugins.rules import bot_target_rejection
+from smarter_dev.bot.plugins.rules import post_rule_citation
+from smarter_dev.bot.plugins.rules import render_rule_citation
 from smarter_dev.bot.plugins.timeout import parse_duration
 from smarter_dev.bot.purge_core import select_purgeable_messages
 from smarter_dev.bot.staff_protection import staff_refusal
+from smarter_dev.bot.triage_config import CITE_TOOL
 from smarter_dev.bot.triage_config import enabled_destructive_tools
 from smarter_dev.bot.triage_config import staff_exempt_role_ids
 from smarter_dev.bot.triage_config import tool_refusal
@@ -46,6 +57,8 @@ from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.staff_protection import BOT_ITSELF
 from smarter_dev.shared.staff_protection import unknown
 from smarter_dev.web.crud import ModerationActionOperations
+from smarter_dev.web.guild_rules import GuildRule
+from smarter_dev.web.guild_rules import find_rule_by_index
 from smarter_dev.web.moderation_gateway import Evidence
 from smarter_dev.web.moderation_gateway import Outcome
 from smarter_dev.web.moderation_gateway import Proposal
@@ -62,6 +75,10 @@ mod_action_ops = ModerationActionOperations()
 MAX_ACTIONS_PER_INVOCATION = 3
 
 MAX_PURGE_COUNT = 50
+
+# Rule citations are not destructive, but each is a public post: a triage
+# cites at most this many messages.
+MAX_RULE_CITATIONS = 3
 
 # Longest model-written reason a report line carries: 3 actions of this size
 # plus their prefixes fit Discord's 1024-character field.
@@ -97,6 +114,9 @@ class ActionTracker:
     purges: list[dict] = field(default_factory=list)  # {user_id, username, count, reason}
     deletions: list[dict] = field(default_factory=list)  # {message_id, reason}
     flags: list[str] = field(default_factory=list)  # user_ids flagged for review
+    # Rule citations posted as replies: {message_id, rule_indexes, reason}.
+    # Not in has_actions: a citation alone needs no follow-up notice.
+    cites: list[dict] = field(default_factory=list)
     channel_message: str | None = None  # message the agent wants posted in the channel
     # Error class when the run stopped on an exception. Actions above had
     # already executed; nothing else was reviewed.
@@ -178,8 +198,18 @@ def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str
     if tracker.flags:
         flagged = ", ".join(f"<@{uid}>" for uid in dict.fromkeys(tracker.flags))
         notes.append((gw.ENTRY_NOTE, f"Flagged for review: {flagged}"))
+    for cite in tracker.cites:
+        listed = ", ".join(str(index) for index in cite["rule_indexes"])
+        verb = "Possibly cited" if cite.get("possibly_applied") else "Cited"
+        notes.append(
+            (
+                gw.ENTRY_NOTE,
+                f"{verb} rule(s) {listed} on message {cite['message_id']}: "
+                f"{cite['reason']}",
+            )
+        )
     if tracker.failure is not None:
-        if tracker.has_actions:
+        if tracker.has_actions or tracker.cites:
             status = (
                 f"Triage stopped partway ({tracker.failure}). The actions listed "
                 "were already taken or possibly applied; nothing else was reviewed. "
@@ -193,7 +223,7 @@ def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str
                 "reviewed and no action was taken. A moderator must review this."
             )
         notes.append((gw.ENTRY_ALERT, status))
-    elif not tracker.has_actions:
+    elif not tracker.has_actions and not tracker.cites:
         notes.append(
             (gw.ENTRY_NOTE, "Situation reviewed, no immediate action required.")
         )
@@ -211,6 +241,9 @@ def create_moderation_tools(
     config_gate: ConfigGate | None = None,
     staff_roles: StaffRoles | None = None,
     trigger: Trigger | None = None,
+    rules: Sequence[GuildRule] = (),
+    context_messages: Sequence[DiscordMessage] = (),
+    enforcing: bool = False,
 ) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
@@ -230,6 +263,13 @@ def create_moderation_tools(
             each target check. Defaults to a fresh database read.
         trigger: The staff ping as the moderation gateway's trigger; every
             action joins its incident. Defaults to one built from the ids.
+        rules: The guild's rules, as the model was shown them. Empty offers
+            no ``cite_rule``.
+        context_messages: The messages the model was shown; the only ones
+            ``cite_rule`` may cite.
+        enforcing: Triage is in enforce mode. ``cite_rule`` posts publicly, so
+            it is offered only then (and re-checked at call time), whatever
+            ``enabled_tools`` says.
 
     Returns:
         Tuple of (tools list, ActionTracker)
@@ -542,6 +582,134 @@ def create_moderation_tools(
         tracker.deletions.append(entry)
         return {"success": True, "result": f"Message {message_id} deleted."}
 
+    async def cite_rule(message_id: str, rule_indexes: list[int], reason: str) -> dict:
+        """Post the server's own rule text as a reply to a message that breaks
+        it, the way a moderator's /rule does. Call this BEFORE deleting the
+        message: the citation replies to it. It notifies nobody and the text
+        is the rule verbatim, so do not repeat the rule in your channel message.
+
+        Message IDs are shown in the conversation context as [msg:ID]. Rule
+        numbers are the ones in server_rules.
+
+        Args:
+            message_id: ID of the offending message from the conversation
+            rule_indexes: Numbers of the rules it breaks, most relevant first
+            reason: One sentence on what the message did (shown to moderators only)
+
+        Returns:
+            dict with 'success' boolean
+        """
+        if len(tracker.cites) >= MAX_RULE_CITATIONS:
+            return {
+                "success": False,
+                "error": f"Citation limit reached ({MAX_RULE_CITATIONS} per invocation).",
+            }
+        message_id = str(message_id).strip()
+        earlier = next(
+            (cite for cite in tracker.cites if cite["message_id"] == message_id), None
+        )
+        if earlier is not None:
+            if earlier.get("possibly_applied"):
+                return {
+                    "success": False,
+                    "error": f"A citation on message {message_id} may already be posted. Not retried.",
+                }
+            return {"success": True, "result": f"Message {message_id} was already cited."}
+
+        me = bot.get_me()
+        bot_user_id = str(me.id) if me is not None else None
+        offered = [
+            RuleMatchMessage(
+                message_id=str(message.message_id),
+                author_id=str(message.author_id or ""),
+                author_display=message.author,
+                content=message.content,
+            )
+            for message in context_messages
+            if message.message_id
+        ]
+        bot_rejection = bot_target_rejection(
+            message_id,
+            {m.message_id for m in offered if m.author_id == bot_user_id},
+        )
+        if bot_rejection is not None:
+            return {"success": False, "error": "Cannot cite a rule against the bot's own message."}
+        # The ping is the report, not an offence; the bot is never cited.
+        candidates = [
+            candidate
+            for candidate in candidate_target_ids(offered, None, bot_user_id)
+            if candidate != str(trigger_message_id)
+        ]
+        validated = validate_rule_citation(
+            RuleCitation(
+                matched_rule_indices=list(rule_indexes),
+                target_message_id=message_id,
+                explanation=reason,
+            ),
+            {rule.index for rule in rules},
+            candidates,
+        )
+        if isinstance(validated, RejectedCitation):
+            return {"success": False, "error": f"Not cited: {validated.reason}."}
+        if not validated.matched_rule_indices:
+            return {"success": False, "error": "Name at least one rule number from server_rules."}
+
+        try:
+            message = await bot.rest.fetch_message(int(channel_id), int(message_id))
+        except hikari.NotFoundError:
+            return {"success": False, "error": f"Message {message_id} not found."}
+        except Exception as e:
+            logger.error(f"[ModTool] cite_rule failed: {type(e).__name__}")
+            return {"success": False, "error": str(e)}
+        if message.webhook_id is None:
+            perm_msg = await _check_target_permissions(
+                str(message.author.id), user_is_bot=bool(message.author.is_bot)
+            )
+            if perm_msg:
+                return {"success": False, "error": perm_msg}
+        elif me is None or str(message.author.id) == str(me.id):
+            return {"success": False, "error": "Cannot cite a rule against the bot's own message."}
+
+        matched = [
+            rule
+            for rule in (
+                find_rule_by_index(list(rules), index)
+                for index in validated.matched_rule_indices
+            )
+            if rule is not None
+        ]
+        content = render_rule_citation(matched)
+        if content is None:
+            return {"success": False, "error": "Those rules are too long to quote in one message."}
+        refusal = await gate(guild_id, CITE_TOOL)
+        if refusal:
+            return {"success": False, "error": refusal}
+        entry = {
+            "message_id": message_id,
+            "rule_indexes": list(validated.matched_rule_indices),
+            "reason": reason[:REPORT_REASON_CHARS],
+        }
+        try:
+            await post_rule_citation(bot.rest, int(channel_id), message, content)
+        except (hikari.NotFoundError, hikari.BadRequestError, hikari.ForbiddenError):
+            return {"success": False, "error": "Not cited: Discord refused the post; nothing posted."}
+        except asyncio.CancelledError:
+            tracker.cites.append({**entry, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] cite_rule on message {message_id} possibly posted; "
+                "triage cancelled"
+            )
+            raise
+        except Exception as e:
+            # A timeout or 5xx says nothing about whether an earlier attempt
+            # landed; record it as possibly posted so a retry cannot double-post.
+            logger.error(f"[ModTool] cite_rule failed: {type(e).__name__}")
+            tracker.cites.append({**entry, "possibly_applied": True})
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(e).__name__)}
+        tracker.cites.append(entry)
+        listed = ", ".join(str(index) for index in validated.matched_rule_indices)
+        return {"success": True, "result": f"Cited rule(s) {listed} on message {message_id}."}
+
     # ── Utility tools (always available) ─────────────────────────────
 
     async def flag_users(user_ids: str) -> dict:
@@ -676,6 +844,11 @@ def create_moderation_tools(
         functions.append(purge_messages)
     if "delete" in enabled:
         functions.append(delete_message)
+
+    # Citing is a public post, so only an enforcing triage offers it; it is
+    # not destructive, so it does not depend on enabled_tools
+    if rules and enforcing:
+        functions.append(cite_rule)
 
     # Always include utility tools
     functions.append(flag_users)
