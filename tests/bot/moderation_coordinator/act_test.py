@@ -2324,3 +2324,28 @@ async def test_a_refused_post_does_not_take_the_bursts_sanction_from_a_confirmed
     assert any(
         a.action_type == "warn" and a.reason == "confirmed scam" for a in actions
     )
+
+
+async def test_a_refusal_alert_that_failed_to_write_is_carried_by_the_next_post():
+    case, victim, posts = scam_burst()
+    case = replace(case, policy=acting(case.policy), haiku=_refusing)
+    h = harness(case)
+    real = ModerationGateway.add_notes
+    failing = [True]
+
+    async def flaky(self, *args, **kwargs):
+        if failing[0] and any(
+            "classifier refused" in str(line) for line in kwargs.get("notes", ())
+        ):
+            failing[0] = False
+            raise RuntimeError("write failed")
+        return await real(self, *args, **kwargs)
+
+    ModerationGateway.add_notes = flaky
+    try:
+        await h.judge(*posts)
+    finally:
+        ModerationGateway.add_notes = real
+
+    refused = [a for a in await entries(gw.ENTRY_ALERT) if "classifier refused" in a]
+    assert len(refused) == 1

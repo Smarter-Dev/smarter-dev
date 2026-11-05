@@ -1909,3 +1909,30 @@ async def test_a_member_nobody_named_is_said_to_be_unknown(discord, db, clock):
     report = discord.latest_report_text(REPORT_CHANNEL)
     [member] = [line for line in report.splitlines() if line.startswith("**Member")]
     assert member == (f"**Member:** <@{SCAMMER}> · username unknown · {SCAMMER}")
+
+
+def test_a_shorter_real_timeout_over_a_day_hold_reads_as_still_held():
+    text = _report(
+        [
+            _report_op(
+                t.TIMEOUT,
+                t.CONFIRMED,
+                1_790_000_001.0,
+                duration_seconds=86400,
+                expires_at=1_790_086_401.0,
+                provisional=True,
+            ),
+            _report_op(
+                t.TIMEOUT,
+                t.CONFIRMED,
+                1_790_000_010.0,
+                duration_seconds=3600,
+                expires_at=1_790_086_401.0,
+            ),
+        ]
+    )
+
+    assert "upgraded" not in text
+    assert "the 24-hour hold keeps them held" in text
+    assert "timed out for 24 hours" in text
+    assert "timed out for 1 hour" not in text

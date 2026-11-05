@@ -779,19 +779,14 @@ class Executor:
             )
 
         await self._dm_before_ban(gateway, trigger, targets, facts, policy)
-        try:
-            if proposals:
-                result = await gateway.act(trigger, proposals)
-            else:
-                result = gw.ActResult(
-                    incident_id=await gateway.ensure_incident(
-                        trigger, subject=facts.author_id
-                    )
+        if proposals:
+            result = await gateway.act(trigger, proposals)
+        else:
+            result = gw.ActResult(
+                incident_id=await gateway.ensure_incident(
+                    trigger, subject=facts.author_id
                 )
-        except BaseException:
-            # The alert never went out: the burst's next post carries it.
-            self._refusal_alerts.pop(_refusal_alert_key(evaluation), None)
-            raise
+            )
 
         deleted = {
             message_id
@@ -813,6 +808,12 @@ class Executor:
                 report_channel_id=policy.report_channel_id,
                 target_user_id=facts.author_id,
             )
+            if any(line[1].startswith(REFUSED_ALERT) for line in lines):
+                # Marked once the alert is written: a failure before leaves
+                # the burst's next post to carry it.
+                self._refusal_alerts[_refusal_alert_key(evaluation)] = None
+                while len(self._refusal_alerts) > 256:
+                    del self._refusal_alerts[next(iter(self._refusal_alerts))]
         if hold is not None and hold.noticed:
             await self.messenger.post(
                 hold.channel_id, _closing(provisional, evaluation)
@@ -1339,11 +1340,7 @@ class Executor:
             if line.startswith(rules.SCAM_GATE)
         ):
             # One alert per burst: its other posts are covered by it.
-            alert_key = _refusal_alert_key(evaluation)
-            if alert_key not in self._refusal_alerts:
-                self._refusal_alerts[alert_key] = None
-                while len(self._refusal_alerts) > 256:
-                    del self._refusal_alerts[next(iter(self._refusal_alerts))]
+            if _refusal_alert_key(evaluation) not in self._refusal_alerts:
                 lines.append(_refused_line(evaluation))
         scam_fired = any(
             line.startswith(rules.SCAM_GATE) for line in decision.rules_fired
@@ -1674,6 +1671,16 @@ def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str
     )
 
 
+#: How the moderators' alert for a refused message begins.
+REFUSED_ALERT = "The classifier refused to review "
+#: Discord keeps one timeout per member, so the hold and a real timeout from
+#: the same burst are one: removing it lifts both.
+HOLD_NOTE = (
+    ", and releasing the hold ends it; removing the timeout also lifts any "
+    "real timeout from this burst (Discord keeps one per member)"
+)
+
+
 def _refusal_alert_key(evaluation: Evaluation) -> tuple[str, str, str]:
     facts = evaluation.facts
     return (
@@ -1717,13 +1724,19 @@ def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
             done += (
                 f" and the member was {_SANCTION_DONE.get(sanction.kind, 'sanctioned')}"
             )
+        elif any(
+            rules.ALREADY_SANCTIONED in hit_line
+            for hit_line in decision.rules_fired
+            if hit_line.startswith(rules.SCAM_GATE)
+        ):
+            done += " and no hold was added: the member already has a real sanction from this burst"
         else:
             done += " and no hold was placed (the policy does not allow one)"
     return (
         gw.ENTRY_ALERT,
-        f"The classifier refused to review <@{facts.author_id}>'s message{said}. "
+        f"{REFUSED_ALERT}<@{facts.author_id}>'s message{said}. "
         f"{done}. A moderator should decide"
-        f"{', and releasing the hold ends it' if hold_placed else ''}: "
+        f"{HOLD_NOTE if hold_placed else ''}: "
         f"{jump_link(facts)}",
     )
 
