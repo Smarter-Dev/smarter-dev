@@ -18,6 +18,8 @@ a new note before the cutoff), it is refused as ``stale`` and the agent re-reads
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from datetime import UTC
 from datetime import datetime
@@ -34,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api_native.chat_memory import BOT_API_GUARDS
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
+from smarter_dev.web.chat_memory_dream import DreamInputs
 from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamOutput
 from smarter_dev.web.chat_memory_dream import GuildDreamResult
@@ -75,6 +78,7 @@ class DreamInputsRead(BaseModel):
     reason: str | None = None
     day: str | None = None
     base_revision: int | None = None
+    inputs_digest: str | None = None
     notes: list[DreamNoteRead] = Field(default_factory=list)
     memory: str = ""
     behavior: str = ""
@@ -89,6 +93,7 @@ class DreamSubmit(DreamOutput):
     cutoff: datetime
     base_revision: int | None = None
     note_ids: list[str]
+    inputs_digest: str
 
 
 class DreamSubmitResult(BaseModel):
@@ -97,6 +102,38 @@ class DreamSubmitResult(BaseModel):
     message: str | None = None
     revision: int | None = None
     notes_consumed: int = 0
+
+
+def inputs_digest(inputs: DreamInputs) -> str:
+    """A fingerprint of everything the dream read, as it stands right now.
+
+    The revision and the note ids are not enough: a privacy purge or a retag
+    rewrites note text (and block text) in place and bumps the revision only
+    when a block changes. So the digest covers each note's id and content, the
+    stored and withheld text of all four blocks, and the assembled message.
+    """
+    material = {
+        "revision": inputs.revision,
+        "cutoff": inputs.cutoff.isoformat(),
+        "notes": [[str(note.id), note.content] for note in inputs.notes],
+        "unread": sorted(str(note.id) for note in inputs.unread),
+        "stored": [
+            inputs.stored_blob,
+            inputs.stored_behavior,
+            inputs.stored_personality,
+            inputs.stored_facts,
+        ],
+        "withheld": [
+            inputs.withheld_blob,
+            inputs.withheld_behavior,
+            inputs.withheld_personality,
+            inputs.withheld_facts,
+        ],
+        "message": inputs.user_message,
+    }
+    return hashlib.sha256(
+        json.dumps(material, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
 
 
 def _check_cutoff(cutoff: datetime, now: datetime) -> bool:
@@ -135,7 +172,13 @@ class ChatMemoryDreamController(Controller):
     async def get_dream_inputs(
         self, db_session: AsyncSession, guild_id: str
     ) -> DreamInputsRead:
-        """Everything this guild's dream reads, withheld lines already removed."""
+        """Everything this guild's dream reads, withheld lines already removed.
+
+        Not free of side effects: when the guild has nothing the model may
+        read (no notes, or only notes about opted-out members) this stamps
+        ``last_dream_at`` and deletes the unreadable notes, exactly as the
+        cron's visit does, and answers ``needed: false``.
+        """
         now = datetime.now(UTC)
         cutoff = dream_cutoff(now)
         inputs = await prepare_guild_dream(
@@ -155,6 +198,7 @@ class ChatMemoryDreamController(Controller):
             needed=True,
             day=dream_day(cutoff).isoformat(),
             base_revision=inputs.revision,
+            inputs_digest=inputs_digest(inputs),
             notes=[
                 DreamNoteRead(id=str(n.id), line=render_note_line(n))
                 for n in inputs.notes
@@ -199,9 +243,11 @@ class ChatMemoryDreamController(Controller):
                 reason=_skip_reason(inputs),
                 message="There is nothing to dream for this guild tonight.",
             )
-        if inputs.revision != data.base_revision or {
-            str(n.id) for n in inputs.notes
-        } != set(data.note_ids):
+        if (
+            inputs.revision != data.base_revision
+            or {str(n.id) for n in inputs.notes} != set(data.note_ids)
+            or inputs_digest(inputs) != data.inputs_digest
+        ):
             await db_session.rollback()
             return DreamSubmitResult(
                 accepted=False,

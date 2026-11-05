@@ -183,6 +183,30 @@ async def test_blocks_remove_opted_out_lines_and_keep_metadata(site_client, db_s
     assert response.headers["cache-control"] == "private, no-store"
 
 
+async def test_facts_remove_opted_out_lines_on_blocks_and_public(
+    site_client, db_session
+):
+    client, _ = site_client
+    await seed_memory(db_session, facts=f"Pine.\n<{OTHER}:bob> owns the box.")
+    await opt_out(db_session, OTHER)
+    await db_session.commit()
+
+    blocks = (await client.get(URL + "/blocks")).json()
+    public = (await client.get(PUBLIC_URL)).json()
+
+    assert blocks["facts"] == "Pine."
+    assert public["facts"] == "Pine." and public["has_facts"] is True
+
+
+async def test_unsafe_facts_are_masked_on_the_public_route(site_client, db_session):
+    client, _ = site_client
+    await seed_memory(db_session, facts="<script>unsafe</script>")
+
+    public = (await client.get(PUBLIC_URL)).json()
+
+    assert public["facts"] == "" and public["has_facts"] is True
+
+
 async def test_empty_and_paused_blocks(site_client, db_session):
     client, _ = site_client
     body = (await client.get(URL + "/blocks")).json()

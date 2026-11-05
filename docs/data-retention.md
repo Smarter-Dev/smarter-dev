@@ -620,4 +620,10 @@ routes (`smarter_dev/web/api_native/chat_memory_dream.py`): `GET
 answer). The POST runs the same validation as the cron in strict mode, so a
 refusal is a 200 with `accepted: false` and a reason that names no stored text;
 nothing is written. A submission naming a moved revision or a different note set
-is refused as `stale`. Notes are deleted only on an accepted night.
+is refused as `stale`, and so is one whose `inputs_digest` no longer matches:
+the GET returns a sha256 over the revision, each note's id and text, and the
+stored and withheld text of every block, so a privacy purge or retag that
+rewrites a note in place (without moving the revision) between the read and the
+submit is caught. Notes are deleted only on an accepted night. The GET is not
+free of side effects: when the guild has no notes the model may read it stamps
+`last_dream_at` and deletes the unreadable notes, as the cron does.

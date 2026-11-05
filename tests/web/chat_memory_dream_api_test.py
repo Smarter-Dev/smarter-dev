@@ -22,6 +22,7 @@ from sqlalchemy import select
 
 from smarter_dev.web.api_native import chat_memory as chat_memory_module
 from smarter_dev.web.api_native import chat_memory_dream as module
+from smarter_dev.web.chat_bot_opt_out import opt_out
 from smarter_dev.web.chat_memory_dream import dream_cutoff
 from smarter_dev.web.crud import create_memory_note
 from smarter_dev.web.crud import get_guild_memory_blob
@@ -83,6 +84,7 @@ def _body(inputs, **overrides):
         "cutoff": inputs["cutoff"],
         "base_revision": inputs["base_revision"],
         "note_ids": [n["id"] for n in inputs["notes"]],
+        "inputs_digest": inputs["inputs_digest"],
         "memory": "## Who's here\nthe shader crowd ships.",
     }
     body.update(overrides)
@@ -156,6 +158,42 @@ async def test_a_different_note_set_is_stale(client, db_session):
     assert result["reason"] == "stale"
 
 
+async def test_a_note_rewritten_in_place_between_read_and_submit_is_stale(
+    client, db_session
+):
+    """A purge rewrites note text without moving the revision or the ids."""
+    await _seed(db_session)
+    inputs = client.get(_BASE).json()
+    note = (await db_session.scalars(select(ChatAgentMemoryNote))).one()
+    note.content = "a member shipped the shader."
+    await db_session.commit()
+
+    result = client.post(_BASE, json=_body(inputs, facts="Server is Pine.")).json()
+
+    assert result["accepted"] is False
+    assert result["reason"] == "stale"
+    db_session.expire_all()
+    assert (await get_guild_memory_blob(db_session, _GUILD)).revision == 1
+    assert (await db_session.scalars(select(ChatAgentMemoryNote.id))).all()
+
+
+async def test_a_missing_digest_is_refused(client, db_session):
+    await _seed(db_session)
+    inputs = client.get(_BASE).json()
+    body = _body(inputs)
+    del body["inputs_digest"]
+
+    assert client.post(_BASE, json=body).status_code == 422
+
+
+async def test_the_digest_is_stable_for_unchanged_inputs(client, db_session):
+    await _seed(db_session)
+
+    first = client.get(_BASE).json()["inputs_digest"]
+
+    assert first and client.get(_BASE).json()["inputs_digest"] == first
+
+
 async def test_an_old_cutoff_is_stale(client, db_session):
     await _seed(db_session)
     inputs = client.get(_BASE).json()
@@ -172,3 +210,38 @@ async def test_guild_list_names_guilds_with_notes(client, db_session):
     listed = client.get("/api/chat-memory/dream/guilds").json()
 
     assert listed["guild_ids"] == [_GUILD]
+
+
+def test_dream_routes_reject_calls_without_the_bot_token():
+    """The real BOT_API_GUARDS, not the emptied list the other tests use."""
+    with create_test_client(
+        route_handlers=[module.ChatMemoryDreamController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: None, sync_to_thread=False)},
+    ) as guarded:
+        assert guarded.get("/api/chat-memory/dream/guilds").status_code == 401
+        assert guarded.get(_BASE).status_code == 401
+        assert guarded.post(_BASE, json={}).status_code == 401
+
+
+_OPTED_OUT = "222222222222222222"
+
+
+async def test_facts_about_an_opted_out_member_are_withheld_and_carried_over(
+    client, db_session
+):
+    await _seed(db_session)
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    memory.facts = f"Server is Pine.\n<{_OPTED_OUT}:bob> owns the build box."
+    await opt_out(db_session, _OPTED_OUT)
+    await db_session.commit()
+
+    inputs = client.get(_BASE).json()
+
+    assert "Server is Pine." in inputs["user_message"]
+    assert "build box" not in inputs["user_message"]
+    result = client.post(_BASE, json=_body(inputs, facts="Server is Oak.")).json()
+    assert result["accepted"] is True, result
+    db_session.expire_all()
+    stored = (await get_guild_memory_blob(db_session, _GUILD)).facts
+    assert stored == f"Server is Oak.\n<{_OPTED_OUT}:bob> owns the build box."
