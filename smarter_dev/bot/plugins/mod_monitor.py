@@ -243,6 +243,7 @@ async def _handle_moderation(
             trigger_message_id=trigger_message_id,
             trigger=trigger,
             guild_rules=await load_triage_rules(guild_id),
+            enforcing=config.enforcing,
         )
 
         # Post channel message with appended user pings

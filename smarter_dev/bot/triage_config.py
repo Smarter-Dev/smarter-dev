@@ -6,8 +6,9 @@ role, and each destructive triage tool reads it again right before it acts
 (:func:`tool_refusal`), so switching triage off or removing a tool stops a
 run that is already going.
 
-``off`` does not run, ``evaluate`` runs with no destructive tool, ``enforce``
-with the policy's ``enabled_tools`` (an empty list is no destructive tool).
+``off`` does not run, ``evaluate`` runs with no destructive tool and posts
+nothing public, ``enforce`` with the policy's ``enabled_tools`` (an empty list
+is no destructive tool) and, when the guild has rules, rule citations.
 The report goes to ``triage.response_channel_id``, or to the channel the ping
 came from when that is empty; the protected roles are the policy's. The caps
 on each tool (an hour, 50 messages, one delete) are in the tools, not the
@@ -31,6 +32,10 @@ logger = logging.getLogger(__name__)
 
 DESTRUCTIVE_TOOLS = ("timeout", "purge", "delete")
 
+# The rule citation is not destructive and not in ``enabled_tools``: it needs
+# only that triage is enforcing.
+CITE_TOOL = "cite"
+
 
 @dataclass(frozen=True, slots=True)
 class TriageConfig:
@@ -42,6 +47,8 @@ class TriageConfig:
     enabled_tools: tuple[str, ...]
     context_message_limit: int
     response_channel_id: str | None
+    # Mode enforce with the guild-wide enforce control on.
+    enforcing: bool = False
 
 
 def enabled_destructive_tools(raw) -> tuple[str, ...]:
@@ -82,6 +89,7 @@ def triage_from_policy(
         else (),
         context_message_limit=triage.context_message_limit,
         response_channel_id=triage.response_channel_id,
+        enforcing=enforcing,
     )
 
 
@@ -102,6 +110,10 @@ async def tool_refusal(guild_id: str, tool: str) -> str | None:
         return "Moderation config could not be read; no action taken."
     if config is None:
         return "AI moderation has been switched off for this server; no action taken."
+    if tool == CITE_TOOL:
+        if not config.enforcing:
+            return "Rule citations are only posted while triage is enforcing; nothing posted."
+        return None
     if tool not in config.enabled_tools:
         return f"The {tool} action is not enabled for this server; no action taken."
     return None

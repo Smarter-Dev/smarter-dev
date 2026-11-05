@@ -49,6 +49,7 @@ from smarter_dev.bot.plugins.rules import render_rule_citation
 from smarter_dev.bot.plugins.timeout import parse_duration
 from smarter_dev.bot.purge_core import select_purgeable_messages
 from smarter_dev.bot.staff_protection import staff_refusal
+from smarter_dev.bot.triage_config import CITE_TOOL
 from smarter_dev.bot.triage_config import enabled_destructive_tools
 from smarter_dev.bot.triage_config import staff_exempt_role_ids
 from smarter_dev.bot.triage_config import tool_refusal
@@ -199,15 +200,16 @@ def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str
         notes.append((gw.ENTRY_NOTE, f"Flagged for review: {flagged}"))
     for cite in tracker.cites:
         listed = ", ".join(str(index) for index in cite["rule_indexes"])
+        verb = "Possibly cited" if cite.get("possibly_applied") else "Cited"
         notes.append(
             (
                 gw.ENTRY_NOTE,
-                f"Cited rule(s) {listed} on message {cite['message_id']}: "
+                f"{verb} rule(s) {listed} on message {cite['message_id']}: "
                 f"{cite['reason']}",
             )
         )
     if tracker.failure is not None:
-        if tracker.has_actions:
+        if tracker.has_actions or tracker.cites:
             status = (
                 f"Triage stopped partway ({tracker.failure}). The actions listed "
                 "were already taken or possibly applied; nothing else was reviewed. "
@@ -241,6 +243,7 @@ def create_moderation_tools(
     trigger: Trigger | None = None,
     rules: Sequence[GuildRule] = (),
     context_messages: Sequence[DiscordMessage] = (),
+    enforcing: bool = False,
 ) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
@@ -262,6 +265,9 @@ def create_moderation_tools(
             action joins its incident. Defaults to one built from the ids.
         rules: The guild's rules, as the model was shown them. Empty offers
             no ``cite_rule``.
+        enforcing: Triage is in enforce mode. ``cite_rule`` posts publicly, so
+            it is offered only then (and re-checked at call time), whatever
+            ``enabled_tools`` says.
         context_messages: The messages the model was shown; the only ones
             ``cite_rule`` may cite.
 
@@ -599,7 +605,15 @@ def create_moderation_tools(
                 "error": f"Citation limit reached ({MAX_RULE_CITATIONS} per invocation).",
             }
         message_id = str(message_id).strip()
-        if any(cite["message_id"] == message_id for cite in tracker.cites):
+        earlier = next(
+            (cite for cite in tracker.cites if cite["message_id"] == message_id), None
+        )
+        if earlier is not None:
+            if earlier.get("possibly_applied"):
+                return {
+                    "success": False,
+                    "error": f"A citation on message {message_id} may already be posted. Not retried.",
+                }
             return {"success": True, "result": f"Message {message_id} was already cited."}
 
         me = bot.get_me()
@@ -667,20 +681,32 @@ def create_moderation_tools(
         content = render_rule_citation(matched)
         if content is None:
             return {"success": False, "error": "Those rules are too long to quote in one message."}
+        refusal = await gate(guild_id, CITE_TOOL)
+        if refusal:
+            return {"success": False, "error": refusal}
+        entry = {
+            "message_id": message_id,
+            "rule_indexes": list(validated.matched_rule_indices),
+            "reason": reason[:REPORT_REASON_CHARS],
+        }
         try:
             await post_rule_citation(bot.rest, int(channel_id), message, content)
-        except (hikari.NotFoundError, hikari.BadRequestError):
-            return {"success": False, "error": f"Message {message_id} is gone; nothing posted."}
+        except (hikari.NotFoundError, hikari.BadRequestError, hikari.ForbiddenError):
+            return {"success": False, "error": "Not cited: Discord refused the post; nothing posted."}
+        except asyncio.CancelledError:
+            tracker.cites.append({**entry, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] cite_rule on message {message_id} possibly posted; "
+                "triage cancelled"
+            )
+            raise
         except Exception as e:
+            # A timeout or 5xx says nothing about whether an earlier attempt
+            # landed; record it as possibly posted so a retry cannot double-post.
             logger.error(f"[ModTool] cite_rule failed: {type(e).__name__}")
-            return {"success": False, "error": f"Not cited: Discord reported {type(e).__name__}."}
-        tracker.cites.append(
-            {
-                "message_id": message_id,
-                "rule_indexes": list(validated.matched_rule_indices),
-                "reason": reason[:REPORT_REASON_CHARS],
-            }
-        )
+            tracker.cites.append({**entry, "possibly_applied": True})
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(e).__name__)}
+        tracker.cites.append(entry)
         listed = ", ".join(str(index) for index in validated.matched_rule_indices)
         return {"success": True, "result": f"Cited rule(s) {listed} on message {message_id}."}
 
@@ -819,8 +845,9 @@ def create_moderation_tools(
     if "delete" in enabled:
         functions.append(delete_message)
 
-    # Citing is not destructive, so it needs no policy gate, only rules to cite
-    if rules:
+    # Citing is a public post, so only an enforcing triage offers it; it is
+    # not destructive, so it does not depend on enabled_tools
+    if rules and enforcing:
         functions.append(cite_rule)
 
     # Always include utility tools

@@ -277,7 +277,7 @@
             <div class="sk-panel" style="margin-top:1rem;">
                 <div class="sk-panel-head">Staff-ping triage</div>
                 <div class="sk-panel-body">
-                    <p class="sk-text-muted">When a member pings a monitored role, the AI review reads the channel and may freeze the situation until a moderator arrives. <strong>Evaluate</strong> runs it with no destructive tool. Its limits are fixed: a timeout of at most an hour, a purge of at most 50 messages, one delete.</p>
+                    <p class="sk-text-muted">When a member pings a monitored role, the AI review reads the channel and may freeze the situation until a moderator arrives. In <strong>Enforce</strong> mode it also replies with the server's rules a message breaks, when rules are configured. <strong>Evaluate</strong> runs it with no destructive tool and posts nothing. Its limits are fixed: a timeout of at most an hour, a purge of at most 50 messages, one delete.</p>
                     <label for="triage.mode">Mode</label>
                     <select id="triage.mode" name="triage.mode">
                         {% for mode in modes %}<option value="{{ mode }}" {% if doc.triage.mode == mode %}selected{% endif %}>{{ mode }}</option>{% endfor %}

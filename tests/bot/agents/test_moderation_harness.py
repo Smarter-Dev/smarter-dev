@@ -50,12 +50,25 @@ from smarter_dev.bot.agents.moderation_agent import (
     format_context_messages,
 )
 from smarter_dev.bot.agents.models import DiscordMessage
+from smarter_dev.web.guild_rules import format_rules_for_prompt
+from smarter_dev.web.guild_rules import parse_guild_rules
 from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_router import build_model_for
 
 logger = logging.getLogger(__name__)
+
+# The server rules every scenario runs under, numbered the way the bot shows them.
+SERVER_RULES = format_rules_for_prompt(
+    parse_guild_rules(
+        "## Be respectful\nNo harassment, threats, hate speech or slurs.\n\n"
+        "## No spam or scams\nNo scams, crypto lures, income or recruitment pitches, "
+        "or invite spam.\n\n"
+        "## No unsolicited promotion\nDo not advertise your projects or services "
+        "in general channels. Sharing your work in #showcase is allowed.\n"
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +267,22 @@ def create_mock_tools(action_log: ActionLog) -> list:
         action_log.actions.append({"tool": "delete", "args": {"message_id": message_id, "reason": reason}})
         return {"success": True, "result": f"Message {message_id} deleted."}
 
-    return [timeout_user, purge_messages, delete_message, flag_users, send_mod_message, get_user_info, get_user_history]
+    def cite_rule(message_id: str, rule_indexes: list[int], reason: str) -> dict:
+        """Reply to a message with the server rule(s) it breaks, quoted verbatim.
+        Cite BEFORE deleting that message.
+
+        Args:
+            message_id: Discord message ID to reply to
+            rule_indexes: Numbers of the rules it breaks, from server_rules
+            reason: Why the message breaks them
+
+        Returns:
+            dict with 'success' boolean
+        """
+        action_log.actions.append({"tool": "cite", "args": {"message_id": message_id, "rule_indexes": rule_indexes, "reason": reason}})
+        return {"success": True, "result": f"Rule(s) cited on message {message_id}."}
+
+    return [cite_rule, timeout_user, purge_messages, delete_message, flag_users, send_mod_message, get_user_info, get_user_history]
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +517,74 @@ SCENARIOS: list[Scenario] = [
         severity="high",
         notes="Sustained targeted harassment — timeout to freeze, flag for human review",
     ),
+
+    # ── 11. Recruitment pitch, first and only post — cite + delete ───
+    Scenario(
+        name="recruitment_pitch",
+        description="Brand-new member posts a work-from-home pitch once",
+        context_messages=[
+            _msg("Dev1", "anyone know a good pytest fixture pattern for db tests?", 4, "11002"),
+            _msg("Recruiter", "Hi all! Earn $500/day from home, no experience needed. DM me for details!", 2, "11001"),
+        ],
+        trigger_message="@Moderator ^ that DM-me income post is a scam",
+        trigger_author="Dev1",
+        guild_instructions="Remove scams and recruitment pitches.",
+        expected_action="delete",
+        expected_target_id=None,
+        severity="high",
+        notes="Clear first-instance scam/recruitment — cite the rule, delete, no timeout",
+    ),
+
+    # ── 12. First-instance hate speech — short timeout ───────────────
+    Scenario(
+        name="first_post_hate_speech",
+        description="One slur-filled post, no earlier history",
+        context_messages=[
+            _msg("Helper", "Welcome! Ask away.", 3, "12002"),
+            _msg("Drive-by", "[slur redacted] like you shouldn't be allowed to code", 1, "12001"),
+        ],
+        trigger_message="@Moderator that last message from Drive-by is hate speech",
+        trigger_author="Helper",
+        guild_instructions="Zero tolerance for hate speech.",
+        expected_action="timeout",
+        expected_target_id="12001",
+        severity="high",
+        notes="Hate speech warrants a short timeout even on a first post",
+    ),
+
+    # ── 13. Self-promo the rules allow — no action ───────────────────
+    Scenario(
+        name="allowed_self_promo",
+        description="Member shares their project where the rules allow it",
+        context_messages=[
+            _msg("Maker", "Just shipped my CLI tool for log parsing, here is the repo https://github.com/maker/logparse — feedback welcome in #showcase!", 2, "13001"),
+            _msg("Dev1", "nice, will try it", 1, "13002"),
+        ],
+        trigger_message="@Moderator is it okay that Maker posted a link to their own project?",
+        trigger_author="Dev1",
+        guild_instructions="Sharing your own work in #showcase is allowed. Remove only what the rules forbid.",
+        expected_action="message_only",
+        expected_target_id=None,
+        severity="high",
+        notes="Self-promotion the server rules allow — false positives are worse than false negatives",
+    ),
+
+    # ── 14. Help ping, project link only in context — no action ──────
+    Scenario(
+        name="help_ping_with_project_link",
+        description="Help request; an earlier context message links a project",
+        context_messages=[
+            _msg("Maker", "my project is at https://github.com/maker/logparse if anyone wants a look", 6, "14001"),
+            _msg("Newbie", "I'm stuck on a pytest fixture error, can anyone help?", 2, "14002"),
+        ],
+        trigger_message="@Moderator can someone help me with my fixture error? nobody is answering",
+        trigger_author="Newbie",
+        guild_instructions="Only moderate rule violations. Help requests should be redirected to appropriate channels.",
+        expected_action="message_only",
+        expected_target_id=None,
+        severity="high",
+        notes="The ping reports no violation; context messages must be left alone",
+    ),
 ]
 
 
@@ -506,6 +602,7 @@ ACTION_SEVERITY = {
     "get_user_history": 0,  # lookup only
     "get_user_info": 0,  # lookup only
     "flag_users": 0,  # informational only
+    "cite": 0,  # a public reply, not a punishment
     "send_mod_message": 0,
     "delete": 1,
     "purge": 1,
@@ -615,6 +712,7 @@ async def run_scenario(scenario: Scenario, model: Model, model_label: str) -> Sc
                 trigger_message=scenario.trigger_message,
                 trigger_author=scenario.trigger_author,
                 guild_instructions=scenario.guild_instructions,
+                server_rules=SERVER_RULES,
             ),
             toolsets=[FunctionToolset(tools)],
             usage_limits=UsageLimits(request_limit=MAX_TRIAGE_REQUESTS),
@@ -634,6 +732,8 @@ async def run_scenario(scenario: Scenario, model: Model, model_label: str) -> Sc
                     parts.append(f"Purged {a['args']['count']} messages from user {a['args']['user_id']}: {a['args']['reason']}")
                 elif a["tool"] == "delete":
                     parts.append(f"Deleted message {a['args']['message_id']}: {a['args']['reason']}")
+                elif a["tool"] == "cite":
+                    parts.append(f"Cited rule(s) {a['args']['rule_indexes']} on message {a['args']['message_id']}: {a['args']['reason']}")
             actions_summary = "\n".join(parts) if parts else "Actions were taken."
 
             follow_up = Agent(

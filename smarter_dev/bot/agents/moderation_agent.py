@@ -99,6 +99,9 @@ async def _enforce_channel_message(
         parts.append(f"Purged {p['count']} messages from {p['username']}: {p['reason']}")
     for d in tracker.deletions:
         parts.append(f"Deleted message {d['message_id']}: {d['reason']}")
+    for c in tracker.cites:
+        listed = ", ".join(str(index) for index in c["rule_indexes"])
+        parts.append(f"Cited rule(s) {listed} on message {c['message_id']}: {c['reason']}")
     actions_summary = "\n".join(parts) if parts else "Actions were taken."
 
     try:
@@ -167,6 +170,7 @@ async def run_moderation_agent(
     trigger_author_id: str | None = None,
     trigger_author_display_name: str | None = None,
     guild_rules: Sequence[GuildRule] = (),
+    enforcing: bool = False,
 ) -> tuple[str, ActionTracker]:
     """Run the moderation triage agent to evaluate a situation and take action.
 
@@ -183,8 +187,8 @@ async def run_moderation_agent(
         trigger: The ping as the moderation gateway's trigger (its incident)
         trigger_author_id: Discord user ID of the trigger message author
         trigger_author_display_name: Their display name, if known
-        guild_rules: The guild's rules, numbered; they go into the prompt and
-            make ``cite_rule`` available
+        guild_rules: The guild's rules, numbered; they go into the prompt
+        enforcing: Triage is enforcing; with rules, this offers ``cite_rule``
 
     Returns:
         Tuple of (assessment string, ActionTracker with all actions taken)
@@ -198,6 +202,7 @@ async def run_moderation_agent(
         trigger=trigger,
         rules=guild_rules,
         context_messages=context_messages,
+        enforcing=enforcing,
     )
 
     context_text = format_context_messages(context_messages)

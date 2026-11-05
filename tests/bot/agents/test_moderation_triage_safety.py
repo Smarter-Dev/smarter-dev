@@ -772,6 +772,7 @@ async def _triage_incident(discord, model, **kw):
         "enabled_tools": ["timeout", "purge", "delete"],
         "trigger_message_id": str(PING_MESSAGE),
         "guild_rules": RULES,
+        "enforcing": True,
         **kw,
     }
     with moderation_agent.get_moderation_agent().override(model=model):
@@ -884,6 +885,7 @@ async def test_cite_rule_refuses_what_validation_rejects(
         trigger_message_id=str(PING_MESSAGE),
         enabled_tools=[],
         rules=RULES,
+        enforcing=True,
         context_messages=_incident(discord),
     )
     cite = next(t.function for t in tools if t.name == "cite_rule")
@@ -915,6 +917,7 @@ async def test_cite_rule_never_cites_the_bot_or_staff(discord, stored):
         trigger_message_id=str(PING_MESSAGE),
         enabled_tools=[],
         rules=RULES,
+        enforcing=True,
         context_messages=context,
     )
     cite = next(t.function for t in tools if t.name == "cite_rule")
@@ -936,6 +939,7 @@ async def test_cite_rule_posts_each_message_once(discord, stored):
         trigger_message_id=str(PING_MESSAGE),
         enabled_tools=[],
         rules=RULES,
+        enforcing=True,
         context_messages=_incident(discord),
     )
     cite = next(t.function for t in tools if t.name == "cite_rule")
@@ -945,3 +949,76 @@ async def test_cite_rule_posts_each_message_once(discord, stored):
 
     assert first["success"] and again["success"]
     assert len(discord.sent) == 1 and len(tracker.cites) == 1
+
+
+def _cite_tool(discord, **kw):
+    tools, tracker = mod_tools.create_moderation_tools(
+        discord,
+        guild_id=str(GUILD_ID),
+        channel_id=str(CHANNEL_ID),
+        trigger_message_id=str(PING_MESSAGE),
+        enabled_tools=kw.pop("enabled_tools", []),
+        rules=RULES,
+        context_messages=_incident(discord),
+        **kw,
+    )
+    return {t.name: t.function for t in tools}, tracker
+
+
+async def test_evaluate_mode_offers_no_cite_tool_and_posts_nothing(discord, stored):
+    seen: list = []
+
+    _, tracker = await _triage_incident(
+        discord,
+        _scripted([("final", {"assessment": "ok"})], seen=seen),
+        enforcing=False,
+    )
+
+    assert "cite_rule" not in {tool.name for tool in seen[0][1].function_tools}
+    assert discord.sent == [] and tracker.cites == []
+
+
+async def test_cite_is_offered_whatever_enabled_tools_says(discord, stored):
+    tools, _ = _cite_tool(discord, enforcing=True, enabled_tools=[])
+
+    assert "cite_rule" in tools
+
+
+async def test_cite_is_refused_when_enforcement_is_switched_off_mid_run(
+    discord, stored
+):
+    raw = mp.default_document().as_json()
+    raw["triage"].update(mode=mp.ENFORCE, monitored_role_ids=[str(MOD_ROLE_ID)])
+    stored.policy = mp.validate(raw)
+    tools, tracker = _cite_tool(discord, enforcing=True)
+    raw["triage"]["mode"] = mp.EVALUATE
+    stored.policy = mp.validate(raw)
+
+    result = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+
+    assert result["success"] is False and "only posted while triage is enforcing" in result["error"]
+    assert discord.sent == [] and tracker.cites == []
+
+    raw["triage"]["mode"] = mp.OFF
+    stored.policy = mp.validate(raw)
+    result = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+    assert result["success"] is False and discord.sent == []
+
+
+async def test_cite_that_times_out_is_possibly_posted_and_not_retried(discord, stored):
+    raw = mp.default_document().as_json()
+    raw["triage"].update(mode=mp.ENFORCE, monitored_role_ids=[str(MOD_ROLE_ID)])
+    stored.policy = mp.validate(raw)
+    tools, tracker = _cite_tool(discord, enforcing=True)
+    discord.fail["create_message"] = TimeoutError("slow")
+
+    first = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+    discord.fail.clear()
+    retry = await tools["cite_rule"](str(RECRUIT_MESSAGE), [2], "why")
+
+    assert first["success"] is False
+    assert retry["success"] is False and "may already be posted" in retry["error"]
+    assert discord.sent == []
+    assert tracker.cites[0]["possibly_applied"] is True
+    notes = [text for _, text in mod_tools.triage_notes(tracker, "x")]
+    assert any("Possibly cited" in text for text in notes)
