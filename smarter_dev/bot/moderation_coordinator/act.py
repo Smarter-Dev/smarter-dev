@@ -801,19 +801,33 @@ class Executor:
         _log_decision(evaluation, targets, result, deleted)
 
         if lines and result.incident_id is not None:
-            await gateway.add_notes(
-                result.incident_id,
-                source=ACTOR,
-                notes=lines,
-                report_channel_id=policy.report_channel_id,
-                target_user_id=facts.author_id,
-            )
-            if any(line[1].startswith(REFUSED_ALERT) for line in lines):
-                # Marked once the alert is written: a failure before leaves
-                # the burst's next post to carry it.
-                self._refusal_alerts[_refusal_alert_key(evaluation)] = None
+            # One alert per burst: decided and marked with no await between,
+            # so posts finishing together cannot both send it.
+            alert_key = _refusal_alert_key(evaluation)
+            alerting = any(line[1].startswith(REFUSED_ALERT) for line in lines)
+            if alerting and alert_key in self._refusal_alerts:
+                lines = [
+                    line for line in lines if not line[1].startswith(REFUSED_ALERT)
+                ]
+                alerting = False
+            if alerting:
+                self._refusal_alerts[alert_key] = None
                 while len(self._refusal_alerts) > 256:
                     del self._refusal_alerts[next(iter(self._refusal_alerts))]
+            try:
+                if lines:
+                    await gateway.add_notes(
+                        result.incident_id,
+                        source=ACTOR,
+                        notes=lines,
+                        report_channel_id=policy.report_channel_id,
+                        target_user_id=facts.author_id,
+                    )
+            except BaseException:
+                # Not written: the burst's next post carries the alert.
+                if alerting:
+                    self._refusal_alerts.pop(alert_key, None)
+                raise
         if hold is not None and hold.noticed:
             await self.messenger.post(
                 hold.channel_id, _closing(provisional, evaluation)
@@ -1340,8 +1354,7 @@ class Executor:
             if line.startswith(rules.SCAM_GATE)
         ):
             # One alert per burst: its other posts are covered by it.
-            if _refusal_alert_key(evaluation) not in self._refusal_alerts:
-                lines.append(_refused_line(evaluation))
+            lines.append(_refused_line(evaluation))
         scam_fired = any(
             line.startswith(rules.SCAM_GATE) for line in decision.rules_fired
         )
@@ -1676,8 +1689,8 @@ REFUSED_ALERT = "The classifier refused to review "
 #: Discord keeps one timeout per member, so the hold and a real timeout from
 #: the same burst are one: removing it lifts both.
 HOLD_NOTE = (
-    ", and releasing the hold ends it; removing the timeout also lifts any "
-    "real timeout from this burst (Discord keeps one per member)"
+    ", and removing the timeout releases the hold and also lifts any real "
+    "timeout from this burst (Discord keeps one per member)"
 )
 
 

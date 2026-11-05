@@ -38,6 +38,7 @@ from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import PastAction
+from smarter_dev.bot.moderation_coordinator.model import Sanction
 from smarter_dev.bot.moderation_coordinator.ownership import COORDINATOR
 from smarter_dev.bot.moderation_coordinator.ownership import LEGACY
 from smarter_dev.bot.moderation_coordinator.ownership import Ownership
@@ -2326,9 +2327,56 @@ async def test_a_refused_post_does_not_take_the_bursts_sanction_from_a_confirmed
     )
 
 
-async def test_a_refusal_alert_that_failed_to_write_is_carried_by_the_next_post():
-    case, victim, posts = scam_burst()
-    case = replace(case, policy=acting(case.policy), haiku=_refusing)
+def _exe_refusing(answers, calls, by_text=None):
+    """Haiku refusing the installer link and calling the Nitro lure a scam."""
+    answering = scripted_haiku(answers, calls, by_text)
+    refusing = _refusing(answers, calls, by_text)
+    return FunctionModel(
+        lambda messages, info: (
+            refusing.function(messages, info)
+            if "setup.exe" in str(messages)
+            else answering.function(messages, info)
+        ),
+        model_name="claude-haiku-5-5",
+    )
+
+
+def _first_message_case(*texts, gap=10):
+    case, victim, _ = scam_burst()
+    posts = [
+        say(victim, text, NOW + timedelta(seconds=gap * n))
+        for n, text in enumerate(texts)
+    ]
+    reads = ReplayReads(
+        histories={
+            victim.id: AuthorHistory(
+                is_first_message=True, days_since_last_message=None
+            )
+        }
+    )
+    case = replace(
+        case,
+        policy=acting(case.policy),
+        messages=posts,
+        reads=reads,
+        haiku=_exe_refusing,
+    )
+    return case, posts
+
+
+EXE = "grab the installer https://files.example/setup.exe"
+EXE_TWO = "the installer again https://files.example/setup.exe?v=2"
+NITRO = "Free Nitro for everyone, claim here https://disc0rd-gifts.example/nitro"
+
+
+async def _refusal_alerts():
+    return [a for a in await entries(gw.ENTRY_ALERT) if "classifier refused" in a]
+
+
+async def test_a_refusal_alert_that_failed_to_write_is_carried_by_the_next_post(
+    monkeypatch,
+):
+    case, posts = _first_message_case(EXE, EXE_TWO)
     h = harness(case)
     real = ModerationGateway.add_notes
     failing = [True]
@@ -2341,11 +2389,37 @@ async def test_a_refusal_alert_that_failed_to_write_is_carried_by_the_next_post(
             raise RuntimeError("write failed")
         return await real(self, *args, **kwargs)
 
-    ModerationGateway.add_notes = flaky
-    try:
-        await h.judge(*posts)
-    finally:
-        ModerationGateway.add_notes = real
+    monkeypatch.setattr(ModerationGateway, "add_notes", flaky)
+    await h.judge(*posts)
 
-    refused = [a for a in await entries(gw.ENTRY_ALERT) if "classifier refused" in a]
-    assert len(refused) == 1
+    assert len(await _refusal_alerts()) == 1
+
+
+async def test_posts_of_one_burst_refused_together_send_one_alert():
+    case, posts = _first_message_case(EXE, EXE_TWO, gap=1)
+    h = harness(case)
+    for post in posts:
+        h.shadow.submit(post)
+    await h.shadow.drain()
+
+    assert len(await _refusal_alerts()) == 1
+
+
+async def test_the_alert_says_a_real_sanction_already_covers_the_hold():
+    case, posts = _first_message_case(EXE)
+    h = harness(case)
+    # A real three-day timeout was already given to the burst.
+    assert h.shadow.coordinator.sanctions.claim(
+        GUILD,
+        posts[0].author_id,
+        "earlier",
+        Sanction(gw.TIMEOUT, duration_seconds=3 * 86400),
+        posts[0].posted_at,
+        burst=posts[0].message_id,
+    )
+
+    await h.judge(*posts)
+
+    [alert] = await _refusal_alerts()
+    assert "no hold was added: the member already has a real sanction" in alert
+    assert "releases the hold" not in alert

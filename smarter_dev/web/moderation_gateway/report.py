@@ -410,7 +410,7 @@ def _summary(
         elif kind == t.TIMEOUT:
             longest = max(op.duration_seconds or 0 for op in ops)
             # A hold still on outlasts a shorter timeout: one per member.
-            longest = max([longest, *held.values()])
+            longest = max(longest, held.get(next(iter(targets)), 0))
             parts.append(f"{verb} for {_span(longest)}")
         else:
             parts.append(verb)
