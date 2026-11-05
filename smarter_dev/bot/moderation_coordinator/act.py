@@ -59,6 +59,7 @@ from uuid import UUID
 from smarter_dev.bot.attachment_filter import classify_attachments
 from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
+from smarter_dev.bot.moderation_coordinator.decide import EVALUATE_ONLY
 from smarter_dev.bot.moderation_coordinator.decide import EXPIRED
 from smarter_dev.bot.moderation_coordinator.decide import RELEASED
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
@@ -99,6 +100,7 @@ ACTOR = "coordinator"
 INVESTIGATING = "-# Investigating potential scam"
 CLOSED_CLEAN = "-# Checked: no scam found"
 CLOSED_REMOVED = "-# Checked: removed as a scam"
+CLOSED_REFUSED = "-# Checked: removed pending moderator review"
 CLOSED_UNKNOWN = "-# Check incomplete: a moderator will take a look"
 
 #: scam-banner's own wording for the two warns, and for its hold.
@@ -328,6 +330,8 @@ class Executor:
         self.summaries = summaries
         #: Holds placed and not yet resolved: (guild, author, post key).
         self._holds: dict[tuple[str, str, str], _Hold] = {}
+        #: Refusal alerts sent, newest last (bounded): one per author's burst.
+        self._refusal_alerts: dict[tuple[str, str, str], None] = {}
 
     @classmethod
     def for_bot(
@@ -741,6 +745,7 @@ class Executor:
                         reason=_reason([target]),
                         duration_seconds=sanction.duration_seconds,
                         claim=sanction.claim,
+                        provisional=sanction.review_hold,
                         target_is_bot=False,
                     )
                 )
@@ -1323,8 +1328,22 @@ class Executor:
         if provisional is not None and provisional.resolution == EXPIRED:
             lines.append(_expired_line(provisional, evaluation))
         lines.extend((gw.ENTRY_NOTE, line) for line in decision.review)
-        if evaluation.scam_outcome == "refused":
-            lines.append(_refused_line(evaluation))
+        if evaluation.scam_outcome == "refused" and not any(
+            rules.COPY_JUDGED in line
+            for line in decision.rules_fired
+            if line.startswith(rules.SCAM_GATE)
+        ):
+            # One alert per burst: its other posts are covered by it.
+            alert_key = (
+                facts.guild_id,
+                facts.author_id,
+                evaluation.burst_alias or evaluation.key,
+            )
+            if alert_key not in self._refusal_alerts:
+                self._refusal_alerts[alert_key] = None
+                while len(self._refusal_alerts) > 256:
+                    del self._refusal_alerts[next(iter(self._refusal_alerts))]
+                lines.append(_refused_line(evaluation))
         scam_fired = any(
             line.startswith(rules.SCAM_GATE) for line in decision.rules_fired
         )
@@ -1655,21 +1674,40 @@ def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str
 
 
 def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
-    """The alert for a message the classifier refused to review."""
+    """The alert for a message the classifier refused to review: says what
+    this decision does about it (policy, evaluate-only and staff change it)."""
     facts = evaluation.facts
+    decision = evaluation.to_carry_out
     category = next((v.detail for v in evaluation.verdicts.values() if v.detail), None)
     said = f" ({category.replace('_', ' ')})" if category else ""
+    target = decision.targets.get(facts.author_id)
+    if facts.author_id in decision.staff_excluded:
+        done = "The author is staff, so nothing was done"
+    elif any(EVALUATE_ONLY in line for line in decision.rules_fired):
+        done = "The policy only evaluates this check, so nothing was done"
+    else:
+        removed = target is not None and bool(target.cleanup)
+        sanction = target.sanction if target is not None else None
+        done = "The message was removed" if removed else "The message was left in place"
+        if sanction is not None and sanction.kind == gw.TIMEOUT:
+            held = rules.duration_text(sanction.duration_seconds or 0)
+            done += f" and the member is held for {held}"
+            if held != rules.duration_text(rules.REFUSAL_HOLD_SECONDS):
+                done += " (the policy caps timeouts)"
+        else:
+            done += " and no hold was placed (the policy does not allow one)"
     return (
         gw.ENTRY_ALERT,
         f"The classifier refused to review <@{facts.author_id}>'s message{said}. "
-        "It was removed and the member is held for "
-        f"{rules.duration_text(rules.REFUSAL_HOLD_SECONDS)}; a moderator should "
-        f"decide, and releasing the hold ends it: {jump_link(facts)}",
+        f"{done}. A moderator should decide, and releasing the hold ends it: "
+        f"{jump_link(facts)}",
     )
 
 
 def _closing(provisional: Provisional | None, evaluation: Evaluation) -> str:
     resolution = provisional.resolution if provisional is not None else EXPIRED
+    if evaluation.scam_outcome == "refused":
+        return CLOSED_REFUSED
     if resolution == RELEASED:
         return CLOSED_CLEAN
     if resolution != EXPIRED or evaluation.scam_outcome == "violation":

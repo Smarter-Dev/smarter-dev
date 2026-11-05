@@ -275,6 +275,9 @@ class Sanction:
     kind: str  # gw.WARN / gw.TIMEOUT / gw.KICK / gw.BAN
     duration_seconds: int | None = None
     claim: str | None = None
+    #: A timeout held for moderators to decide, not a sanction: recorded as a
+    #: review hold (``provisional``), so it is no moderation history.
+    review_hold: bool = False
 
     @property
     def rank(self) -> int:

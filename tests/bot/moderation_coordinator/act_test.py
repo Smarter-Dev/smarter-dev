@@ -23,6 +23,7 @@ from sqlalchemy import select
 from smarter_dev.bot.moderation_coordinator import act as act_module
 from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_CLEAN
+from smarter_dev.bot.moderation_coordinator.act import CLOSED_REFUSED
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_REMOVED
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_UNKNOWN
 from smarter_dev.bot.moderation_coordinator.act import EDIT_PING_TEXT
@@ -49,6 +50,7 @@ from smarter_dev.bot.moderation_coordinator.shadow import ModerationShadow
 from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.models import ModerationIncidentEntry
 from smarter_dev.web.models import ModerationIncidentLink
+from smarter_dev.web.models import ModerationOperation
 from smarter_dev.web.models import ModerationOutbox
 from smarter_dev.web.moderation_gateway import ModerationGateway
 from smarter_dev.web.moderation_gateway import types as gw
@@ -339,13 +341,24 @@ async def test_a_refusal_holds_the_author_a_day_removes_the_post_and_alerts():
 
     timeouts = [call for call in h.port.calls if call[0] == "timeout"]
     assert timeouts and timeouts[-1][2] is not None  # still held: never released
+    # The 5-minute hold became a day's: the last expiry is ~24h past the first.
+    assert 23.5 * 3600 < timeouts[-1][2] - timeouts[0][2] + 300 < 24.5 * 3600
     assert h.deleted() >= {posts[1].message_id}
     alerts = await entries(gw.ENTRY_ALERT)
-    assert any(
-        "classifier refused to review" in a and "general harms" in a for a in alerts
-    )
+    refused = [a for a in alerts if "classifier refused to review" in a]
+    # One alert for the burst, not one per copy, naming the category and what
+    # was done.
+    assert len(refused) == 1 and "general harms" in refused[0]
+    assert "held for 1 day" in refused[0]
     assert (posts[1].channel_id, CLOSED_CLEAN) not in h.messenger.posts
     assert (posts[1].channel_id, CLOSED_UNKNOWN) not in h.messenger.posts
+    assert (posts[1].channel_id, CLOSED_REFUSED) in h.messenger.posts
+    assert not any("general" in text for _, text in h.messenger.posts)
+    # Recorded as a review hold, so it is no moderation history afterwards.
+    async with default_session_factory()() as session:
+        ops = (await session.execute(select(ModerationOperation))).scalars().all()
+    day = [op for op in ops if (op.requested or {}).get("duration_seconds") == 86400]
+    assert day and all((op.requested or {}).get("provisional") for op in day)
 
 
 async def test_a_failed_evaluation_after_the_hold_is_reported(monkeypatch):

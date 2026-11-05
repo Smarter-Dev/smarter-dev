@@ -320,3 +320,27 @@ async def test_a_lower_longest_timeout_saved_before_dispatch_is_applied():
     # Every timeout ends within the current revision's 10 minutes (the
     # spam mute asked for 24 h under revision 1).
     assert max(expiries) - time.time() <= 600 + 5
+
+
+async def test_a_refusal_under_a_policy_without_timeouts_says_no_hold_was_placed():
+    from tests.bot.moderation_coordinator.act_test import _refusing
+    from tests.bot.moderation_coordinator.replay_cases import scam_burst
+
+    case, _, posts = scam_burst()
+    case = replace(
+        case,
+        policy=policy_from(document(sanctions__allowed=[mp.WARN, mp.DELETE])),
+        haiku=_refusing,
+    )
+    h = harness(case)
+    on_revision(h, {"revision": 1, "policy": case.policy})
+
+    await h.judge(*posts)
+
+    assert [call for call in h.port.calls if call[0] == "timeout"] == []
+    alerts = await entries(gw.ENTRY_ALERT)
+    assert any(
+        "classifier refused to review" in a and "no hold was placed" in a
+        for a in alerts
+    )
+    assert not any("held for 1 day" in a for a in alerts)

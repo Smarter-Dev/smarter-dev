@@ -573,6 +573,9 @@ def duration_text(seconds: int) -> str:
 #: How long a message the classifier refused to read holds its author.
 REFUSAL_HOLD_SECONDS = DAY
 
+#: How a copy's reason says the post it copies was already judged.
+COPY_JUDGED = ", copy of a post already judged"
+
 
 def scam_claim(key: str) -> str:
     """The one timeout claim a post and its copies share."""
@@ -657,11 +660,15 @@ class ScamReview:
         for :data:`REFUSAL_HOLD_SECONDS`, so a moderator decides; releasing
         the hold ends it. A copy is removed only: the post carries the hold."""
         facts = self.facts
-        category = f" ({verdict.detail.replace('_', ' ')})" if verdict.detail else ""
+        # The reason reaches the member (their DM): no classifier internals.
+        # The category is in the moderators' alert (``verdict.detail``).
+        reason = "held for moderator review"
+        if self.copy:
+            reason += COPY_JUDGED
         return [
             RuleHit(
                 rule=SCAM_GATE,
-                reason=f"classifier refused to review the message{category}",
+                reason=reason,
                 target_user_id=facts.author_id,
                 target_name=facts.author_name,
                 sanction=None
@@ -670,6 +677,7 @@ class ScamReview:
                     gw.TIMEOUT,
                     duration_seconds=REFUSAL_HOLD_SECONDS,
                     claim=scam_claim(self.key),
+                    review_hold=True,
                 ),
                 cleanup=(Cleanup(facts.channel_id, facts.message_id),)
                 + tuple(

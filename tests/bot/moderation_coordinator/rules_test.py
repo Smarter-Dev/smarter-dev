@@ -283,8 +283,10 @@ def test_a_refused_verdict_removes_the_message_and_holds_the_author_a_day():
     (hit,) = hits
     assert (hit.sanction.kind, hit.sanction.duration_seconds) == (gw.TIMEOUT, DAY)
     assert hit.cleanup[0].message_id == facts.message_id
-    assert "general harms" in hit.reason
+    assert hit.reason == "held for moderator review"
     assert not hit.model_justified and not hit.high_signal
+    assert hit.sanction.review_hold
+    assert "general" not in hit.reason  # the member's DM carries the reason
 
 
 def test_a_yes_beats_a_refusal_and_a_copy_is_removed_only():
@@ -301,6 +303,13 @@ def test_a_yes_beats_a_refusal_and_a_copy_is_removed_only():
         Verdicts({label: LabelVerdict(label, "refused") for label in (SCAM, ABUSE)})
     )
     assert outcome == "refused" and hits[0].sanction is None and hits[0].cleanup
+
+
+def test_a_refused_check_settles_the_provisional_hold_without_a_sanction():
+    hold = Provisional("A", 300, ("scam link",))
+    for outcome in ("refused",):
+        decision = decide([], refusals={}, provisional=hold, scam_outcome=outcome)
+        assert decision.provisional.resolution == "decided"
 
 
 # -- decide --------------------------------------------------------------------
