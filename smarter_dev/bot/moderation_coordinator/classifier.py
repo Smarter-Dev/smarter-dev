@@ -11,12 +11,15 @@ one request on one backend (:func:`choose_backend`):
   questions are needed. The promotion question and the participant questions
   go in one request; with no candidates it is exactly the ring's own ad check.
 
-Never Jev then Haiku, and never a second request for the same revision:
+Never Jev then Haiku, and one request for the same revision, with a single
+exception: when Haiku refuses a request that carried other members' messages,
+the author's own labels are asked once more without them
+(:meth:`Classifier._ask_again_alone`), within the budget:
 
 * no tools, no web search, no tool loop (``UsageLimits(request_limit=1)``);
 * no retries at any layer: pydantic-ai ``retries=0``, the Anthropic SDK and
   the TypeSafe SDK both built with ``max_retries=0``;
-* one deadline (:data:`DEADLINE_SECONDS`, the brief's 10 s) for the request;
+* one deadline (:data:`DEADLINE_SECONDS`, the brief's 10 s) for each request;
 * bounded input (message and context truncated, at most :data:`MAX_IMAGES`
   images of at most :data:`MAX_IMAGE_BYTES` each) and output (``max_tokens``);
 * a per-author, per-guild-minute and per-guild-day budget
@@ -1319,6 +1322,10 @@ class ModerationClassifier:
         result.output_tokens += again.output_tokens
         result.cost_usd += again.cost_usd
         result.latency_ms = (result.latency_ms or 0) + (again.latency_ms or 0)
+        if again.outcome == BUDGET:
+            # Nothing was asked: the first request's images stay the record.
+            result.refused_by = again.refused_by
+            return
         result.images = again.images
         result.images_loaded = again.images_loaded
         result.summary = again.summary

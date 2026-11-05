@@ -779,14 +779,19 @@ class Executor:
             )
 
         await self._dm_before_ban(gateway, trigger, targets, facts, policy)
-        if proposals:
-            result = await gateway.act(trigger, proposals)
-        else:
-            result = gw.ActResult(
-                incident_id=await gateway.ensure_incident(
-                    trigger, subject=facts.author_id
+        try:
+            if proposals:
+                result = await gateway.act(trigger, proposals)
+            else:
+                result = gw.ActResult(
+                    incident_id=await gateway.ensure_incident(
+                        trigger, subject=facts.author_id
+                    )
                 )
-            )
+        except BaseException:
+            # The alert never went out: the burst's next post carries it.
+            self._refusal_alerts.pop(_refusal_alert_key(evaluation), None)
+            raise
 
         deleted = {
             message_id
@@ -1334,11 +1339,7 @@ class Executor:
             if line.startswith(rules.SCAM_GATE)
         ):
             # One alert per burst: its other posts are covered by it.
-            alert_key = (
-                facts.guild_id,
-                facts.author_id,
-                evaluation.burst_alias or evaluation.key,
-            )
+            alert_key = _refusal_alert_key(evaluation)
             if alert_key not in self._refusal_alerts:
                 self._refusal_alerts[alert_key] = None
                 while len(self._refusal_alerts) > 256:
@@ -1673,6 +1674,18 @@ def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str
     )
 
 
+def _refusal_alert_key(evaluation: Evaluation) -> tuple[str, str, str]:
+    facts = evaluation.facts
+    return (
+        facts.guild_id,
+        facts.author_id,
+        evaluation.burst_alias or evaluation.key,
+    )
+
+
+_SANCTION_DONE = {gw.BAN: "banned", gw.KICK: "kicked", gw.WARN: "warned"}
+
+
 def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
     """The alert for a message the classifier refused to review: says what
     this decision does about it (policy, evaluate-only and staff change it)."""
@@ -1681,9 +1694,14 @@ def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
     category = next((v.detail for v in evaluation.verdicts.values() if v.detail), None)
     said = f" ({category.replace('_', ' ')})" if category else ""
     target = decision.targets.get(facts.author_id)
+    hold_placed = False
     if facts.author_id in decision.staff_excluded:
         done = "The author is staff, so nothing was done"
-    elif any(EVALUATE_ONLY in line for line in decision.rules_fired):
+    elif any(
+        EVALUATE_ONLY in line
+        for line in decision.rules_fired
+        if line.startswith(rules.SCAM_GATE)
+    ):
         done = "The policy only evaluates this check, so nothing was done"
     else:
         removed = target is not None and bool(target.cleanup)
@@ -1694,12 +1712,18 @@ def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
             done += f" and the member is held for {held}"
             if held != rules.duration_text(rules.REFUSAL_HOLD_SECONDS):
                 done += " (the policy caps timeouts)"
+            hold_placed = True
+        elif sanction is not None:
+            done += (
+                f" and the member was {_SANCTION_DONE.get(sanction.kind, 'sanctioned')}"
+            )
         else:
             done += " and no hold was placed (the policy does not allow one)"
     return (
         gw.ENTRY_ALERT,
         f"The classifier refused to review <@{facts.author_id}>'s message{said}. "
-        f"{done}. A moderator should decide, and releasing the hold ends it: "
+        f"{done}. A moderator should decide"
+        f"{', and releasing the hold ends it' if hold_placed else ''}: "
         f"{jump_link(facts)}",
     )
 

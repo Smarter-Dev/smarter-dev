@@ -441,7 +441,11 @@ class ScamSanctions:
         burst: str | None = None,
     ) -> bool:
         """Whether ``sanction`` applies: it is stronger than what the post
-        and its burst were already given. True records it as both's."""
+        and its burst were already given. True records it as both's.
+
+        A review hold (a refused post, held for a moderator) is not a
+        sanction for the scam: it applies only when nothing was given, and is
+        never recorded, so a later post's real sanction is not stripped by it."""
         now = time.time() if now is None else now
         for stale, (at, _) in list(self._given.items()):
             if now - at > SANCTION_TTL_SECONDS:
@@ -453,6 +457,8 @@ class ScamSanctions:
             given = self._given.get(claim)
             if given is not None and not sanction.stronger_than(given[1]):
                 return False
+        if sanction.review_hold:
+            return True
         for claim in keys:
             self._given[claim] = (now, sanction)
         return True

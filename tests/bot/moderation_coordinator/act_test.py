@@ -2268,3 +2268,59 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     [(_, hold), (_, dm)] = h.messenger.dms
     assert "being checked" in hold
     assert "we removed what it posted" in dm
+
+
+async def test_a_refused_post_does_not_take_the_bursts_sanction_from_a_confirmed_scam():
+    case, victim, _ = scam_burst()
+    exe = "grab the installer https://files.example/setup.exe"
+    nitro = "Free Nitro for everyone, claim here https://disc0rd-gifts.example/nitro"
+    first = [say(victim, exe, NOW)]
+    second = [say(victim, nitro, NOW + timedelta(seconds=10), channel=OTHER)]
+    lure = second[0]
+    # A first message is judged on its own, without a repeat to hold it.
+    reads = ReplayReads(
+        histories={
+            victim.id: AuthorHistory(
+                is_first_message=True, days_since_last_message=None
+            )
+        }
+    )
+
+    def haiku(answers, calls, by_text=None):
+        answering = scripted_haiku(answers, calls, by_text)
+        refusing = _refusing(answers, calls, by_text)
+        return FunctionModel(
+            lambda messages, info: (
+                refusing.function(messages, info)
+                if "setup.exe" in str(messages)
+                else answering.function(messages, info)
+            ),
+            model_name="claude-haiku-5-5",
+        )
+
+    case = replace(
+        case,
+        policy=acting(case.policy),
+        messages=[*first, *second],
+        reads=reads,
+        haiku=haiku,
+    )
+    h = harness(case)
+
+    await h.judge(*first, *second)
+
+    assert h.deleted() >= {lure.message_id}
+    async with default_session_factory()() as session:
+        ops = (await session.execute(select(ModerationOperation))).scalars().all()
+        actions = (await session.execute(select(ModerationAction))).scalars().all()
+    # B's confirmed scam was sanctioned (warned, being a first message) with
+    # its own history row, though A's review hold (a day) was already running.
+    assert any(
+        op.kind == gw.WARN
+        and op.state == gw.CONFIRMED
+        and op.reason == "confirmed scam"
+        for op in ops
+    )
+    assert any(
+        a.action_type == "warn" and a.reason == "confirmed scam" for a in actions
+    )

@@ -418,6 +418,42 @@ async def test_provisional_timeout_then_ban_then_nothing_left_to_lift(
     assert discord.count("ban") == 1
 
 
+async def test_a_real_timeout_over_a_review_hold_is_sent_and_recorded(
+    discord, db, clock
+):
+    """A day's review hold covers a shorter real timeout in time, but the real
+    one is its own action: it needs its history row, and keeps the hold's end."""
+    gateway = make_gateway(discord, db, clock)
+    await gateway.act(
+        handler_trigger(),
+        [
+            Proposal(
+                kind=t.TIMEOUT,
+                target_user_id=SCAMMER,
+                duration_seconds=86400,
+                claim="scam:a",
+                provisional=True,
+            )
+        ],
+    )
+    held_until = discord.members[SCAMMER]
+    real = await gateway.act(
+        handler_trigger(),
+        [
+            Proposal(
+                kind=t.TIMEOUT,
+                target_user_id=SCAMMER,
+                duration_seconds=3600,
+                claim="scam:b",
+            )
+        ],
+    )
+    assert real.outcomes[0].state == t.CONFIRMED
+    assert discord.members[SCAMMER] == held_until
+    actions = await rows(db, ModerationAction)
+    assert [action.action_type for action in actions] == ["timeout", "timeout"]
+
+
 async def test_provisional_timeout_cleared_lifts_only_its_own_claim(discord, db, clock):
     gateway = make_gateway(discord, db, clock)
     await gateway.act(

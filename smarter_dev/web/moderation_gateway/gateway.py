@@ -985,6 +985,13 @@ class ModerationGateway:
                     ),
                 )
             if current >= desired - EXTEND_MIN_SECONDS:
+                if not proposal.provisional and self._held_by_provisional(
+                    incident_ops, current
+                ):
+                    # Only a review hold keeps them: a real timeout is its own
+                    # action (history needs its row), and runs as long as the
+                    # hold does so it does not shorten it.
+                    return _Decision(until=max(desired, current), key=key)
                 return _Decision(
                     state=t.COVERED,
                     detail=f"already timed out until <t:{int(current)}:f>",
@@ -992,6 +999,24 @@ class ModerationGateway:
                     in_place_until=current,
                 )
         return _Decision(until=desired, key=key)
+
+    @staticmethod
+    def _held_by_provisional(
+        incident_ops: Sequence[ModerationOperation], current: float
+    ) -> bool:
+        """Whether the timeout in place is kept only by provisional holds."""
+        live = [
+            op
+            for op in incident_ops
+            if op.kind == t.TIMEOUT
+            and op.state in t.LIVE_STATES
+            and op.released_at is None
+            and op.expires_at is not None
+            and op.expires_at >= current - SAME_EXPIRY_SECONDS
+        ]
+        return bool(live) and all(
+            (op.requested or {}).get("provisional") for op in live
+        )
 
     async def _decide_untimeout(
         self, trigger: t.Trigger, proposal: t.Proposal, now: float

@@ -411,7 +411,9 @@ def _summary(
     )
     if holds and not replaced:
         if held:
-            parts.append(f"held for {_span(holds[0].duration_seconds)}")
+            parts.append(
+                f"held for {_span(max(op.duration_seconds or 0 for op in holds))}"
+            )
         else:
             parts.append("hold lifted")
     skipped: dict[str, set[str]] = {}
@@ -655,7 +657,9 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     if facts.has_transcript:
         tail.append("The transcript is attached.")
     if any(
-        op.kind == t.TIMEOUT and op.state == t.CONFIRMED and not op.provisional
+        op.kind == t.TIMEOUT
+        and op.state == t.CONFIRMED
+        and (not op.provisional or held)
         for op in facts.operations
     ):
         tail.append("To undo a timeout: open the member and choose Remove Timeout.")
