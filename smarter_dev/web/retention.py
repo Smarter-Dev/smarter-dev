@@ -58,8 +58,11 @@ rather than message text it read: no verbatim quotes, no private or sensitive
 detail, only who these people are to it. Scrubbing that on the retention
 window would not protect anyone's words, it would just give the bot amnesia
 several times a day. The mid-term notes are exempt for a different reason — they are
-deleted outright by the nightly dream session that consumes them, so they live
-well under a day by construction and never reach a retention cutoff. Adding a
+deleted outright by the nightly dream that consumes them, so they live
+well under a day by construction and never reach a retention cutoff. The one
+exception is a guild the proactive agent does not own
+(``PROACTIVE_AGENT_EXTERNAL_GUILD_IDS``): no dream runs there, so
+``delete_unowned_memory_notes`` removes its notes after two days. Adding a
 scrubber for any of the three needs the same explicit sign-off the exemption
 got, plus a matching row in ``docs/data-retention.md``.
 
@@ -81,8 +84,9 @@ skipped, so re-running the sweep costs one indexed lookup per table.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import case, delete, exists, or_, select, update
@@ -97,6 +101,7 @@ from smarter_dev.web.models import (
     ChatAgentCompactionEvent,
     ChatAgentEngagement,
     ChatAgentError,
+    ChatAgentMemoryNote,
     ChatAgentTurn,
     ForumAgentResponse,
     HandlerRun,
@@ -347,6 +352,52 @@ async def scrub_moderation_actions(
         now=now,
         values={"ai_context_summary": None},
     )
+
+
+UNOWNED_NOTE_MAX = timedelta(days=2)
+
+
+def _guild_ids(name: str) -> set[str]:
+    return {v.strip() for v in os.getenv(name, "").split(",") if v.strip()}
+
+
+async def delete_unowned_memory_notes(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete chat memory notes no dream will ever fold in.
+
+    Only the proactive agent dreams, and only the guilds it runs. Which those
+    are follows ``ProactiveAgentPlugin.execution_mode_for``: a guild on the
+    embedded list is the bot's own, else one on the external list is the
+    agent's, else one on the shadow list is not, else
+    ``PROACTIVE_AGENT_EXECUTION_MODE`` decides. A guild the agent does not run
+    has no consumer for its notes, so they would pile up.
+
+    Ignores the in-flight ``cutoff``. Does nothing when the mode variable is
+    unset or invalid, or when the mode is not ``external`` and no guild is on
+    the external list: a job without the ConfigMap must not mistake every guild
+    for an unowned one.
+    """
+    mode = os.getenv("PROACTIVE_AGENT_EXECUTION_MODE", "")
+    embedded = _guild_ids("PROACTIVE_AGENT_EMBEDDED_GUILD_IDS")
+    shadow = _guild_ids("PROACTIVE_AGENT_SHADOW_GUILD_IDS")
+    external = _guild_ids("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS") - embedded
+    if mode == "external":
+        # The agent runs every guild not pinned elsewhere.
+        pinned = embedded | (shadow - external)
+        if not pinned:
+            return 0
+        unowned = ChatAgentMemoryNote.guild_id.in_(pinned)
+    elif mode in ("embedded", "shadow") and external:
+        unowned = ChatAgentMemoryNote.guild_id.not_in(external)
+    else:
+        return 0
+    result = await session.execute(
+        delete(ChatAgentMemoryNote).where(
+            unowned, ChatAgentMemoryNote.created_at <= now - UNOWNED_NOTE_MAX
+        )
+    )
+    return result.rowcount or 0
 
 
 async def delete_spam_ring_incidents(
@@ -620,8 +671,10 @@ async def redact_bot_words(
     )
 
 
-# Table name -> scrubber. Ordered as they run; the name is what shows up in the
-# sweep log and in the operator-facing summary.
+# Pass name -> function. Mostly a table name -> scrubber; a pass that deletes
+# rows outright (``unowned_memory_notes``, ``spam_ring_incidents``) is named for
+# what it removes. Ordered as they run; the name is what shows up in the sweep
+# log and in the operator-facing summary.
 SCRUBBERS: dict[str, Any] = {
     "help_conversations": scrub_help_conversations,
     "chat_agent_turns": scrub_chat_agent_turns,
@@ -630,6 +683,7 @@ SCRUBBERS: dict[str, Any] = {
     "chat_agent_errors": scrub_chat_agent_errors,
     "forum_agent_responses": scrub_forum_agent_responses,
     "moderation_actions": scrub_moderation_actions,
+    "unowned_memory_notes": delete_unowned_memory_notes,
     "spam_ring_incidents": delete_spam_ring_incidents,
     "moderation_incident_entries": prune_moderation_incident_entries,
     "moderation_outbox": prune_moderation_outbox,

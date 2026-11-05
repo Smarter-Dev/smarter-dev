@@ -23,7 +23,7 @@ from smarter_dev.web.chat_bot_opt_out import opt_out
 from smarter_dev.web.chat_memory_dream import DreamContext
 from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamOutput
-from smarter_dev.web.chat_memory_dream import run_guild_dream
+from tests.web._dream_night import dream_one_night
 from smarter_dev.web.crud import create_memory_note
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import upsert_guild_memory_blob
@@ -124,7 +124,7 @@ async def _seed(db_session, *, blob: str, behavior: str = "") -> None:
 
 
 async def _dream(db_session, agent):
-    return await run_guild_dream(
+    return await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,

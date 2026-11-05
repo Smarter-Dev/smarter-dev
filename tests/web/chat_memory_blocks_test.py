@@ -21,7 +21,6 @@ from pathlib import Path
 
 import pytest
 from pydantic_ai import ModelRetry
-from pydantic_ai.models.test import TestModel
 from sqlalchemy import create_engine
 from sqlalchemy import inspect
 from sqlalchemy import select
@@ -35,8 +34,7 @@ from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamOutput
 from smarter_dev.web.chat_memory_dream import build_dream_user_message
 from smarter_dev.web.chat_memory_dream import compose_blocks
-from smarter_dev.web.chat_memory_dream import get_dream_agent
-from smarter_dev.web.chat_memory_dream import run_guild_dream
+from tests.web._dream_night import dream_one_night
 from smarter_dev.web.crud import create_memory_note
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import record_memory_revision
@@ -124,7 +122,7 @@ async def _write_note(session, content: str = _NOTE) -> ChatAgentMemoryNote:
 
 async def _dream(session, output: DreamOutput) -> tuple:
     agent = _StubDreamAgent(output=output)
-    result = await run_guild_dream(
+    result = await dream_one_night(
         session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -493,14 +491,6 @@ def test_dream_prompt_marks_empty_blocks_without_a_first_night_nudge():
     assert chat_memory_dream.FIRST_NIGHT_NUDGE not in message
 
 
-def test_dream_system_prompt_states_both_limits_and_the_retention_rules():
-    prompt = chat_memory_dream.DREAM_SYSTEM_PROMPT
-    assert "at most 750 characters" in prompt
-    assert "at most 250 characters" in prompt
-    assert "return `null` for a block to keep it" in prompt
-    assert "`personality_reason`" in prompt
-
-
 # -- a whole night ------------------------------------------------------------------
 
 
@@ -618,28 +608,3 @@ async def test_first_dream_can_start_both_blocks(db_session):
     assert chat_memory_dream.FIRST_NIGHT_NUDGE in agent.prompts[0]
     row = await get_guild_memory_blob(db_session, _GUILD)
     assert (row.behavior, row.personality) == (_BEHAVIOR, _PERSONALITY)
-
-
-# -- the real validator loop ------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_agent_retries_an_over_limit_behavior_then_keeps_the_old_one(monkeypatch):
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
-    output = DreamOutput(memory=_MEMORY, behavior="b" * (MAX_BEHAVIOR_CHARS + 1))
-    model = TestModel(custom_output_args=output.model_dump())
-    monkeypatch.setattr(chat_memory_dream, "build_model_for", lambda _: model)
-
-    result = await get_dream_agent().run("Distill today's notes.", deps=_context())
-
-    # Every retry was spent, and the last attempt resolves to the old block.
-    retries = [
-        part
-        for message in result.all_messages()
-        for part in getattr(message, "parts", [])
-        if part.part_kind == "retry-prompt"
-    ]
-    assert len(retries) == chat_memory_dream.DREAM_OUTPUT_RETRIES
-    blocks = compose_blocks(result.output, _context(), retries_left=0)
-    assert (blocks.behavior, blocks.refusals) == (_BEHAVIOR, ("behavior",))
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)

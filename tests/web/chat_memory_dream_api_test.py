@@ -103,9 +103,42 @@ async def test_inputs_carry_blocks_notes_and_limits(client, db_session):
     assert "the shader shipped." in inputs["user_message"]
 
 
-async def test_inputs_say_nothing_to_do_for_a_quiet_guild(client, db_session):
+async def test_a_guild_with_a_memory_row_and_no_notes_is_needed(client, db_session):
     await _seed(db_session, notes=())
 
+    assert _GUILD in client.get("/api/chat-memory/dream/guilds").json()["guild_ids"]
+    inputs = client.get(_BASE).json()
+
+    assert inputs["needed"] is True
+    assert inputs["notes"] == []
+    assert "(no notes tonight)" in inputs["user_message"]
+    result = client.post(_BASE, json=_body(inputs, facts="Server is Pine.")).json()
+    assert result["accepted"] is True
+    # Dreamed tonight, so it is not offered again.
+    assert _GUILD not in client.get("/api/chat-memory/dream/guilds").json()["guild_ids"]
+
+
+async def test_a_no_notes_dream_goes_stale_when_a_note_arrives(client, db_session):
+    await _seed(db_session, notes=())
+    inputs = client.get(_BASE).json()
+    created = _CUTOFF - timedelta(hours=1)
+    await create_memory_note(
+        db_session,
+        guild_id=_GUILD,
+        channel_id="555000111222333444",
+        channel_name="dev-help",
+        content="a late note",
+        created_at=created,
+        day_start=created.replace(hour=0, minute=0),
+    )
+    await db_session.commit()
+
+    result = client.post(_BASE, json=_body(inputs)).json()
+
+    assert (result["accepted"], result["reason"]) == (False, "stale")
+
+
+async def test_a_guild_with_no_memory_row_and_no_notes_is_not_needed(client, db_session):
     inputs = client.get(_BASE).json()
 
     assert inputs["needed"] is False
@@ -245,3 +278,22 @@ async def test_facts_about_an_opted_out_member_are_withheld_and_carried_over(
     db_session.expire_all()
     stored = (await get_guild_memory_blob(db_session, _GUILD)).facts
     assert stored == f"Server is Oak.\n<{_OPTED_OUT}:bob> owns the build box."
+
+
+async def test_an_opt_out_between_read_and_submit_is_stale(client, db_session):
+    await _seed(db_session)
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    memory.facts = f"Server is Pine.\n<{_OPTED_OUT}:bob> owns the build box."
+    await db_session.commit()
+    inputs = client.get(_BASE).json()
+    # The line was shown to the model; the member opts out before the answer.
+    assert "build box" in inputs["user_message"]
+    await opt_out(db_session, _OPTED_OUT)
+    await db_session.commit()
+
+    result = client.post(_BASE, json=_body(inputs, facts="Server is Oak.")).json()
+
+    assert result["accepted"] is False
+    assert result["reason"] == "stale"
+    db_session.expire_all()
+    assert "Server is Pine." in (await get_guild_memory_blob(db_session, _GUILD)).facts

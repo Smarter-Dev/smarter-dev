@@ -57,7 +57,7 @@ from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamOutput
 from smarter_dev.web.chat_memory_dream import IdentityUpdate
 from smarter_dev.web.chat_memory_dream import compose_blocks
-from smarter_dev.web.chat_memory_dream import run_guild_dream
+from tests.web._dream_night import dream_one_night
 from smarter_dev.web.crud import create_memory_note
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import upsert_guild_memory_blob
@@ -420,7 +420,7 @@ async def _seed_memory(session, *, guild_id: str = _GUILD, content: str = _BLOB)
 
 
 async def _dream(session, agent):
-    return await run_guild_dream(
+    return await dream_one_night(
         session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,

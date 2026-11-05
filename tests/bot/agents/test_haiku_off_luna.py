@@ -490,12 +490,10 @@ def test_one_request_agents_on_claude_drop_the_message_breakpoint(monkeypatch):
     monkeypatch.setattr(rule_matcher, "RULE_MATCHER_MODEL_KEY", "claude-haiku-5-5")
     monkeypatch.setattr(rule_matcher, "_rule_matcher_agent", None)
     monkeypatch.setenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, "claude-haiku-5-5")
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
     monkeypatch.setattr(chat_memory_purge, "_purge_agent", None)
 
     for agent in (
         rule_matcher.get_rule_matcher_agent(),
-        chat_memory_dream.get_dream_agent(),
         chat_memory_purge.get_purge_agent(),
     ):
         assert agent.model_settings["anthropic_cache_messages"] is False

@@ -5638,7 +5638,7 @@ async def list_notes_before(
             ChatAgentMemoryNote.guild_id == guild_id,
             ChatAgentMemoryNote.created_at < cutoff,
         )
-        .order_by(ChatAgentMemoryNote.created_at.asc())
+        .order_by(ChatAgentMemoryNote.created_at.asc(), ChatAgentMemoryNote.id.asc())
     )
     return list(result.scalars().all())
 
@@ -5829,8 +5829,9 @@ async def guilds_needing_dream(session: AsyncSession, cutoff: datetime) -> list[
 
     Two sources, unioned: guilds with notes waiting from before ``cutoff``, and
     guilds that already have a memory row but have not been dreamed since it.
-    The second half is what makes quiet guilds — the majority — still get their
-    ``last_dream_at`` stamped, which is also what makes a CronJob retry a no-op.
+    The second half is what lets a guild with no notes still be dreamed, from
+    the agent's own history, and ``last_dream_at`` is what makes a repeat visit
+    a no-op.
 
     Guilds whose ``memory_enabled`` is false are filtered out of both halves:
     that flag is the per-guild pause switch, and a paused guild's memory must

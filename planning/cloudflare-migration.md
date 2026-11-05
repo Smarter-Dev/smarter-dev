@@ -184,7 +184,7 @@ What exists: a three-layer, per-guild memory for the Discord chat agent.
 - `chat_agent_memory_revisions`: a past night's dream output per guild.
 - Written by the bot through `POST /api/guilds/{guild_id}/chat-memory/notes`
   and read through `GET /api/guilds/{guild_id}/chat-memory` (bot API guards,
-  `sk_` key). Rewritten nightly by `scripts/dream_session.py`. Exempt from
+  `sk_` key). Rewritten nightly by the proactive agent's dream (the old `scripts/dream_session.py` cron is retired). Exempt from
   retention; blocked users (`chat_bot_blocked_users`) are redacted whole;
   purge requests exist.
 

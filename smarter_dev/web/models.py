@@ -5515,9 +5515,8 @@ class ChatAgentGuildMemory(Base):
         DateTime(timezone=True),
         nullable=True,
         doc=(
-            "When a dream last ran for this guild — stamped even on the quiet "
-            "nights where there were no notes and no model call, so a CronJob "
-            "retry is a no-op."
+            "When a dream last ran for this guild — stamped when a night had "
+            "nothing the model may read, so a repeat visit is a no-op."
         ),
     )
     notes_consumed: Mapped[int] = mapped_column(
@@ -5564,8 +5563,11 @@ class ChatAgentMemoryNote(Base):
 
     Written by the ``remember`` tool, read back into the same day's
     activations, and consumed by that night's dream — which deletes the notes
-    it folded into the blob. Nothing here is meant to outlive a day, which is
-    why the retention sweep leaves it alone: the dream is the deleter.
+    it folded into the blob. Nothing here is meant to outlive a day, so the
+    retention sweep leaves it alone: the dream is the deleter. The one
+    exception is a guild the proactive agent does not run, which no dream
+    visits; the sweep deletes its notes after two days
+    (``delete_unowned_memory_notes``).
 
     ``engagement_id`` is a soft link with no foreign key on purpose. A note
     outliving the engagement that produced it is normal and fine, and a memory

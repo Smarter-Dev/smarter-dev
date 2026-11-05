@@ -31,10 +31,11 @@ actually read are deleted.
 
 Three rules shape everything here:
 
-1. **A quiet guild costs nothing.** No notes written before the cutoff means
-   no model call at all; the guild's ``last_dream_at`` is stamped and the run
-   moves on. Most guilds are quiet most nights, and it is also what makes a
-   CronJob retry a no-op.
+1. **Notes are one input, not the trigger.** A guild with a memory row is
+   dreamed once a night whether or not it kept any notes; the agent
+   consolidates from its own history too. Only a guild with no memory row and
+   no notes has nothing to do. ``last_dream_at`` is what makes a repeated run
+   a no-op.
 2. **A bad night must never erase a good persona.** An empty or degenerate
    response leaves yesterday's blob exactly where it was, and leaves the notes
    in place so tomorrow's dream sees two days and self-heals. The same is true
@@ -54,8 +55,9 @@ so the carried-over block still fits its column. An output that names a
 blocked id is refused like any other bad night. Opting out deletes nothing
 beyond that; the rest stays the admin's deletion request.
 
-The dream runs in the web image (``scripts/dream_session.py``) and therefore
-talks to :mod:`smarter_dev.web.crud` directly rather than over the bot API.
+The proactive agent runs the dream (:mod:`smarter_dev.web.api_native.chat_memory_dream`
+serves it); this module holds the inputs, the validation and the commit both
+sides share.
 """
 
 from __future__ import annotations
@@ -71,30 +73,21 @@ from datetime import UTC
 from datetime import date
 from datetime import datetime
 from datetime import timedelta
-from pathlib import Path
-from typing import Protocol
 
 from pydantic import BaseModel
 from pydantic import Field
-from pydantic_ai import Agent
 from pydantic_ai import ModelRetry
-from pydantic_ai import RunContext
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.bot.agents.model_router import build_model_for
-from smarter_dev.bot.agents.model_router import model_settings_for
-from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.member_tags import names_outside_tags
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
-from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.web.chat_agent_public import blocked_member_names
 from smarter_dev.web.chat_agent_public import known_member_names
 from smarter_dev.web.chat_agent_public import member_names
 from smarter_dev.web.crud import delete_notes_by_id
 from smarter_dev.web.crud import get_guild_memory_blob
-from smarter_dev.web.crud import guilds_needing_dream
 from smarter_dev.web.crud import list_notes_before
 from smarter_dev.web.crud import lock_guild_memory
 from smarter_dev.web.crud import prune_memory_revisions
@@ -107,7 +100,6 @@ from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
 from smarter_dev.web.privacy_gate import OptOutGate
 from smarter_dev.web.privacy_gate import load_gate
-from smarter_dev.web.usage_metering import record_meter_now
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +110,6 @@ DREAM_MODEL_ENV_VAR = "CHAT_DREAM_MODEL"
 # in a way it does not anywhere else in the chat stack.
 DEFAULT_DREAM_MODEL = "gpt-6.1-sol"
 DREAM_REASONING_LEVEL = ReasoningLevel.HIGH
-# Two shots at getting under the character limit before we cut it ourselves.
-DREAM_OUTPUT_RETRIES = 2
 IDENTITY_HEADING = "## Identity & Voice"
 MAX_IDENTITY_CHARS = 800
 
@@ -130,6 +120,7 @@ ESTABLISHED_BLOB_CHARS = 200
 
 EMPTY_BLOB_PLACEHOLDER = "(nothing yet — this is your first night in this server.)"
 EMPTY_BLOCK_PLACEHOLDER = "(empty)"
+EMPTY_NOTES_PLACEHOLDER = "(no notes tonight)"
 FIRST_NIGHT_NUDGE = (
     "This is your first night here. You're not editing anything — you're "
     "deciding, from one day of paying attention, who you are in this server. "
@@ -149,11 +140,6 @@ def over_length_retry_message(limit: int) -> str:
 
 
 OVER_LENGTH_RETRY_MESSAGE = over_length_retry_message(MAX_MEMORY_BLOB_CHARS)
-
-DREAM_SYSTEM_PROMPT = (
-    Path(__file__).parent / "prompts" / "chat_memory_dream.md"
-).read_text(encoding="utf-8")
-
 
 class IdentityUpdate(BaseModel):
     before: str | None = None
@@ -221,26 +207,6 @@ class GuildDreamResult:
     outcome: DreamOutcome
     notes_consumed: int = 0
     revision: int | None = None
-
-
-@dataclass(frozen=True)
-class DreamSessionSummary:
-    """Every guild visited tonight, split by whether the visit survived."""
-
-    results: list[GuildDreamResult]
-    failed_guild_ids: list[str]
-
-
-class DreamRunResult(Protocol):
-    """The slice of a Pydantic AI run result the dream actually reads."""
-
-    output: DreamOutput
-
-
-class DreamAgent(Protocol):
-    """The slice of a Pydantic AI agent the dream actually uses."""
-
-    async def run(self, user_prompt: str, *, deps: DreamContext) -> DreamRunResult: ...
 
 
 SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSession]]
@@ -563,10 +529,10 @@ def check_member_tags(
 
 
 # How early the dream may fire and still be treated as "at" the upcoming
-# midnight. The CronJob is scheduled for 00:00 UTC, and a job that fires even a
+# midnight. The dream is scheduled for 00:00 UTC, and a run that starts even a
 # few milliseconds early would otherwise see ``now`` still on the previous date
 # and truncate to *that* day's midnight — folding the day before last and
-# leaving a full day of notes unread. Generous enough to absorb cron jitter and
+# leaving a full day of notes unread. Generous enough to absorb scheduler jitter and
 # node clock skew, far too small to swallow a deliberate mid-day manual run.
 CUTOFF_SNAP_TOLERANCE = timedelta(minutes=5)
 
@@ -686,7 +652,7 @@ def build_dream_user_message(
     behavior = previous_behavior.strip()
     personality = previous_personality.strip()
     facts = previous_facts.strip()
-    today = "\n".join(note_lines)
+    today = "\n".join(note_lines) or EMPTY_NOTES_PLACEHOLDER
     sections = [
         f"# My personality\n\n{personality or EMPTY_BLOCK_PLACEHOLDER}",
         f"# My behavior\n\n{behavior or EMPTY_BLOCK_PLACEHOLDER}",
@@ -757,10 +723,7 @@ def names_a_blocked_id(blocks: DreamBlocks, gate: OptOutGate | None) -> bool:
     )
 
 
-# -- the agent -----------------------------------------------------------------
-
-
-_dream_agent: Agent[DreamContext, DreamOutput] | None = None
+# -- the model -----------------------------------------------------------------
 
 
 def _dream_catalog_model() -> CatalogModel:
@@ -770,46 +733,6 @@ def _dream_catalog_model() -> CatalogModel:
         if model.model_id == model_id:
             return model
     raise RuntimeError(f"Dream model is not in the catalog: {model_id}")
-
-
-def get_dream_agent() -> Agent[DreamContext, DreamOutput]:
-    """Return the singleton dream agent, built on first use.
-
-    Deliberately lazy: a night with nothing to dream about must never need an
-    API key or a model id to be configured correctly.
-    """
-    global _dream_agent
-    if _dream_agent is None:
-        catalog_model = _dream_catalog_model()
-        agent = Agent(
-            build_model_for(catalog_model),
-            output_type=DreamOutput,
-            deps_type=DreamContext,
-            system_prompt=DREAM_SYSTEM_PROMPT,
-            retries=DREAM_OUTPUT_RETRIES,
-            # One request unless the output is sent back; caching the messages
-            # would bill every night's prompt at the 1-hour write rate for that.
-            model_settings=model_settings_for(
-                catalog_model, DREAM_REASONING_LEVEL, cache_messages=False
-            ),
-        )
-
-        @agent.output_validator
-        def keep_the_blob_under_the_cap(
-            ctx: RunContext[DreamContext], output: DreamOutput
-        ) -> DreamOutput:
-            blocks = compose_blocks(
-                output, ctx.deps, retries_left=DREAM_OUTPUT_RETRIES - ctx.retry
-            )
-            if names_a_blocked_id(blocks, ctx.deps.gate):
-                raise ModelRetry(BLOCKED_ID_RETRY_MESSAGE)
-            return output
-
-        _dream_agent = agent
-    return _dream_agent
-
-
-# -- one guild -----------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -843,10 +766,12 @@ async def prepare_guild_dream(
 ) -> DreamInputs | GuildDreamResult:
     """Lock the guild and read its night: the inputs, or why there is nothing to do.
 
-    Returns a :class:`GuildDreamResult` when the guild is paused or has no notes
-    a model may read; in the second case the row is stamped and any unreadable
-    notes are consumed, and the session is committed. The guild stays locked
-    until the session ends either way.
+    Returns a :class:`GuildDreamResult` when the guild is paused, has no memory
+    row and no notes, or its night's notes were all about members who opted
+    out; in the last case the row is stamped and those notes are consumed, and
+    the session is committed. A guild with a memory row and no notes is dreamed
+    like any other: the night's material is then the agent's own history. The
+    guild stays locked until the session ends either way.
     """
     # Shared with the admin purge: neither may write over the other's blocks.
     await lock_guild_memory(session, guild_id)
@@ -883,7 +808,11 @@ async def prepare_guild_dream(
     for note in pending:
         blocked = gate.carries_blocked_member(note.content, blocked_names)
         (unread if blocked else notes).append(note)
-    if not notes:
+    # No readable notes is no reason to skip: the agent also dreams from its own
+    # history, and notes are one input among them. A guild with no memory row
+    # has nothing to consolidate, and a night whose only notes were about
+    # members who opted out is consumed and stamped as before.
+    if not notes and (memory is None or unread):
         if unread:
             await delete_notes_by_id(session, [note.id for note in unread])
         if memory is not None:
@@ -974,7 +903,7 @@ async def commit_guild_dream(
 
     ``strict`` is for a caller that can ask again (the agent-run dream): every
     problem the model could fix raises :class:`ModelRetry` with a message that
-    names no stored text, and nothing is written. Otherwise (the cron) a night
+    names no stored text, and nothing is written. Otherwise a night
     that cannot be saved comes back as ``KEPT_PREVIOUS``, with the notes left
     for tomorrow.
     """
@@ -1087,131 +1016,6 @@ async def commit_guild_dream(
         notes_consumed=len(notes),
         revision=written.revision,
     )
-
-
-async def run_guild_dream(
-    session: AsyncSession,
-    *,
-    guild_id: str,
-    cutoff: datetime,
-    dreamed_at: datetime,
-    agent: DreamAgent | None = None,
-    meter: UsageMeter | None = None,
-) -> GuildDreamResult:
-    """Dream one guild's night inside one transaction, in this exact order.
-
-    Load the four blocks and every note written before ``cutoff`` (oldest first) →
-    stamp and stop if there are none → run the model → :func:`commit_guild_dream`.
-
-    The delete is last and by explicit id, and the commit is the only thing
-    that makes any of it real: anything raised on the way through leaves the
-    blob and every note exactly as they were.
-
-    ``meter`` keeps every response the model sent, whatever the night's
-    outcome: a kept-previous night or a failed one was billed all the same.
-    """
-    inputs = await prepare_guild_dream(
-        session, guild_id=guild_id, cutoff=cutoff, dreamed_at=dreamed_at
-    )
-    if isinstance(inputs, GuildDreamResult):
-        return inputs
-    dream_agent = agent if agent is not None else get_dream_agent()
-    run_options = {}
-    if meter is not None and isinstance(dream_agent, Agent):
-        run_options["model"] = meter.wrap(dream_agent.model)
-    result = await dream_agent.run(
-        user_prompt=inputs.user_message, deps=inputs.context, **run_options
-    )
-    return await commit_guild_dream(session, inputs, result.output, dreamed_at=dreamed_at)
-
-
-# -- the whole session ---------------------------------------------------------
-
-
-async def run_dream_session(
-    now: datetime,
-    *,
-    session_factory: SessionFactory = get_db_session_context,
-    agent: DreamAgent | None = None,
-) -> DreamSessionSummary:
-    """Dream every guild that needs it for the night ending at midnight UTC.
-
-    One session per guild, and one guild's failure is only that guild's
-    failure: the loop keeps going, the failed guild's notes stay put, and
-    tomorrow it reads two days at once.
-    """
-    cutoff = dream_cutoff(now)
-    async with session_factory() as session:
-        guild_ids = await guilds_needing_dream(session, cutoff)
-    logger.info("Dream session for %s: %d guild(s)", cutoff.date(), len(guild_ids))
-
-    results: list[GuildDreamResult] = []
-    failed_guild_ids: list[str] = []
-    for guild_id in guild_ids:
-        result = await _dream_one_guild_in_isolation(
-            session_factory,
-            guild_id=guild_id,
-            cutoff=cutoff,
-            dreamed_at=now,
-            agent=agent,
-        )
-        if result is None:
-            failed_guild_ids.append(guild_id)
-        else:
-            results.append(result)
-    return DreamSessionSummary(results=results, failed_guild_ids=failed_guild_ids)
-
-
-async def _dream_one_guild_in_isolation(
-    session_factory: SessionFactory,
-    *,
-    guild_id: str,
-    cutoff: datetime,
-    dreamed_at: datetime,
-    agent: DreamAgent | None,
-) -> GuildDreamResult | None:
-    """Run one guild's dream; return ``None`` if it failed.
-
-    The broad ``except`` is the point rather than a lapse: a provider hiccup, a
-    lock timeout or a bad row in one guild must not cost every guild after it
-    its night. The rollback undoes that guild's half-written transaction, and
-    its notes survive to be re-read tomorrow.
-
-    The model's usage is written after the guild's transaction is over, in a
-    session of its own, so a night that kept the previous blocks or rolled back
-    is still on the ledger. It is keyed by the guild, the night and this
-    session's start: a second run of the CronJob that night (after a failure)
-    is new spend, and gets new rows.
-    """
-    meter = UsageMeter()
-    try:
-        async with session_factory() as session:
-            try:
-                return await run_guild_dream(
-                    session,
-                    guild_id=guild_id,
-                    cutoff=cutoff,
-                    dreamed_at=dreamed_at,
-                    agent=agent,
-                    meter=meter,
-                )
-            except Exception:
-                logger.exception(
-                    "Dream failed for guild %s; its notes survive for tomorrow", guild_id
-                )
-                await session.rollback()
-                return None
-    finally:
-        day = dream_day(cutoff).isoformat()
-        await record_meter_now(
-            meter,
-            session_factory=session_factory,
-            operation_key=f"memory_dream:{guild_id}:{day}:{dreamed_at.isoformat()}",
-            product_mode="discord",
-            operation_type="memory_dream",
-            reasoning_level=DREAM_REASONING_LEVEL.value,
-            details={"guild_id": guild_id, "dream_day": day},
-        )
 
 
 def _as_utc(moment: datetime) -> datetime:
