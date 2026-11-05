@@ -31,6 +31,7 @@ from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.mod_tools import TRIAGE_ACTOR
 from smarter_dev.bot.agents.mod_tools import triage_notes
 from smarter_dev.bot.agents.mod_tools import triage_trigger
+from smarter_dev.bot.agents.moderation_agent import load_triage_rules
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
 from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.triage_config import TriageConfig
@@ -241,6 +242,7 @@ async def _handle_moderation(
             enabled_tools=list(config.enabled_tools),
             trigger_message_id=trigger_message_id,
             trigger=trigger,
+            guild_rules=await load_triage_rules(guild_id),
         )
 
         # Post channel message with appended user pings

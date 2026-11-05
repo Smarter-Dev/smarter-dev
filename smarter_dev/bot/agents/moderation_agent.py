@@ -1,9 +1,9 @@
 """AI moderation triage agent for role-mention-triggered moderation.
 
 The agent acts as a stopgap while waiting for human moderators. It can
-timeout users, purge harmful messages, flag users for review, and send
-a channel message explaining the situation. A full report is sent to
-the configured mod channel.
+timeout users, purge harmful messages, cite the server's rules, flag users
+for review, and send a channel message explaining the situation. A full
+report is sent to the configured mod channel.
 
 Runs on pydantic-ai with the triage tools from :mod:`mod_tools`.
 """
@@ -11,6 +11,7 @@ Runs on pydantic-ai with the triage tools from :mod:`mod_tools`.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -25,8 +26,13 @@ from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.agents.utility_model import utility_metered
+from smarter_dev.bot.plugins.rules import MAX_RULES_PROMPT_CHARS
+from smarter_dev.bot.plugins.rules import load_guild_rules
+from smarter_dev.bot.plugins.rules import rules_within_prompt_budget
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.web.guild_rules import GuildRule
+from smarter_dev.web.guild_rules import format_rules_for_prompt
 from smarter_dev.web.moderation_gateway import Trigger
 
 logger = logging.getLogger(__name__)
@@ -111,6 +117,26 @@ async def _enforce_channel_message(
         )
 
 
+async def load_triage_rules(guild_id: str) -> tuple[GuildRule, ...]:
+    """The guild's rules as the triage is shown them, capped like ``/rule``'s.
+
+    Empty when none are configured or they cannot be read: triage then runs
+    as it did before, without ``cite_rule``.
+    """
+    try:
+        configured = await load_guild_rules(guild_id)
+    except Exception:
+        log_exception(logger, f"Could not load rules for guild {guild_id}")
+        return ()
+    rules, dropped = rules_within_prompt_budget(configured, MAX_RULES_PROMPT_CHARS)
+    if dropped:
+        logger.warning(
+            f"Guild {guild_id} has {dropped} rule(s) past the "
+            f"{MAX_RULES_PROMPT_CHARS}-character prompt cap; triage was not shown them"
+        )
+    return rules
+
+
 def format_context_messages(messages: list[DiscordMessage]) -> str:
     """Format a list of DiscordMessage objects into a readable string."""
     lines = []
@@ -140,6 +166,7 @@ async def run_moderation_agent(
     trigger: Trigger | None = None,
     trigger_author_id: str | None = None,
     trigger_author_display_name: str | None = None,
+    guild_rules: Sequence[GuildRule] = (),
 ) -> tuple[str, ActionTracker]:
     """Run the moderation triage agent to evaluate a situation and take action.
 
@@ -156,6 +183,8 @@ async def run_moderation_agent(
         trigger: The ping as the moderation gateway's trigger (its incident)
         trigger_author_id: Discord user ID of the trigger message author
         trigger_author_display_name: Their display name, if known
+        guild_rules: The guild's rules, numbered; they go into the prompt and
+            make ``cite_rule`` available
 
     Returns:
         Tuple of (assessment string, ActionTracker with all actions taken)
@@ -167,6 +196,8 @@ async def run_moderation_agent(
         trigger_message_id=trigger_message_id,
         enabled_tools=enabled_tools,
         trigger=trigger,
+        rules=guild_rules,
+        context_messages=context_messages,
     )
 
     context_text = format_context_messages(context_messages)
@@ -189,6 +220,8 @@ async def run_moderation_agent(
                     trigger_author_id=trigger_author_id or "unknown",
                     guild_instructions=guild_instructions
                     or "Use your best judgment to moderate fairly.",
+                    server_rules=format_rules_for_prompt(list(guild_rules))
+                    or "No server rules are configured.",
                 ),
                 model=meter.wrap(agent.model),
                 toolsets=[FunctionToolset(tools)],
