@@ -1323,6 +1323,8 @@ class Executor:
         if provisional is not None and provisional.resolution == EXPIRED:
             lines.append(_expired_line(provisional, evaluation))
         lines.extend((gw.ENTRY_NOTE, line) for line in decision.review)
+        if evaluation.scam_outcome == "refused":
+            lines.append(_refused_line(evaluation))
         scam_fired = any(
             line.startswith(rules.SCAM_GATE) for line in decision.rules_fired
         )
@@ -1649,6 +1651,20 @@ def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str
         f"No verdict from the scam check on {user}'s message ({cause}). The "
         f"{minutes}-minute hold stays on and lapses by itself. A moderator "
         f"should look: {link}",
+    )
+
+
+def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
+    """The alert for a message the classifier refused to review."""
+    facts = evaluation.facts
+    category = next((v.detail for v in evaluation.verdicts.values() if v.detail), None)
+    said = f" ({category.replace('_', ' ')})" if category else ""
+    return (
+        gw.ENTRY_ALERT,
+        f"The classifier refused to review <@{facts.author_id}>'s message{said}. "
+        "It was removed and the member is held for "
+        f"{rules.duration_text(rules.REFUSAL_HOLD_SECONDS)}; a moderator should "
+        f"decide, and releasing the hold ends it: {jump_link(facts)}",
     )
 
 

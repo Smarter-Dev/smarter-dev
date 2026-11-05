@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -269,6 +270,37 @@ def test_clean_and_unknown_verdicts_propose_nothing():
     assert "too unsure" in lines[0]
     hits, outcome, _ = review.resolve(Verdicts({SCAM: LabelVerdict(SCAM, "timeout")}))
     assert (hits, outcome) == ([], "unknown")
+
+
+def test_a_refused_verdict_removes_the_message_and_holds_the_author_a_day():
+    review, facts = _review(NEWBIE, "https://x.example")
+    refused = {
+        label: LabelVerdict(label, "refused", detail="general_harms")
+        for label in (SCAM, ABUSE)
+    }
+    hits, outcome, _ = review.resolve(Verdicts(refused))
+    assert outcome == "refused"
+    (hit,) = hits
+    assert (hit.sanction.kind, hit.sanction.duration_seconds) == (gw.TIMEOUT, DAY)
+    assert hit.cleanup[0].message_id == facts.message_id
+    assert "general harms" in hit.reason
+    assert not hit.model_justified and not hit.high_signal
+
+
+def test_a_yes_beats_a_refusal_and_a_copy_is_removed_only():
+    review, _ = _review(NEWBIE, "https://x.example")
+    mixed = Verdicts(
+        {
+            SCAM: LabelVerdict(SCAM, "answered", True, 0.9),
+            ABUSE: LabelVerdict(ABUSE, "refused"),
+        }
+    )
+    assert review.resolve(mixed)[1] == "violation"
+    copy = replace(review, copy=True)
+    hits, outcome, _ = copy.resolve(
+        Verdicts({label: LabelVerdict(label, "refused") for label in (SCAM, ABUSE)})
+    )
+    assert outcome == "refused" and hits[0].sanction is None and hits[0].cleanup
 
 
 # -- decide --------------------------------------------------------------------

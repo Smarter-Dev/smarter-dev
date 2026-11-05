@@ -55,6 +55,7 @@ from pydantic import Field
 from pydantic import create_model
 from pydantic_ai import Agent
 from pydantic_ai import BinaryContent
+from pydantic_ai.exceptions import ContentFilterError
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
@@ -66,6 +67,7 @@ from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import HAIKU_LABELS
 from smarter_dev.bot.moderation_coordinator.model import INVALID_OUTPUT
 from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
+from smarter_dev.bot.moderation_coordinator.model import REFUSED
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
 from smarter_dev.bot.moderation_coordinator.model import UNSEEN_IMAGES
@@ -148,6 +150,26 @@ MAX_TRACKED_AUTHORS = 4096
 METER_OPERATION = "moderation_shadow_classifier"
 #: The acting coordinator's requests: moderation spend, not a trial's.
 ACTING_METER_OPERATION = "moderation_classifier"
+
+
+#: Haiku 5.5's documented refusal categories; anything else is not repeated.
+REFUSAL_CATEGORIES = frozenset({"cyber", "bio", "frontier_llm", "general_harms"})
+
+
+def refusal_category(error: BaseException) -> str | None:
+    """The refusal's category from a ``ContentFilterError``'s body (the
+    response's ``provider_details``), or None. Reads nothing else from it."""
+    body = getattr(error, "body", None)
+    try:
+        messages = json.loads(body) if isinstance(body, str | bytes) else body
+        for message in messages if isinstance(messages, list) else ():
+            details = message.get("provider_details") or {}
+            category = details.get("refusal_category")
+            if category in REFUSAL_CATEGORIES:
+                return category
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return None
 
 
 def _is_timeout(error: BaseException) -> bool:
@@ -1200,6 +1222,20 @@ class ModerationClassifier:
                     if any(v.outcome != INVALID_OUTPUT for v in verdicts.values())
                     else INVALID_OUTPUT
                 )
+            except ContentFilterError as error:
+                # The model declined to read the message: kept apart from an
+                # error so moderators decide (the text is never logged).
+                category = refusal_category(error)
+                logger.warning(
+                    "Moderation classifier (%s) refused a message (%s)",
+                    backend,
+                    category or "no category",
+                )
+                result.verdicts = {
+                    label: LabelVerdict(label, REFUSED, detail=category)
+                    for label in labels
+                }
+                result.outcome = REFUSED
             except Exception as error:  # noqa: BLE001 — unknown, never a retry
                 outcome = TIMEOUT if _is_timeout(error) else ERROR
                 if outcome == ERROR:

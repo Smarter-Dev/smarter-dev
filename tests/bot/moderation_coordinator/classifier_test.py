@@ -25,6 +25,7 @@ from smarter_dev.bot.moderation_coordinator.model import ERROR
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import INVALID_OUTPUT
 from smarter_dev.bot.moderation_coordinator.model import LOW_CONFIDENCE
+from smarter_dev.bot.moderation_coordinator.model import REFUSED
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
 from smarter_dev.bot.moderation_coordinator.model import participant_label
@@ -171,6 +172,33 @@ async def test_an_error_is_unknown_and_never_retried():
     result = await classifier.classify(_request({SCAM}))
     assert result.outcome == ERROR
     assert result.verdicts[SCAM].outcome == ERROR
+    assert attempts == [1]
+
+
+@pytest.mark.parametrize(
+    ("details", "category"),
+    [
+        ({"refusal_category": "cyber", "refusal": "no"}, "cyber"),
+        ({"refusal_category": "something_new"}, None),
+        ({}, None),
+    ],
+)
+async def test_a_refusal_is_its_own_outcome_with_its_category(details, category):
+    attempts = []
+
+    def refusing(messages, info):
+        attempts.append(1)
+        return ModelResponse(
+            parts=[], finish_reason="content_filter", provider_details=details
+        )
+
+    classifier = ModerationClassifier(
+        budget=ClassifierBudget(per_guild_day=100), haiku_model=FunctionModel(refusing)
+    )
+    result = await classifier.classify(_request({SCAM, ABUSE}))
+    assert result.outcome == REFUSED
+    assert {v.outcome for v in result.verdicts.values()} == {REFUSED}
+    assert {v.detail for v in result.verdicts.values()} == {category}
     assert attempts == [1]
 
 

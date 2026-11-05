@@ -16,6 +16,8 @@ from dataclasses import replace
 from datetime import timedelta
 
 import pytest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 
 from smarter_dev.bot.moderation_coordinator import act as act_module
@@ -312,6 +314,38 @@ async def test_no_verdict_leaves_the_hold_and_alerts_with_the_cause():
         for alert in alerts
     )
     assert (posts[1].channel_id, CLOSED_UNKNOWN) in h.messenger.posts
+
+
+def _refusing(answers, calls, by_text=None):
+    """Haiku declining to read the message, as the API's refusal stop."""
+
+    def refuse(messages, info):
+        calls.haiku.append("refused")
+        return ModelResponse(
+            parts=[],
+            finish_reason="content_filter",
+            provider_details={"refusal_category": "general_harms"},
+        )
+
+    return FunctionModel(refuse, model_name="claude-haiku-5-5")
+
+
+async def test_a_refusal_holds_the_author_a_day_removes_the_post_and_alerts():
+    case, victim, posts = scam_burst()
+    case = replace(case, policy=acting(case.policy), haiku=_refusing)
+    h = harness(case)
+
+    await h.judge(*posts)
+
+    timeouts = [call for call in h.port.calls if call[0] == "timeout"]
+    assert timeouts and timeouts[-1][2] is not None  # still held: never released
+    assert h.deleted() >= {posts[1].message_id}
+    alerts = await entries(gw.ENTRY_ALERT)
+    assert any(
+        "classifier refused to review" in a and "general harms" in a for a in alerts
+    )
+    assert (posts[1].channel_id, CLOSED_CLEAN) not in h.messenger.posts
+    assert (posts[1].channel_id, CLOSED_UNKNOWN) not in h.messenger.posts
 
 
 async def test_a_failed_evaluation_after_the_hold_is_reported(monkeypatch):
