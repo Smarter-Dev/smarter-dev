@@ -5638,7 +5638,7 @@ async def list_notes_before(
             ChatAgentMemoryNote.guild_id == guild_id,
             ChatAgentMemoryNote.created_at < cutoff,
         )
-        .order_by(ChatAgentMemoryNote.created_at.asc())
+        .order_by(ChatAgentMemoryNote.created_at.asc(), ChatAgentMemoryNote.id.asc())
     )
     return list(result.scalars().all())
 

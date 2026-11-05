@@ -617,13 +617,14 @@ The proactive agent can run the nightly dream itself through three bot-API
 routes (`smarter_dev/web/api_native/chat_memory_dream.py`): `GET
 /api/chat-memory/dream/guilds`, `GET /api/guilds/{id}/chat-memory/dream`
 (inputs, with opted-out lines withheld) and `POST` to the same path (the
-answer). The POST runs the same validation as the cron in strict mode, so a
+answer). The POST runs the shared dream validation in strict mode, so a
 refusal is a 200 with `accepted: false` and a reason that names no stored text;
 nothing is written. A submission naming a moved revision or a different note set
 is refused as `stale`, and so is one whose `inputs_digest` no longer matches:
-the GET returns a sha256 over the revision, each note's id and text, and the
-stored and withheld text of every block, so a privacy purge or retag that
-rewrites a note in place (without moving the revision) between the read and the
-submit is caught. Notes are deleted only on an accepted night. The GET is not
+the GET returns a sha256 over the revision, the cutoff, each note's id and text,
+the unread note ids, the stored and the withheld text of all four blocks, and
+the assembled user message, so a privacy purge, retag or opt-out landing between
+the read and the submit is caught, including an in-place note rewrite that
+moves neither the revision nor the ids. Notes are deleted only on an accepted night. The GET is not
 free of side effects: when the guild has no notes the model may read it stamps
-`last_dream_at` and deletes the unreadable notes, as the cron does.
+`last_dream_at` and deletes the unreadable notes.

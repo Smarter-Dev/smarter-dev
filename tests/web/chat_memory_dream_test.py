@@ -26,13 +26,11 @@ from pydantic_ai import ModelRetry
 from pydantic_ai.models.test import TestModel
 from sqlalchemy import select
 
-from scripts import dream_session
 from smarter_dev.web import chat_memory_dream
 from smarter_dev.web.chat_memory_dream import CUTOFF_SNAP_TOLERANCE
 from smarter_dev.web.chat_memory_dream import DreamContext
 from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamOutput
-from smarter_dev.web.chat_memory_dream import DreamSessionSummary
 from smarter_dev.web.chat_memory_dream import IdentityUpdate
 from smarter_dev.web.chat_memory_dream import build_dream_user_message
 from smarter_dev.web.chat_memory_dream import compose_dream
@@ -40,7 +38,6 @@ from smarter_dev.web.chat_memory_dream import dream_cutoff
 from smarter_dev.web.chat_memory_dream import dream_day
 from smarter_dev.web.chat_memory_dream import enforce_blob_limit
 from smarter_dev.web.chat_memory_dream import get_dream_agent
-from smarter_dev.web.chat_memory_dream import run_dream_session
 from smarter_dev.web.chat_memory_dream import run_guild_dream
 from smarter_dev.web.chat_memory_dream import should_keep_previous_blob
 from smarter_dev.web.chat_memory_dream import truncate_to_last_line
@@ -640,70 +637,6 @@ async def test_disabled_guild_is_never_dreamed(db_session):
     assert agent.call_count == 0
     assert result.outcome is DreamOutcome.SKIPPED_DISABLED
     assert len((await db_session.scalars(select(ChatAgentMemoryNote.id))).all()) == 1
-
-
-# -- the whole session ---------------------------------------------------------
-
-
-async def test_one_guilds_failure_never_stops_the_others(db_session):
-    await _write_note(db_session, content=_KAI_NOTE, guild_id=_GUILD)
-    await _write_note(db_session, content=_MALLORY_NOTE, guild_id=_OTHER_GUILD)
-    agent = _StubDreamAgent(
-        raise_on_markers={_KAI_NOTE},
-        outputs_by_marker={_MALLORY_NOTE: "## Who's here\nmallory (id 8) argues."},
-    )
-
-    summary = await run_dream_session(
-        _DREAMED_AT,
-        session_factory=_session_factory_for(db_session),
-        agent=agent,
-    )
-
-    assert summary.failed_guild_ids == [_GUILD]
-    assert [result.guild_id for result in summary.results] == [_OTHER_GUILD]
-
-    # The healthy guild is fully written; the failed one kept its notes, so
-    # tomorrow's dream sees two days and self-heals.
-    assert (await get_guild_memory_blob(db_session, _OTHER_GUILD)) is not None
-    assert (await get_guild_memory_blob(db_session, _GUILD)) is None
-    surviving_guilds = list(
-        (await db_session.scalars(select(ChatAgentMemoryNote.guild_id))).all()
-    )
-    assert surviving_guilds == [_GUILD]
-
-
-async def test_running_the_session_twice_in_one_night_is_a_no_op(db_session):
-    await _write_note(db_session, content=_KAI_NOTE)
-    agent = _StubDreamAgent()
-    factory = _session_factory_for(db_session)
-
-    await run_dream_session(_DREAMED_AT, session_factory=factory, agent=agent)
-    first_pass_calls = agent.call_count
-    await run_dream_session(
-        _DREAMED_AT + timedelta(minutes=1), session_factory=factory, agent=agent
-    )
-
-    assert first_pass_calls == 1
-    assert agent.call_count == 1  # the second pass had nothing left to read
-
-
-# -- the CronJob entry point ---------------------------------------------------
-
-
-async def test_script_exits_zero_when_every_guild_dreamed(monkeypatch):
-    async def fake_run_dream_session(now):
-        return DreamSessionSummary(results=[], failed_guild_ids=[])
-
-    monkeypatch.setattr(dream_session, "run_dream_session", fake_run_dream_session)
-    assert await dream_session.main() == 0
-
-
-async def test_script_exits_one_when_any_guild_failed(monkeypatch):
-    async def fake_run_dream_session(now):
-        return DreamSessionSummary(results=[], failed_guild_ids=[_GUILD])
-
-    monkeypatch.setattr(dream_session, "run_dream_session", fake_run_dream_session)
-    assert await dream_session.main() == 1
 
 
 def test_default_dream_model_is_gpt_6_1_sol_and_resolves_through_the_catalog(

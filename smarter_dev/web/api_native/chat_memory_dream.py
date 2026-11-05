@@ -5,15 +5,19 @@ touches the guild's memory. Three routes:
 
 - ``GET  /api/chat-memory/dream/guilds`` — guilds that need tonight's dream.
 - ``GET  /api/guilds/{guild_id}/chat-memory/dream`` — everything the dream reads
-  (the same inputs and the same user message the cron's one-shot builds).
+  (everything the dream reads, with the user message the model is given).
 - ``POST /api/guilds/{guild_id}/chat-memory/dream`` — the dream's answer.
 
 All validation lives in :mod:`smarter_dev.web.chat_memory_dream` and runs here
 unchanged, in its strict mode: a problem the model can fix is refused with a
 reason that names no stored text, so the agent can try again. A refusal is a
-200 with ``accepted: false`` and nothing is written. The submission also names
-the revision and the notes it read; if either moved since (a purge, an opt-out,
-a new note before the cutoff), it is refused as ``stale`` and the agent re-reads.
+200 with ``accepted: false`` and nothing is written. The submission also echoes
+the revision, the note ids and an ``inputs_digest`` of what it read; if any of
+them no longer matches (a purge or retag rewriting text in place, an opt-out, a
+new note before the cutoff), it is refused as ``stale`` and the agent re-reads.
+The digest covers the revision, the cutoff, each note's id and text, the unread
+note ids, the stored and the withheld text of all four blocks, and the user
+message.
 """
 
 from __future__ import annotations

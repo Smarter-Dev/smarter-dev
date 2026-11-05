@@ -54,8 +54,9 @@ so the carried-over block still fits its column. An output that names a
 blocked id is refused like any other bad night. Opting out deletes nothing
 beyond that; the rest stays the admin's deletion request.
 
-The dream runs in the web image (``scripts/dream_session.py``) and therefore
-talks to :mod:`smarter_dev.web.crud` directly rather than over the bot API.
+The proactive agent runs the dream (:mod:`smarter_dev.web.api_native.chat_memory_dream`
+serves it); this module holds the inputs, the validation and the commit both
+sides share.
 """
 
 from __future__ import annotations
@@ -83,7 +84,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
-from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.member_tags import names_outside_tags
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -94,7 +94,6 @@ from smarter_dev.web.chat_agent_public import known_member_names
 from smarter_dev.web.chat_agent_public import member_names
 from smarter_dev.web.crud import delete_notes_by_id
 from smarter_dev.web.crud import get_guild_memory_blob
-from smarter_dev.web.crud import guilds_needing_dream
 from smarter_dev.web.crud import list_notes_before
 from smarter_dev.web.crud import lock_guild_memory
 from smarter_dev.web.crud import prune_memory_revisions
@@ -107,7 +106,6 @@ from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
 from smarter_dev.web.privacy_gate import OptOutGate
 from smarter_dev.web.privacy_gate import load_gate
-from smarter_dev.web.usage_metering import record_meter_now
 
 logger = logging.getLogger(__name__)
 
@@ -221,14 +219,6 @@ class GuildDreamResult:
     outcome: DreamOutcome
     notes_consumed: int = 0
     revision: int | None = None
-
-
-@dataclass(frozen=True)
-class DreamSessionSummary:
-    """Every guild visited tonight, split by whether the visit survived."""
-
-    results: list[GuildDreamResult]
-    failed_guild_ids: list[str]
 
 
 class DreamRunResult(Protocol):
@@ -1123,95 +1113,6 @@ async def run_guild_dream(
         user_prompt=inputs.user_message, deps=inputs.context, **run_options
     )
     return await commit_guild_dream(session, inputs, result.output, dreamed_at=dreamed_at)
-
-
-# -- the whole session ---------------------------------------------------------
-
-
-async def run_dream_session(
-    now: datetime,
-    *,
-    session_factory: SessionFactory = get_db_session_context,
-    agent: DreamAgent | None = None,
-) -> DreamSessionSummary:
-    """Dream every guild that needs it for the night ending at midnight UTC.
-
-    One session per guild, and one guild's failure is only that guild's
-    failure: the loop keeps going, the failed guild's notes stay put, and
-    tomorrow it reads two days at once.
-    """
-    cutoff = dream_cutoff(now)
-    async with session_factory() as session:
-        guild_ids = await guilds_needing_dream(session, cutoff)
-    logger.info("Dream session for %s: %d guild(s)", cutoff.date(), len(guild_ids))
-
-    results: list[GuildDreamResult] = []
-    failed_guild_ids: list[str] = []
-    for guild_id in guild_ids:
-        result = await _dream_one_guild_in_isolation(
-            session_factory,
-            guild_id=guild_id,
-            cutoff=cutoff,
-            dreamed_at=now,
-            agent=agent,
-        )
-        if result is None:
-            failed_guild_ids.append(guild_id)
-        else:
-            results.append(result)
-    return DreamSessionSummary(results=results, failed_guild_ids=failed_guild_ids)
-
-
-async def _dream_one_guild_in_isolation(
-    session_factory: SessionFactory,
-    *,
-    guild_id: str,
-    cutoff: datetime,
-    dreamed_at: datetime,
-    agent: DreamAgent | None,
-) -> GuildDreamResult | None:
-    """Run one guild's dream; return ``None`` if it failed.
-
-    The broad ``except`` is the point rather than a lapse: a provider hiccup, a
-    lock timeout or a bad row in one guild must not cost every guild after it
-    its night. The rollback undoes that guild's half-written transaction, and
-    its notes survive to be re-read tomorrow.
-
-    The model's usage is written after the guild's transaction is over, in a
-    session of its own, so a night that kept the previous blocks or rolled back
-    is still on the ledger. It is keyed by the guild, the night and this
-    session's start: a second run of the CronJob that night (after a failure)
-    is new spend, and gets new rows.
-    """
-    meter = UsageMeter()
-    try:
-        async with session_factory() as session:
-            try:
-                return await run_guild_dream(
-                    session,
-                    guild_id=guild_id,
-                    cutoff=cutoff,
-                    dreamed_at=dreamed_at,
-                    agent=agent,
-                    meter=meter,
-                )
-            except Exception:
-                logger.exception(
-                    "Dream failed for guild %s; its notes survive for tomorrow", guild_id
-                )
-                await session.rollback()
-                return None
-    finally:
-        day = dream_day(cutoff).isoformat()
-        await record_meter_now(
-            meter,
-            session_factory=session_factory,
-            operation_key=f"memory_dream:{guild_id}:{day}:{dreamed_at.isoformat()}",
-            product_mode="discord",
-            operation_type="memory_dream",
-            reasoning_level=DREAM_REASONING_LEVEL.value,
-            details={"guild_id": guild_id, "dream_day": day},
-        )
 
 
 def _as_utc(moment: datetime) -> datetime:

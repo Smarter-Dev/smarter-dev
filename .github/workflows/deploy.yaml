@@ -67,7 +67,7 @@ jobs:
         for f in deploy.yaml deploy-bot.yaml deploy-worker.yaml \
                  deploy-chat-child-worker.yaml cron-sudo-sweep.yaml \
                  cron-retention-sweep.yaml cron-handler-sweep.yaml \
-                 cron-dream-session.yaml migrate-job.yaml; do
+                 migrate-job.yaml; do
           sed -i 's|<IMAGE_VERSION>|'${IMAGE_TAG}'|' $GITHUB_WORKSPACE/k8s/$f
         done
 
@@ -194,8 +194,11 @@ jobs:
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-handler-sweep.yaml
-        kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-dream-session.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-log-restart.yaml
+        # `kubectl apply` never deletes: a manifest removed from the repo
+        # leaves its object running. The proactive agent dreams now; drop the
+        # retired cron (a no-op once it is gone).
+        kubectl delete cronjob smarter-dev-dream-session -n smarter-dev --ignore-not-found
 
     - name: Verify web deployment
       run: kubectl rollout status deployment/smarter-dev-website

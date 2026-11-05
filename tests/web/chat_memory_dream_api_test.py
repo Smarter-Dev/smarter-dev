@@ -245,3 +245,22 @@ async def test_facts_about_an_opted_out_member_are_withheld_and_carried_over(
     db_session.expire_all()
     stored = (await get_guild_memory_blob(db_session, _GUILD)).facts
     assert stored == f"Server is Oak.\n<{_OPTED_OUT}:bob> owns the build box."
+
+
+async def test_an_opt_out_between_read_and_submit_is_stale(client, db_session):
+    await _seed(db_session)
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    memory.facts = f"Server is Pine.\n<{_OPTED_OUT}:bob> owns the build box."
+    await db_session.commit()
+    inputs = client.get(_BASE).json()
+    # The line was shown to the model; the member opts out before the answer.
+    assert "build box" in inputs["user_message"]
+    await opt_out(db_session, _OPTED_OUT)
+    await db_session.commit()
+
+    result = client.post(_BASE, json=_body(inputs, facts="Server is Oak.")).json()
+
+    assert result["accepted"] is False
+    assert result["reason"] == "stale"
+    db_session.expire_all()
+    assert "Server is Pine." in (await get_guild_memory_blob(db_session, _GUILD)).facts
