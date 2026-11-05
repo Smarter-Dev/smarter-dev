@@ -15,6 +15,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from enum import Enum
+from pathlib import Path
 
 from pydantic import BaseModel
 from pydantic import Field
@@ -39,17 +40,11 @@ TIMEOUT_SECONDS = 60
 INPUT_PRICE_PER_MILLION_USD = float(JEV_INPUT_PRICE_PER_MILLION_USD)
 
 INSTRUCTIONS = (
-    "Follow the GUIDE. A result is at least level 1 when the snippet gives useful "
-    "information for the REQUEST or any part of it, including a page about the same "
-    "error or problem. It is level 0 when it only shares words, is navigation or a "
-    "store or job listing, only asks for more details, or is outside a time the "
-    "REQUEST names."
+    Path(__file__).parent / "prompts" / "ranking_instructions.md"
+).read_text(encoding="utf-8")
+GUIDE = (Path(__file__).parent / "prompts" / "ranking_guide.md").read_text(
+    encoding="utf-8"
 )
-GUIDE = """\
-You judge web search results for a search assistant. Today is {weekday} {today}, and this week runs {this_week}. The REQUEST is what the user asked for. Each RESULT is one search result, shown as the site's domain and the snippet the search engine returned. Judge every result on its own, from its domain and snippet only, and judge what the snippet says rather than the words it contains.
-
-- Relevant: the page helps with the REQUEST or with any part of it. A page does not need to answer the whole REQUEST. It is relevant when it covers one step, a likely cause, an error the user is likely to hit along the way, a concept they need to understand, or one of the options they are weighing. A page that shows a function, setting or technique the user could use for part of the REQUEST counts. It is not relevant when it only shares some of the REQUEST's words while being about something else, or when the snippet is mostly menus, prices, ratings, buy buttons, sign-up text, a list of links, a job listing or an empty code editor rather than information. A reply that only asks someone for more details, or that answers a different person's unrelated problem, is not relevant either. When the REQUEST asks about a particular time, such as today, this week or the latest release, an event or release outside that time is not relevant, however close its topic.
-- Good quality: the source is trustworthy and substantive for this topic, such as official documentation, a standards body, a reputable publication, an expert Q&A answer or a well-known practitioner. Content farms, thin SEO listicles, scraped copies, spam and pages selling something unrelated are not good quality."""
 RELEVANCE_QUESTION = "How useful is {where} for the REQUEST?"
 LEVELS = (
     "not useful: only shares words, is navigation, a store or job listing, only asks "

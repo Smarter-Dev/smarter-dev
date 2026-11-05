@@ -30,6 +30,7 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Generic
 from typing import Literal
 from typing import TypeVar
@@ -179,34 +180,9 @@ def _with_feedback(prompt: str, feedback: str | None) -> str:
 
 # -- chat agent: history + topic + notes --------------------------------------
 
-CHAT_PURGE_PROMPT = """\
-You rewrite a Discord chat agent's working memory for one channel because a
-person asked to be removed from it. You get the agent's whole conversation
-history as a transcript (XML `<message>` blocks with `user-id` and `username`
-attributes, the agent's replies, tool calls and returns; it may open with an
-earlier `[compacted history]` summary), plus the channel's current topic line
-and notes.
-
-Remove every trace of the person named privately below: their messages, what
-they asked, said, shared or decided, replies addressed to them, facts about
-them, and the fact that they took part. Do not mention that anyone was
-removed. Keep everything else, attributed exactly as before.
-
-Output three fields:
-- `summary`: the running summary the agent will read in place of the whole
-  history. Same rules as always: attribute every kept question, claim,
-  request or decision as a tag, `<user-id:username>`; structure it as a
-  `Participants:` line, topic bullets, and an `Agent state:` section. At most
-  {max_chars} characters. If there is no transcript, return an empty string.
-  If nothing remains once the person is removed, say briefly that the
-  conversation has no open threads.
-- `topic`: the channel's topic line (1-2 sentences) rewritten the same way;
-  an empty string if no topic was given.
-- `notes`: the channel's notes (1-5 sentences) rewritten the same way; an
-  empty string if no notes were given.
-Always return all three fields.
-
-No preamble, no quoting, no apologies."""
+CHAT_PURGE_PROMPT = (
+    Path(__file__).parent / "prompts" / "compaction_chat_purge_prompt.md"
+).read_text(encoding="utf-8")
 
 
 class ChatPurgeOutput(BaseModel):
@@ -335,22 +311,9 @@ async def _purge_chat_memory(
 
 # -- proactive agent: guild / channel history ---------------------------------
 
-PROACTIVE_PURGE_PROMPT = """\
-Your rolling context is being compacted because a person asked to be removed
-from your memory: everything above this message will be replaced by the note
-you write now. Write the memory your future self needs to continue
-seamlessly, exactly as you would for an ordinary compaction — conversations
-still in motion and who is in them, commitments or follow-ups you made, what
-you have learned about the people and channels you watch — attributing every
-statement to WHO said or did it, as a tag `<user-id:username>`, and WHERE
-(channel name and id).
-
-Leave out every trace of the person below: their messages, what they asked,
-said, shared or decided, your replies to them, facts about them, and the fact
-that they took part. Do not mention that anyone was removed. Never write
-their user id or any of their names.
-
-{target}"""
+PROACTIVE_PURGE_PROMPT = (
+    Path(__file__).parent / "prompts" / "compaction_proactive_purge_prompt.md"
+).read_text(encoding="utf-8")
 
 
 async def purge_proactive_history(
@@ -398,20 +361,9 @@ async def _purge_proactive_history(
 
 # -- proactive watch instructions ---------------------------------------------
 
-WATCH_PURGE_PROMPT = """\
-You maintain the watch instructions a Discord bot set for its watcher (wake
-criteria with an id each). A person asked to be removed from the bot's
-memory. For EVERY instruction below decide one action:
-- `keep` — it has nothing to do with that person; leave it unchanged.
-- `rewrite` — it is still useful without them; give the new text in `text`,
-  with no trace of the person.
-- `drop` — it only makes sense because of them.
-Return one decision per instruction id, no more, no fewer.
-
-{target}
-
-INSTRUCTIONS:
-{instructions}"""
+WATCH_PURGE_PROMPT = (
+    Path(__file__).parent / "prompts" / "compaction_watch_purge_prompt.md"
+).read_text(encoding="utf-8")
 
 
 class InstructionDecision(BaseModel):

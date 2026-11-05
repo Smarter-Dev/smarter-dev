@@ -26,20 +26,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 ANNOUNCEMENTS_CHANNEL_ID = "670004266320134185"
 
-ANNOUNCEMENT_INSTRUCTIONS = """
-# Task
-
-You're posting a one-off announcement to the server, not replying in a
-conversation. The operator's brief describes what to announce; turn it into
-a single Discord message in your own voice.
-
-Rules:
-- One message, under 1900 characters, plain Discord markdown.
-- Cover every fact in the brief accurately — don't invent details,
-  numbers, or dates that aren't in it.
-- No @everyone/@here or role pings unless the brief explicitly asks.
-- Output ONLY the message text, nothing else.
-"""
+ANNOUNCEMENT_INSTRUCTIONS = (
+    Path(__file__).parent / "prompts" / "announce.md"
+).read_text(encoding="utf-8")
 
 
 def _persona() -> str:

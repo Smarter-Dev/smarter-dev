@@ -17,22 +17,25 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
-from pydantic_ai import Agent, BinaryContent
+from pydantic_ai import Agent
+from pydantic_ai import BinaryContent
 from pydantic_ai.models import Model
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.google import GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 
 from smarter_dev.bot.services.usage_reporter import metered
-from smarter_dev.shared.model_catalog import CatalogModel
-from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.shared.media_reads import MAX_SEND_BYTES
 from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import too_large_to_send
-from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 
 logger = logging.getLogger(__name__)
@@ -44,29 +47,9 @@ MODEL_ENV_VAR = "MEDIA_READER_MODEL"
 DEFAULT_AUDIO_MODEL = "gemini-3.8-flash"
 AUDIO_MODEL_ENV_VAR = "MEDIA_READER_AUDIO_MODEL"
 
-SYSTEM_PROMPT = """\
-You examine a single attached media file — an image or an audio clip — to \
-satisfy a specific INSTRUCTION from another assistant. You are given the \
-source URL, the kind of media, the INSTRUCTION, and the file itself.
-
-Follow these rules:
-- Obey the INSTRUCTION precisely: report exactly what it asks for, at the \
-requested level of detail, and include verbatim text/quotations only when it \
-asks (otherwise paraphrase).
-- For an IMAGE: describe only what is actually visible — objects, people, UI, \
-diagrams, charts, and any readable text. Transcribe on-screen text accurately \
-when relevant. Read details in the context of the whole image, not in \
-isolation.
-- For AUDIO: transcribe or summarize what is actually said or heard per the \
-instruction, noting speakers or notable non-speech sounds when relevant.
-- Stay grounded in what is present. Do not guess at, infer, or invent details \
-that are not actually in the media.
-- Be concise: at most about 5 paragraphs, fewer when the instruction asks for \
-less. Do not pad.
-- If the media cannot be meaningfully read — it is blank, corrupt, silent, \
-unintelligible, or it simply does not contain what the INSTRUCTION asks for — \
-say plainly that you cannot provide a meaningful summary and briefly state \
-why. Never fabricate a description to fill the gap."""
+SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "media_reader.md").read_text(
+    encoding="utf-8"
+)
 
 
 _media_reader_agent: Agent[None, str] | None = None

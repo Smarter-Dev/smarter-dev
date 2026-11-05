@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+from pathlib import Path
 from uuid import UUID
 from uuid import uuid4
 
@@ -35,19 +36,9 @@ logger = logging.getLogger(__name__)
 TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "claude-haiku-5-5")
 AGENT_NAME = "smarter.dev.title.generator"
 
-_SYSTEM_PROMPT = """\
-You generate concise titles for engineering Q&A sessions.
-
-Given a user's first question, reply with ONE short title — 3 to 7 words,
-title-cased, no quotes, no trailing punctuation, no preamble.
-
-The title should capture the TOPIC, not the question. For example:
-- "How do I architect a webhook receiver for bursts?" -> "Webhook Receiver Burst Architecture"
-- "Postgres SKIP LOCKED vs SQS" -> "Postgres SKIP LOCKED vs SQS"
-- "Best book on distributed systems?" -> "Distributed Systems Reading"
-
-Reply with the title alone. No labels, no explanation.
-"""
+_SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "title_agent.md").read_text(
+    encoding="utf-8"
+)
 
 _TITLE_MAX_LEN = 80
 

@@ -1,0 +1,1 @@
+Is this CANDIDATE, a new account that posted in the channel around the ad, taking part in a staged conversation that sets up or promotes the event in the ad (asking leading questions before it, echoing or cheering it after)? The ad is the AD when one is given, otherwise the MESSAGE. Messages about something else, or doubtful reactions to it, are not.
