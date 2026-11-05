@@ -176,6 +176,6 @@ def _resolve_provisional(
         return replace(provisional, resolution=UPGRADED)
     if scam_outcome == "clean":
         return replace(provisional, resolution=RELEASED)
-    if scam_outcome == "violation":
+    if scam_outcome in ("violation", "refused"):
         return replace(provisional, resolution=DECIDED)
     return replace(provisional, resolution=EXPIRED)

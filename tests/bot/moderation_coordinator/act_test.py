@@ -16,11 +16,14 @@ from dataclasses import replace
 from datetime import timedelta
 
 import pytest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 
 from smarter_dev.bot.moderation_coordinator import act as act_module
 from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_CLEAN
+from smarter_dev.bot.moderation_coordinator.act import CLOSED_REFUSED
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_REMOVED
 from smarter_dev.bot.moderation_coordinator.act import CLOSED_UNKNOWN
 from smarter_dev.bot.moderation_coordinator.act import EDIT_PING_TEXT
@@ -47,6 +50,7 @@ from smarter_dev.bot.moderation_coordinator.shadow import ModerationShadow
 from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.models import ModerationIncidentEntry
 from smarter_dev.web.models import ModerationIncidentLink
+from smarter_dev.web.models import ModerationOperation
 from smarter_dev.web.models import ModerationOutbox
 from smarter_dev.web.moderation_gateway import ModerationGateway
 from smarter_dev.web.moderation_gateway import types as gw
@@ -312,6 +316,49 @@ async def test_no_verdict_leaves_the_hold_and_alerts_with_the_cause():
         for alert in alerts
     )
     assert (posts[1].channel_id, CLOSED_UNKNOWN) in h.messenger.posts
+
+
+def _refusing(answers, calls, by_text=None):
+    """Haiku declining to read the message, as the API's refusal stop."""
+
+    def refuse(messages, info):
+        calls.haiku.append("refused")
+        return ModelResponse(
+            parts=[],
+            finish_reason="content_filter",
+            provider_details={"refusal_category": "general_harms"},
+        )
+
+    return FunctionModel(refuse, model_name="claude-haiku-5-5")
+
+
+async def test_a_refusal_holds_the_author_a_day_removes_the_post_and_alerts():
+    case, victim, posts = scam_burst()
+    case = replace(case, policy=acting(case.policy), haiku=_refusing)
+    h = harness(case)
+
+    await h.judge(*posts)
+
+    timeouts = [call for call in h.port.calls if call[0] == "timeout"]
+    assert timeouts and timeouts[-1][2] is not None  # still held: never released
+    # The 5-minute hold became a day's: the last expiry is ~24h past the first.
+    assert 23.5 * 3600 < timeouts[-1][2] - timeouts[0][2] + 300 < 24.5 * 3600
+    assert h.deleted() >= {posts[1].message_id}
+    alerts = await entries(gw.ENTRY_ALERT)
+    refused = [a for a in alerts if "classifier refused to review" in a]
+    # One alert for the burst, not one per copy, naming the category and what
+    # was done.
+    assert len(refused) == 1 and "general harms" in refused[0]
+    assert "held for 1 day" in refused[0]
+    assert (posts[1].channel_id, CLOSED_CLEAN) not in h.messenger.posts
+    assert (posts[1].channel_id, CLOSED_UNKNOWN) not in h.messenger.posts
+    assert (posts[1].channel_id, CLOSED_REFUSED) in h.messenger.posts
+    assert not any("general" in text for _, text in h.messenger.posts)
+    # Recorded as a review hold, so it is no moderation history afterwards.
+    async with default_session_factory()() as session:
+        ops = (await session.execute(select(ModerationOperation))).scalars().all()
+    day = [op for op in ops if (op.requested or {}).get("duration_seconds") == 86400]
+    assert day and all((op.requested or {}).get("provisional") for op in day)
 
 
 async def test_a_failed_evaluation_after_the_hold_is_reported(monkeypatch):
@@ -2221,3 +2268,59 @@ async def test_an_image_only_copy_held_while_its_post_is_judged_joins_its_incide
     [(_, hold), (_, dm)] = h.messenger.dms
     assert "being checked" in hold
     assert "we removed what it posted" in dm
+
+
+async def test_a_refused_post_does_not_take_the_bursts_sanction_from_a_confirmed_scam():
+    case, victim, _ = scam_burst()
+    exe = "grab the installer https://files.example/setup.exe"
+    nitro = "Free Nitro for everyone, claim here https://disc0rd-gifts.example/nitro"
+    first = [say(victim, exe, NOW)]
+    second = [say(victim, nitro, NOW + timedelta(seconds=10), channel=OTHER)]
+    lure = second[0]
+    # A first message is judged on its own, without a repeat to hold it.
+    reads = ReplayReads(
+        histories={
+            victim.id: AuthorHistory(
+                is_first_message=True, days_since_last_message=None
+            )
+        }
+    )
+
+    def haiku(answers, calls, by_text=None):
+        answering = scripted_haiku(answers, calls, by_text)
+        refusing = _refusing(answers, calls, by_text)
+        return FunctionModel(
+            lambda messages, info: (
+                refusing.function(messages, info)
+                if "setup.exe" in str(messages)
+                else answering.function(messages, info)
+            ),
+            model_name="claude-haiku-5-5",
+        )
+
+    case = replace(
+        case,
+        policy=acting(case.policy),
+        messages=[*first, *second],
+        reads=reads,
+        haiku=haiku,
+    )
+    h = harness(case)
+
+    await h.judge(*first, *second)
+
+    assert h.deleted() >= {lure.message_id}
+    async with default_session_factory()() as session:
+        ops = (await session.execute(select(ModerationOperation))).scalars().all()
+        actions = (await session.execute(select(ModerationAction))).scalars().all()
+    # B's confirmed scam was sanctioned (warned, being a first message) with
+    # its own history row, though A's review hold (a day) was already running.
+    assert any(
+        op.kind == gw.WARN
+        and op.state == gw.CONFIRMED
+        and op.reason == "confirmed scam"
+        for op in ops
+    )
+    assert any(
+        a.action_type == "warn" and a.reason == "confirmed scam" for a in actions
+    )

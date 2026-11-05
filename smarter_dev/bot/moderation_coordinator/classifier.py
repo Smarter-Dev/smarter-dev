@@ -11,12 +11,15 @@ one request on one backend (:func:`choose_backend`):
   questions are needed. The promotion question and the participant questions
   go in one request; with no candidates it is exactly the ring's own ad check.
 
-Never Jev then Haiku, and never a second request for the same revision:
+Never Jev then Haiku, and one request for the same revision, with a single
+exception: when Haiku refuses a request that carried other members' messages,
+the author's own labels are asked once more without them
+(:meth:`Classifier._ask_again_alone`), within the budget:
 
 * no tools, no web search, no tool loop (``UsageLimits(request_limit=1)``);
 * no retries at any layer: pydantic-ai ``retries=0``, the Anthropic SDK and
   the TypeSafe SDK both built with ``max_retries=0``;
-* one deadline (:data:`DEADLINE_SECONDS`, the brief's 10 s) for the request;
+* one deadline (:data:`DEADLINE_SECONDS`, the brief's 10 s) for each request;
 * bounded input (message and context truncated, at most :data:`MAX_IMAGES`
   images of at most :data:`MAX_IMAGE_BYTES` each) and output (``max_tokens``);
 * a per-author, per-guild-minute and per-guild-day budget
@@ -45,6 +48,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -55,6 +59,7 @@ from pydantic import Field
 from pydantic import create_model
 from pydantic_ai import Agent
 from pydantic_ai import BinaryContent
+from pydantic_ai.exceptions import ContentFilterError
 from pydantic_ai.models import Model
 from pydantic_ai.usage import UsageLimits
 
@@ -66,6 +71,7 @@ from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import HAIKU_LABELS
 from smarter_dev.bot.moderation_coordinator.model import INVALID_OUTPUT
 from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
+from smarter_dev.bot.moderation_coordinator.model import REFUSED
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
 from smarter_dev.bot.moderation_coordinator.model import UNSEEN_IMAGES
@@ -148,6 +154,47 @@ MAX_TRACKED_AUTHORS = 4096
 METER_OPERATION = "moderation_shadow_classifier"
 #: The acting coordinator's requests: moderation spend, not a trial's.
 ACTING_METER_OPERATION = "moderation_classifier"
+
+
+#: A refusal category is a short snake_case word (``cyber``, ``bio``,
+#: ``reasoning_extraction``…); anything else is not repeated.
+_CATEGORY = re.compile(r"[a-z][a-z_]{0,39}")
+
+
+def refusal_category(error: BaseException) -> str | None:
+    """The refusal's category from a ``ContentFilterError``'s body (the
+    response's ``provider_details``), or None. Reads nothing else from it."""
+    body = getattr(error, "body", None)
+    try:
+        messages = json.loads(body) if isinstance(body, str | bytes) else body
+        for message in messages if isinstance(messages, list) else ():
+            details = message.get("provider_details") or {}
+            category = details.get("refusal_category")
+            if isinstance(category, str) and _CATEGORY.fullmatch(category):
+                return category
+    except (ValueError, AttributeError, TypeError):
+        pass
+    return None
+
+
+def raise_if_refused(run) -> None:
+    """A refusal that came after some text still ends the answer: pydantic-ai
+    raises only for a reply with no text, so the finish reason is checked."""
+    response = run.response
+    if response.finish_reason == "content_filter":
+        details = response.provider_details or {}
+        raise ContentFilterError(
+            "Content filter triggered.",
+            body=json.dumps(
+                [
+                    {
+                        "provider_details": {
+                            "refusal_category": details.get("refusal_category")
+                        }
+                    }
+                ]
+            ),
+        )
 
 
 def _is_timeout(error: BaseException) -> bool:
@@ -386,6 +433,16 @@ class ClassifierRequest:
     #: Ask Haiku for the message's one-line description too (#378), in the
     #: same request: the report's line for a deletion. Jev is never asked.
     summarize: bool = False
+
+    @property
+    def others_material(self) -> bool:
+        """The request carries other members' messages (a ring's context,
+        candidates or stored ad): a refusal of it is not the author's."""
+        return bool(
+            self.ring_context
+            or self.ring_candidates
+            or (self.ring_ad is not None and self.ring_ad != self.content)
+        )
 
 
 @dataclass(slots=True)
@@ -1171,6 +1228,7 @@ class ModerationClassifier:
         model_name = HAIKU_MODEL_ID if backend == HAIKU else JEV_MODEL_ID
         started = time.monotonic()
         result = ClassifierResult(backend=backend, model=model_name, requests=1)
+        refused_with_others = False
         async with metered(
             ACTING_METER_OPERATION if request.acting else self.operation_type,
             guild_id=request.guild_id,
@@ -1200,6 +1258,21 @@ class ModerationClassifier:
                     if any(v.outcome != INVALID_OUTPUT for v in verdicts.values())
                     else INVALID_OUTPUT
                 )
+            except ContentFilterError as error:
+                # The model declined to read the message: kept apart from an
+                # error so moderators decide (the text is never logged).
+                category = refusal_category(error)
+                logger.warning(
+                    "Moderation classifier (%s) refused a message (%s)",
+                    backend,
+                    category or "no category",
+                )
+                result.verdicts = {
+                    label: LabelVerdict(label, REFUSED, detail=category)
+                    for label in labels
+                }
+                result.outcome = REFUSED
+                refused_with_others = request.others_material
             except Exception as error:  # noqa: BLE001 — unknown, never a retry
                 outcome = TIMEOUT if _is_timeout(error) else ERROR
                 if outcome == ERROR:
@@ -1216,7 +1289,46 @@ class ModerationClassifier:
                 result.outcome = outcome
         result.latency_ms = int((time.monotonic() - started) * 1000)
         self._account(result, meter, model_name)
+        if refused_with_others:
+            await self._ask_again_alone(request, result)
         return result
+
+    async def _ask_again_alone(
+        self, request: ClassifierRequest, result: ClassifierResult
+    ) -> None:
+        """A refusal of a request that carried other members' messages is not
+        the author's: the author's own labels are asked again without them.
+        Only a refusal of that is theirs to answer for."""
+        own = frozenset(
+            label
+            for label in request.labels
+            if label != EVENT_PROMOTION and participant_of(label) is None
+        )
+        if not own:
+            return
+        again = await self.classify(
+            replace(
+                request,
+                labels=own,
+                ring_context=(),
+                ring_ad=None,
+                ring_candidates=(),
+            )
+        )
+        result.verdicts.update(again.verdicts)
+        result.outcome = again.outcome
+        result.requests += again.requests
+        result.input_tokens += again.input_tokens
+        result.output_tokens += again.output_tokens
+        result.cost_usd += again.cost_usd
+        result.latency_ms = (result.latency_ms or 0) + (again.latency_ms or 0)
+        if again.outcome == BUDGET:
+            # Nothing was asked: the first request's images stay the record.
+            result.refused_by = again.refused_by
+            return
+        result.images = again.images
+        result.images_loaded = again.images_loaded
+        result.summary = again.summary
 
     @staticmethod
     def _account(result: ClassifierResult, meter, model_name: str) -> None:
@@ -1247,6 +1359,7 @@ class ModerationClassifier:
             model_settings={**HAIKU_SETTINGS, "timeout": deadline or self.deadline},
             usage_limits=UsageLimits(request_limit=1),
         )
+        raise_if_refused(run)
         verdicts = parse_haiku_reply(run.output, request.labels)
         summary = parse_haiku_summary(run.output) if request.summarize else None
         return unseen_is_unknown(verdicts, images.counts), summary
@@ -1265,6 +1378,7 @@ class ModerationClassifier:
             },
             usage_limits=UsageLimits(request_limit=1),
         )
+        raise_if_refused(run)
         answers = run.output.model_dump()
         details = run.response.provider_details or {}
         confidence = details.get("confidence") or {}

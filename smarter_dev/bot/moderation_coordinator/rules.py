@@ -47,6 +47,7 @@ from smarter_dev.bot.moderation_coordinator.model import NOTICE_SCAM_REMOVED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SECURE_ACCOUNT
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_SPAM_WARNING
 from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
+from smarter_dev.bot.moderation_coordinator.model import REFUSED
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import Cleanup
@@ -569,6 +570,13 @@ def duration_text(seconds: int) -> str:
     return f"{max(1, seconds)} seconds"
 
 
+#: How long a message the classifier refused to read holds its author.
+REFUSAL_HOLD_SECONDS = DAY
+
+#: How a copy's reason says the post it copies was already judged.
+COPY_JUDGED = ", copy of a post already judged"
+
+
 def scam_claim(key: str) -> str:
     """The one timeout claim a post and its copies share."""
     return f"scam:{key}"
@@ -630,6 +638,12 @@ class ScamReview:
         scam, abuse = verdicts[SCAM], verdicts[ABUSE]
         if scam.yes or abuse.yes:
             return self._violation(scam.yes), "violation", []
+        if REFUSED in (scam.outcome, abuse.outcome):
+            return (
+                self._refused(scam if scam.outcome == REFUSED else abuse),
+                "refused",
+                [],
+            )
         if scam.no and abuse.no:
             return [], "clean", []
         unknown = [v for v in (scam, abuse) if not v.known]
@@ -639,6 +653,38 @@ class ScamReview:
             "unknown",
             [f"Scam check on <@{self.facts.author_id}> came back unknown ({why})."],
         )
+
+    def _refused(self, verdict: LabelVerdict) -> list[RuleHit]:
+        """The classifier declined to read the message (often what it should
+        not be shown): never judged clean. It is removed and its author held
+        for :data:`REFUSAL_HOLD_SECONDS`, so a moderator decides; releasing
+        the hold ends it. A copy is removed only: the post carries the hold."""
+        facts = self.facts
+        # The reason reaches the member (their DM): no classifier internals.
+        # The category is in the moderators' alert (``verdict.detail``).
+        reason = "held for moderator review"
+        if self.copy:
+            reason += COPY_JUDGED
+        return [
+            RuleHit(
+                rule=SCAM_GATE,
+                reason=reason,
+                target_user_id=facts.author_id,
+                target_name=facts.author_name,
+                sanction=None
+                if self.copy
+                else Sanction(
+                    gw.TIMEOUT,
+                    duration_seconds=REFUSAL_HOLD_SECONDS,
+                    claim=scam_claim(self.key),
+                    review_hold=True,
+                ),
+                cleanup=(Cleanup(facts.channel_id, facts.message_id),)
+                + tuple(
+                    Cleanup(post.channel_id, post.message_id) for post in self.copies
+                ),
+            )
+        ]
 
     def _violation(self, is_scam: bool) -> list[RuleHit]:
         facts = self.facts

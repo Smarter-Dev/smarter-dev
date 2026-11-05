@@ -49,6 +49,9 @@ ANSWERED = "answered"
 LOW_CONFIDENCE = "low_confidence"
 TIMEOUT = "timeout"
 ERROR = "error"
+#: The classifier declined to look at the message (a ``refusal`` stop): not
+#: an error, and not clean. A flagged message is held for moderators.
+REFUSED = "refused"
 INVALID_OUTPUT = "invalid_output"
 BUDGET = "budget"
 NOT_ASKED = "not_asked"
@@ -58,6 +61,7 @@ UNKNOWN_OUTCOMES = (
     LOW_CONFIDENCE,
     TIMEOUT,
     ERROR,
+    REFUSED,
     INVALID_OUTPUT,
     BUDGET,
     UNSEEN_IMAGES,
@@ -76,6 +80,8 @@ class LabelVerdict:
     outcome: str
     answer: bool | None = None
     confidence: float | None = None
+    #: A refusal's category (``cyber``, ``general_harms``…), when known.
+    detail: str | None = None
 
     @property
     def yes(self) -> bool:
@@ -95,6 +101,8 @@ class LabelVerdict:
             if self.confidence is not None:
                 text += f", confidence {percent(self.confidence)}"
             return text if self.outcome == ANSWERED else f"{text} (too unsure)"
+        if self.outcome == REFUSED and self.detail:
+            return f"refused, {self.detail.replace('_', ' ')}"
         if self.outcome == UNSEEN_IMAGES:
             return "no, but not every image was seen"
         return self.outcome.replace("_", " ")
@@ -106,6 +114,7 @@ class LabelVerdict:
             "confidence": None
             if self.confidence is None
             else round(float(self.confidence), 3),
+            **({"detail": self.detail} if self.detail else {}),
         }
 
 
@@ -266,6 +275,9 @@ class Sanction:
     kind: str  # gw.WARN / gw.TIMEOUT / gw.KICK / gw.BAN
     duration_seconds: int | None = None
     claim: str | None = None
+    #: A timeout held for moderators to decide, not a sanction: recorded as a
+    #: review hold (``provisional``), so it is no moderation history.
+    review_hold: bool = False
 
     @property
     def rank(self) -> int:

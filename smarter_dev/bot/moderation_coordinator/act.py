@@ -59,6 +59,7 @@ from uuid import UUID
 from smarter_dev.bot.attachment_filter import classify_attachments
 from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.coordinator import Evaluation
+from smarter_dev.bot.moderation_coordinator.decide import EVALUATE_ONLY
 from smarter_dev.bot.moderation_coordinator.decide import EXPIRED
 from smarter_dev.bot.moderation_coordinator.decide import RELEASED
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
@@ -99,6 +100,7 @@ ACTOR = "coordinator"
 INVESTIGATING = "-# Investigating potential scam"
 CLOSED_CLEAN = "-# Checked: no scam found"
 CLOSED_REMOVED = "-# Checked: removed as a scam"
+CLOSED_REFUSED = "-# Checked: removed pending moderator review"
 CLOSED_UNKNOWN = "-# Check incomplete: a moderator will take a look"
 
 #: scam-banner's own wording for the two warns, and for its hold.
@@ -328,6 +330,8 @@ class Executor:
         self.summaries = summaries
         #: Holds placed and not yet resolved: (guild, author, post key).
         self._holds: dict[tuple[str, str, str], _Hold] = {}
+        #: Refusal alerts sent, newest last (bounded): one per author's burst.
+        self._refusal_alerts: dict[tuple[str, str, str], None] = {}
 
     @classmethod
     def for_bot(
@@ -741,6 +745,7 @@ class Executor:
                         reason=_reason([target]),
                         duration_seconds=sanction.duration_seconds,
                         claim=sanction.claim,
+                        provisional=sanction.review_hold,
                         target_is_bot=False,
                     )
                 )
@@ -774,14 +779,19 @@ class Executor:
             )
 
         await self._dm_before_ban(gateway, trigger, targets, facts, policy)
-        if proposals:
-            result = await gateway.act(trigger, proposals)
-        else:
-            result = gw.ActResult(
-                incident_id=await gateway.ensure_incident(
-                    trigger, subject=facts.author_id
+        try:
+            if proposals:
+                result = await gateway.act(trigger, proposals)
+            else:
+                result = gw.ActResult(
+                    incident_id=await gateway.ensure_incident(
+                        trigger, subject=facts.author_id
+                    )
                 )
-            )
+        except BaseException:
+            # The alert never went out: the burst's next post carries it.
+            self._refusal_alerts.pop(_refusal_alert_key(evaluation), None)
+            raise
 
         deleted = {
             message_id
@@ -1323,6 +1333,18 @@ class Executor:
         if provisional is not None and provisional.resolution == EXPIRED:
             lines.append(_expired_line(provisional, evaluation))
         lines.extend((gw.ENTRY_NOTE, line) for line in decision.review)
+        if evaluation.scam_outcome == "refused" and not any(
+            rules.COPY_JUDGED in line
+            for line in decision.rules_fired
+            if line.startswith(rules.SCAM_GATE)
+        ):
+            # One alert per burst: its other posts are covered by it.
+            alert_key = _refusal_alert_key(evaluation)
+            if alert_key not in self._refusal_alerts:
+                self._refusal_alerts[alert_key] = None
+                while len(self._refusal_alerts) > 256:
+                    del self._refusal_alerts[next(iter(self._refusal_alerts))]
+                lines.append(_refused_line(evaluation))
         scam_fired = any(
             line.startswith(rules.SCAM_GATE) for line in decision.rules_fired
         )
@@ -1652,8 +1674,64 @@ def _expired_line(provisional: Provisional, evaluation: Evaluation) -> tuple[str
     )
 
 
+def _refusal_alert_key(evaluation: Evaluation) -> tuple[str, str, str]:
+    facts = evaluation.facts
+    return (
+        facts.guild_id,
+        facts.author_id,
+        evaluation.burst_alias or evaluation.key,
+    )
+
+
+_SANCTION_DONE = {gw.BAN: "banned", gw.KICK: "kicked", gw.WARN: "warned"}
+
+
+def _refused_line(evaluation: Evaluation) -> tuple[str, str]:
+    """The alert for a message the classifier refused to review: says what
+    this decision does about it (policy, evaluate-only and staff change it)."""
+    facts = evaluation.facts
+    decision = evaluation.to_carry_out
+    category = next((v.detail for v in evaluation.verdicts.values() if v.detail), None)
+    said = f" ({category.replace('_', ' ')})" if category else ""
+    target = decision.targets.get(facts.author_id)
+    hold_placed = False
+    if facts.author_id in decision.staff_excluded:
+        done = "The author is staff, so nothing was done"
+    elif any(
+        EVALUATE_ONLY in line
+        for line in decision.rules_fired
+        if line.startswith(rules.SCAM_GATE)
+    ):
+        done = "The policy only evaluates this check, so nothing was done"
+    else:
+        removed = target is not None and bool(target.cleanup)
+        sanction = target.sanction if target is not None else None
+        done = "The message was removed" if removed else "The message was left in place"
+        if sanction is not None and sanction.kind == gw.TIMEOUT:
+            held = rules.duration_text(sanction.duration_seconds or 0)
+            done += f" and the member is held for {held}"
+            if held != rules.duration_text(rules.REFUSAL_HOLD_SECONDS):
+                done += " (the policy caps timeouts)"
+            hold_placed = True
+        elif sanction is not None:
+            done += (
+                f" and the member was {_SANCTION_DONE.get(sanction.kind, 'sanctioned')}"
+            )
+        else:
+            done += " and no hold was placed (the policy does not allow one)"
+    return (
+        gw.ENTRY_ALERT,
+        f"The classifier refused to review <@{facts.author_id}>'s message{said}. "
+        f"{done}. A moderator should decide"
+        f"{', and releasing the hold ends it' if hold_placed else ''}: "
+        f"{jump_link(facts)}",
+    )
+
+
 def _closing(provisional: Provisional | None, evaluation: Evaluation) -> str:
     resolution = provisional.resolution if provisional is not None else EXPIRED
+    if evaluation.scam_outcome == "refused":
+        return CLOSED_REFUSED
     if resolution == RELEASED:
         return CLOSED_CLEAN
     if resolution != EXPIRED or evaluation.scam_outcome == "violation":

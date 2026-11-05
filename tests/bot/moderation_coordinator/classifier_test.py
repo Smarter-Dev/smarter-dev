@@ -25,6 +25,7 @@ from smarter_dev.bot.moderation_coordinator.model import ERROR
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import INVALID_OUTPUT
 from smarter_dev.bot.moderation_coordinator.model import LOW_CONFIDENCE
+from smarter_dev.bot.moderation_coordinator.model import REFUSED
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
 from smarter_dev.bot.moderation_coordinator.model import participant_label
@@ -172,6 +173,102 @@ async def test_an_error_is_unknown_and_never_retried():
     assert result.outcome == ERROR
     assert result.verdicts[SCAM].outcome == ERROR
     assert attempts == [1]
+
+
+@pytest.mark.parametrize(
+    ("details", "category"),
+    [
+        ({"refusal_category": "cyber", "refusal": "no"}, "cyber"),
+        ({"refusal_category": "something_new"}, "something_new"),
+        ({"refusal_category": "Not A Word!"}, None),
+        ({}, None),
+    ],
+)
+async def test_a_refusal_is_its_own_outcome_with_its_category(details, category):
+    attempts = []
+
+    def refusing(messages, info):
+        attempts.append(1)
+        return ModelResponse(
+            parts=[], finish_reason="content_filter", provider_details=details
+        )
+
+    classifier = ModerationClassifier(
+        budget=ClassifierBudget(per_guild_day=100), haiku_model=FunctionModel(refusing)
+    )
+    result = await classifier.classify(_request({SCAM, ABUSE}))
+    assert result.outcome == REFUSED
+    assert {v.outcome for v in result.verdicts.values()} == {REFUSED}
+    assert {v.detail for v in result.verdicts.values()} == {category}
+    assert attempts == [1]
+
+
+def _refusing_on(marker: str, calls, answers):
+    """Haiku refusing any prompt that holds ``marker``, answering the rest."""
+    inner = scripted_haiku(answers, calls)
+
+    def respond(messages, info):
+        content = messages[-1].parts[-1].content
+        prompt = content if isinstance(content, str) else content[0]
+        if marker in prompt:
+            return ModelResponse(
+                parts=[],
+                finish_reason="content_filter",
+                provider_details={"refusal_category": "cyber"},
+            )
+        return inner.function(messages, info)
+
+    return FunctionModel(respond, model_name="claude-haiku-5-5")
+
+
+async def test_a_refusal_caused_by_other_members_chat_is_not_the_authors():
+    calls = ModelCalls()
+    answers = {SCAM: (False, 0.9), ABUSE: (False, 0.9), EVENT_PROMOTION: (False, 0.9)}
+    classifier = ModerationClassifier(
+        budget=ClassifierBudget(per_guild_day=100),
+        haiku_model=_refusing_on("exploit chatter", calls, answers),
+    )
+    request = _request(
+        {SCAM, ABUSE, EVENT_PROMOTION},
+        ring_context=("[eve] exploit chatter about shellcode",),
+        ring_ad="check out HackNova at https://devpost.example",
+    )
+    result = await classifier.classify(request)
+    # Asked again on the author's own material, which was fine.
+    assert result.requests == 2
+    assert result.verdicts[SCAM].outcome == ANSWERED
+    assert result.verdicts[ABUSE].outcome == ANSWERED
+    assert result.verdicts[EVENT_PROMOTION].outcome == REFUSED
+    assert result.outcome == ANSWERED
+
+
+async def test_a_refusal_of_the_authors_own_material_is_still_theirs():
+    calls = ModelCalls()
+    classifier = ModerationClassifier(
+        budget=ClassifierBudget(per_guild_day=100),
+        haiku_model=_refusing_on("HackNova", calls, {SCAM: (False, 0.9)}),
+    )
+    request = _request({SCAM, ABUSE, EVENT_PROMOTION}, ring_context=("[eve] hi",))
+    result = await classifier.classify(request)
+    assert result.requests == 2  # the re-ask refused too
+    assert result.verdicts[SCAM].outcome == REFUSED
+    assert result.verdicts[SCAM].detail == "cyber"
+
+
+async def test_a_refusal_after_some_text_and_any_category_are_caught():
+    def refusing(messages, info):
+        return ModelResponse(
+            parts=[TextPart("I can't")],
+            finish_reason="content_filter",
+            provider_details={"refusal_category": "reasoning_extraction"},
+        )
+
+    classifier = ModerationClassifier(
+        budget=ClassifierBudget(per_guild_day=100), haiku_model=FunctionModel(refusing)
+    )
+    result = await classifier.classify(_request({SCAM}))
+    assert result.verdicts[SCAM].outcome == REFUSED
+    assert result.verdicts[SCAM].detail == "reasoning_extraction"
 
 
 async def test_an_off_shape_reply_is_not_re_asked():
