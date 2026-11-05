@@ -20,10 +20,11 @@ true about itself in that server:
 Every block names a person only as a tag, ``<userid:username>`` (#104), so
 the public ``/chat-agent`` page can mask them all. Text the model writes
 tonight that names a member it knows outside a tag (a bare name, or the old
-``username (id N)`` form) is asked for again; on the last attempt it is kept
-and logged, because a username that is also a common word must not freeze the
-memory, and the page masks a known name left outside a tag. Blocks the dream
-leaves alone keep whatever form they were written in.
+``username (id N)`` form) is asked for again, except in a line copied word for
+word from the stored text. A submission is judged alone, so there is no last
+attempt to keep: the retry message tells the model to reword a line that holds
+an ordinary word, and the page masks a known name left outside a tag. Blocks
+the dream leaves alone keep whatever form they were written in.
 
 Behavior, personality and facts are only ever replaced by an explicit, valid
 revision: an omitted field keeps the block verbatim. Only the notes the dream
@@ -104,7 +105,7 @@ from smarter_dev.web.privacy_gate import load_gate
 logger = logging.getLogger(__name__)
 
 DREAM_MODEL_ENV_VAR = "CHAT_DREAM_MODEL"
-# The dream runs once per guild per day and writes the only thing the bot
+# The dream runs about once per guild per night and writes the only thing the bot
 # remembers long-term, so it gets the capable model in the chat agent's own
 # family (voice continuity) rather than the cheap one. Quality compounds here
 # in a way it does not anywhere else in the chat stack.
@@ -456,10 +457,20 @@ UNTAGGED_NAME_RETRY_MESSAGE = (
     "`{block}` names {names} outside a tag. Write every person as "
     "`<userid:username>`, like `<101:kai>`, every time you mention them, "
     "including people you carry over in the old `username (id 101)` form; "
-    "`<:username>` only for someone you have no id for."
+    "`<:username>` only for someone you have no id for. If the word is an "
+    "ordinary word and not a person (a channel name, say), reword that line "
+    "so it is not there."
 )
 # How many names a retry message lists.
 MAX_NAMES_IN_RETRY = 5
+
+
+def _new_lines(text: str, stored: str) -> str:
+    """``text`` without the lines it repeats from ``stored`` verbatim."""
+    kept = {line.strip() for line in stored.splitlines()}
+    return "\n".join(
+        line for line in text.splitlines() if line.strip() not in kept
+    )
 
 
 def untagged_names(
@@ -473,20 +484,24 @@ def untagged_names(
     """Per block, the known members tonight's own writing names outside a tag.
 
     Only what the model wrote tonight is read: the memory sections, new
-    identity traits, and behavior, personality or facts where it revised them. What
-    code carries over (identity traits, an unchanged block, withheld lines)
-    keeps whatever form it was stored in. The names are every one the dream
-    knows of plus every one tonight's output gives a person.
+    identity traits, and behavior, personality or facts where it revised them.
+    What code carries over (identity traits, an unchanged block, withheld
+    lines) keeps whatever form it was stored in, and so does a line the model
+    copied word for word from the stored text: a legacy line, or one that
+    mentions ``#dev-help`` beside a member called dev, would otherwise be
+    refused every night. The names are every one the dream knows of plus every
+    one tonight's output gives a person.
     """
     written = {
         "memory": "\n".join(
-            [output.memory, *(update.after for update in output.identity_updates)]
+            [
+                _new_lines(output.memory, context.previous_blob),
+                *(update.after for update in output.identity_updates),
+            ]
         ),
-        "behavior": behavior if behavior != context.previous_behavior else "",
-        "personality": (
-            personality if personality != context.previous_personality else ""
-        ),
-        "facts": facts if facts != context.previous_facts else "",
+        "behavior": _new_lines(behavior, context.previous_behavior),
+        "personality": _new_lines(personality, context.previous_personality),
+        "facts": _new_lines(facts, context.previous_facts),
     }
     names = context.member_names | member_names(*written.values())
     found = {block: names_outside_tags(text, names) for block, text in written.items()}
@@ -808,6 +823,17 @@ async def prepare_guild_dream(
     for note in pending:
         blocked = gate.carries_blocked_member(note.content, blocked_names)
         (unread if blocked else notes).append(note)
+    # A second visit in the same night finds the row already stamped. With no
+    # new notes it has nothing to add, so it must not dream again.
+    if (
+        not pending
+        and memory is not None
+        and memory.last_dream_at is not None
+        and _as_utc(memory.last_dream_at) >= cutoff
+    ):
+        return GuildDreamResult(
+            guild_id=guild_id, outcome=DreamOutcome.SKIPPED_NO_NOTES
+        )
     # No readable notes is no reason to skip: the agent also dreams from its own
     # history, and notes are one input among them. A guild with no memory row
     # has nothing to consolidate, and a night whose only notes were about
@@ -976,6 +1002,29 @@ async def commit_guild_dream(
                 "revised memory, carrying forward what is still alive."
             )
         return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
+
+    if inputs.revision is not None and (
+        new_blob.strip() == inputs.stored_blob.strip()
+        and blocks.behavior.strip() == inputs.stored_behavior.strip()
+        and blocks.personality.strip() == inputs.stored_personality.strip()
+        and blocks.facts.strip() == inputs.stored_facts.strip()
+    ):
+        # A quiet night: nothing changed, so there is no revision to record.
+        # Stamping the row is enough; a new revision row each night would push
+        # the real history out of the pruned window.
+        memory = await get_guild_memory_blob(session, guild_id)
+        if memory is not None:
+            memory.last_dream_at = dreamed_at
+        await delete_notes_by_id(
+            session, [note.id for note in [*notes, *inputs.unread]]
+        )
+        await session.commit()
+        return GuildDreamResult(
+            guild_id=guild_id,
+            outcome=DreamOutcome.DREAMED,
+            notes_consumed=len(notes),
+            revision=inputs.revision,
+        )
 
     model_name = model_name or os.getenv(DREAM_MODEL_ENV_VAR, DEFAULT_DREAM_MODEL)
     written = await upsert_guild_memory_blob(
