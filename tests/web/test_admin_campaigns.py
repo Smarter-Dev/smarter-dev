@@ -659,3 +659,21 @@ async def test_administrator_permission_denies_non_admin_and_allows_admin():
 
     assert await guard.check(non_admin) is False
     assert await guard.check(admin) is True
+
+
+# --- templates: scheduled-messages links -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "template",
+    ["admin/bot/campaigns/challenges.html", "admin/bot/campaigns/list.html"],
+)
+def test_campaign_templates_link_to_scheduled_messages(template):
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[2] / "templates"
+    source = (root / template).read_text()
+    assert (
+        "/campaigns/{{ campaign.id }}/scheduled-messages\""
+        in source
+    )
