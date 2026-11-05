@@ -299,7 +299,7 @@ allowed — that is a keyword watch, not a command.
   | --- | --- | --- |
   | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. Beside it, a ≤750-character behavior block (how the bot has learned to act there) a ≤250-character personality block (who it is there) and a ≤1000-character facts block (durable facts about the bot, its setup and the server, kept until superseded or no longer true). | Prose the bot wrote about itself, not message text it read. |
   | `chat_agent_memory_revisions` | The last five nights of that document and its three blocks, per guild. | Same — it is the history of the bot's own writing. |
-  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document, so they normally live under a day. A note about someone on the block list (below) is deleted by the same job without being folded in. A night whose dream fails keeps its notes for the next night, and a guild whose memory is paused (below) keeps them indefinitely, because the dream that consumes them is skipped. The agent dreams only the guilds in `PROACTIVE_AGENT_EXTERNAL_GUILD_IDS`; the hourly retention job deletes a note in any other guild once it is 2 days old (the `unowned_memory_notes` pass, `delete_unowned_memory_notes` in `smarter_dev/web/retention.py`), and does nothing when that variable is empty. |
+  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document, so they normally live under a day. A note about someone on the block list (below) is deleted by the same job without being folded in. A night whose dream fails keeps its notes for the next night, and a guild whose memory is paused (below) keeps them while the dream that consumes them is skipped. Only the proactive agent dreams, and only the guilds it runs, by the rule the bot's `execution_mode_for` uses: a guild on `PROACTIVE_AGENT_EMBEDDED_GUILD_IDS` is not the agent's; else one on `PROACTIVE_AGENT_EXTERNAL_GUILD_IDS` is; else one on `PROACTIVE_AGENT_SHADOW_GUILD_IDS` is not; else `PROACTIVE_AGENT_EXECUTION_MODE` decides (`external` means the agent's). No dream will ever consume a note in a guild the agent does not run, so the hourly retention job deletes such a note once it is 2 days old (the `unowned_memory_notes` pass, `delete_unowned_memory_notes` in `smarter_dev/web/retention.py`), paused or not. It does nothing when the mode is unset or invalid, when the mode is not `external` and the external list is empty, or when the mode is `external` and no guild is on the embedded or shadow list. |
 
   The rule the bot is held to when writing any of it is *remember the person,
   not the transcript*: no verbatim quotes, and nothing private, sensitive, or
@@ -311,10 +311,11 @@ allowed — that is a keyword watch, not a command.
   This memory is permanent. Only the agent edits
   its own memory; no operator tool rewrites, blanks or deletes it, and none
   should be added. `memory_enabled` on a guild's row is a pause, not a reset:
-  set false, the stored document, blocks, notes and revisions are all kept as
-  they are, the bot is not shown them and the nightly dream skips the guild.
-  Note writes do not check the flag, so a paused guild still accumulates
-  notes. Nothing in the application sets the flag today.
+  set false, the stored document, blocks and revisions are all kept as they
+  are, the bot is not shown them and the nightly dream skips the guild. Note
+  writes do not check the flag, so a paused guild still accumulates notes; they
+  are kept too, except in a guild the agent does not run, where the 2-day
+  backstop above deletes them. Nothing in the application sets the flag today.
 
   Removing one person from this memory is a purge the agent carries out
   itself, given that person's id: it rewrites the lines of the document, its
@@ -613,7 +614,7 @@ with the Discord ids in request paths, has been dropped along with its rows.
 
 ## Agent-run dream endpoints
 
-The proactive agent can run the nightly dream itself through three bot-API
+The proactive agent runs the nightly dream, and is the only dream, through three bot-API
 routes (`smarter_dev/web/api_native/chat_memory_dream.py`): `GET
 /api/chat-memory/dream/guilds`, `GET /api/guilds/{id}/chat-memory/dream`
 (inputs, with opted-out lines withheld) and `POST` to the same path (the
@@ -625,6 +626,9 @@ the GET returns a sha256 over the revision, the cutoff, each note's id and text,
 the unread note ids, the stored and the withheld text of all four blocks, and
 the assembled user message, so a privacy purge, retag or opt-out landing between
 the read and the submit is caught, including an in-place note rewrite that
-moves neither the revision nor the ids. Notes are deleted only on an accepted night. The GET is not
-free of side effects: when the guild has no notes the model may read it stamps
-`last_dream_at` and deletes the unreadable notes.
+moves neither the revision nor the ids. Notes are deleted only on an accepted night. A guild with a memory row is dreamed once a night
+whether or not it kept notes: the agent also consolidates from its own
+history, so `needed` is true with an empty note list. The GET is not free of
+side effects when there is nothing to read: a night whose only notes were about
+opted-out members stamps `last_dream_at` and deletes them. A guild with no
+memory row and no notes is `needed: false`.

@@ -357,25 +357,44 @@ async def scrub_moderation_actions(
 UNOWNED_NOTE_MAX = timedelta(days=2)
 
 
+def _guild_ids(name: str) -> set[str]:
+    return {v.strip() for v in os.getenv(name, "").split(",") if v.strip()}
+
+
 async def delete_unowned_memory_notes(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
     """Delete chat memory notes no dream will ever fold in.
 
-    The agent-run dream only covers the guilds in
-    ``PROACTIVE_AGENT_EXTERNAL_GUILD_IDS``; for any other guild the notes would
-    pile up with no consumer. Ignores the in-flight ``cutoff``. Does nothing
-    when the variable is unset or empty, so a job without the ConfigMap cannot
-    mistake every guild for an unowned one.
+    Only the proactive agent dreams, and only the guilds it runs. Which those
+    are follows ``ProactiveAgentPlugin.execution_mode_for``: a guild on the
+    embedded list is the bot's own, else one on the external list is the
+    agent's, else one on the shadow list is not, else
+    ``PROACTIVE_AGENT_EXECUTION_MODE`` decides. A guild the agent does not run
+    has no consumer for its notes, so they would pile up.
+
+    Ignores the in-flight ``cutoff``. Does nothing when the mode variable is
+    unset or invalid, or when the mode is not ``external`` and no guild is on
+    the external list: a job without the ConfigMap must not mistake every guild
+    for an unowned one.
     """
-    raw = os.getenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", "")
-    owned = {value.strip() for value in raw.split(",") if value.strip()}
-    if not owned:
+    mode = os.getenv("PROACTIVE_AGENT_EXECUTION_MODE", "")
+    embedded = _guild_ids("PROACTIVE_AGENT_EMBEDDED_GUILD_IDS")
+    shadow = _guild_ids("PROACTIVE_AGENT_SHADOW_GUILD_IDS")
+    external = _guild_ids("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS") - embedded
+    if mode == "external":
+        # The agent runs every guild not pinned elsewhere.
+        pinned = embedded | (shadow - external)
+        if not pinned:
+            return 0
+        unowned = ChatAgentMemoryNote.guild_id.in_(pinned)
+    elif mode in ("embedded", "shadow") and external:
+        unowned = ChatAgentMemoryNote.guild_id.not_in(external)
+    else:
         return 0
     result = await session.execute(
         delete(ChatAgentMemoryNote).where(
-            ChatAgentMemoryNote.guild_id.not_in(owned),
-            ChatAgentMemoryNote.created_at <= now - UNOWNED_NOTE_MAX,
+            unowned, ChatAgentMemoryNote.created_at <= now - UNOWNED_NOTE_MAX
         )
     )
     return result.rowcount or 0
@@ -652,8 +671,10 @@ async def redact_bot_words(
     )
 
 
-# Table name -> scrubber. Ordered as they run; the name is what shows up in the
-# sweep log and in the operator-facing summary.
+# Pass name -> function. Mostly a table name -> scrubber; a pass that deletes
+# rows outright (``unowned_memory_notes``, ``spam_ring_incidents``) is named for
+# what it removes. Ordered as they run; the name is what shows up in the sweep
+# log and in the operator-facing summary.
 SCRUBBERS: dict[str, Any] = {
     "help_conversations": scrub_help_conversations,
     "chat_agent_turns": scrub_chat_agent_turns,

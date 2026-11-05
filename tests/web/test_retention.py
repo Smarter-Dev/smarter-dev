@@ -736,8 +736,9 @@ class TestChatAgentMemoryIsExempt:
 
     The blob and its revision history are prose the agent wrote about itself,
     not message content it read; the notes are deleted by the nightly dream
-    long before the 48-hour window elapses. Naming all three tables here means
-    a future scrubber cannot be added without a test author noticing.
+    long before the 48-hour window elapses, except in a guild no dream covers
+    (``unowned_memory_notes``, tested below). Naming all three tables here
+    means a future scrubber cannot be added without a test author noticing.
     """
 
     EXEMPT_TABLES = (
@@ -762,45 +763,90 @@ class TestChatAgentMemoryIsExempt:
             updated_at=created_at,
         )
 
+    @staticmethod
+    def _ownership(monkeypatch, mode="embedded", external="", embedded="", shadow=""):
+        for name, value in (
+            ("PROACTIVE_AGENT_EXECUTION_MODE", mode),
+            ("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", external),
+            ("PROACTIVE_AGENT_EMBEDDED_GUILD_IDS", embedded),
+            ("PROACTIVE_AGENT_SHADOW_GUILD_IDS", shadow),
+        ):
+            if value is None:
+                monkeypatch.delenv(name, raising=False)
+            else:
+                monkeypatch.setenv(name, value)
+
+    async def _surviving(self, db_session, notes):
+        db_session.add_all(self._note(guild, age) for guild, age in notes)
+        await db_session.flush()
+        result = await run_retention_sweep(db_session, now=NOW)
+        left = (await db_session.execute(select(ChatAgentMemoryNote))).scalars().all()
+        return sorted((n.guild_id, NOW - n.created_at.replace(tzinfo=UTC)) for n in left), result
+
+    OLD = NOW - timedelta(days=2, minutes=1)
+    RECENT = NOW - timedelta(days=1)
+
     async def test_notes_of_unowned_guilds_go_after_two_days(
         self, db_session, monkeypatch
     ):
-        monkeypatch.setenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", "111, 333")
-        old = NOW - timedelta(days=2, minutes=1)
-        recent = NOW - timedelta(days=1)
-        db_session.add_all(
+        self._ownership(monkeypatch, external="111, 333")
+        left, result = await self._surviving(
+            db_session,
             [
-                self._note("111", old),  # owned: the dream's to delete
-                self._note("999", old),  # unowned, past two days: deleted
-                self._note("999", recent),  # unowned, inside two days: kept
-            ]
+                ("111", self.OLD),  # owned: the dream's to delete
+                ("333", self.OLD),  # owned, listed after ", ": strip() matters
+                ("999", self.OLD),  # unowned, past two days: deleted
+                ("999", self.RECENT),  # unowned, inside two days: kept
+            ],
         )
-        await db_session.flush()
 
-        result = await run_retention_sweep(db_session, now=NOW)
-
-        left = (await db_session.execute(select(ChatAgentMemoryNote))).scalars().all()
-        assert sorted(n.guild_id for n in left) == ["111", "999"]
-        assert {n.guild_id: n.created_at.replace(tzinfo=UTC) for n in left} == {
-            "111": old,
-            "999": recent,
-        }
+        assert [g for g, _ in left] == ["111", "333", "999"]
+        assert left[-1][1] == NOW - self.RECENT
         assert result.counts["unowned_memory_notes"] == 1
 
-    @pytest.mark.parametrize("value", [None, "", " , "])
-    async def test_no_owned_guilds_configured_deletes_nothing(
-        self, db_session, monkeypatch, value
+    async def test_global_external_mode_owns_every_guild_not_pinned_elsewhere(
+        self, db_session, monkeypatch
     ):
-        if value is None:
-            monkeypatch.delenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", raising=False)
-        else:
-            monkeypatch.setenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", value)
-        db_session.add(self._note("999", NOW - timedelta(days=30)))
-        await db_session.flush()
+        self._ownership(
+            monkeypatch, mode="external", embedded="444", shadow="555", external="555"
+        )
+        left, _ = await self._surviving(
+            db_session,
+            [
+                ("111", self.OLD),  # unlisted: the agent's under global external
+                ("444", self.OLD),  # pinned embedded: no dream, deleted
+                ("555", self.OLD),  # shadow list but external list wins: kept
+                ("666", self.OLD),  # unlisted: kept
+            ],
+        )
 
-        await run_retention_sweep(db_session, now=NOW)
+        assert [g for g, _ in left] == ["111", "555", "666"]
 
-        assert len((await db_session.execute(select(ChatAgentMemoryNote))).all()) == 1
+    async def test_embedded_list_beats_the_external_list(self, db_session, monkeypatch):
+        self._ownership(monkeypatch, external="111,222", embedded="222")
+        left, _ = await self._surviving(
+            db_session, [("111", self.OLD), ("222", self.OLD)]
+        )
+
+        assert [g for g, _ in left] == ["111"]
+
+    @pytest.mark.parametrize(
+        "settings",
+        [
+            {"mode": None, "external": "111"},  # no ConfigMap
+            {"mode": "bogus", "external": "111"},
+            {"mode": "embedded", "external": ""},
+            {"mode": "embedded", "external": " , "},
+            {"mode": "external", "external": ""},  # nothing pinned elsewhere
+        ],
+    )
+    async def test_ambiguous_ownership_deletes_nothing(
+        self, db_session, monkeypatch, settings
+    ):
+        self._ownership(monkeypatch, **settings)
+        left, _ = await self._surviving(db_session, [("999", NOW - timedelta(days=30))])
+
+        assert len(left) == 1
 
     def test_exempt_tables_carry_no_purge_marker(self):
         for model in (
@@ -811,7 +857,7 @@ class TestChatAgentMemoryIsExempt:
             assert not hasattr(model, "content_purged_at")
 
     async def test_sweep_leaves_stale_memory_untouched(self, db_session, monkeypatch):
-        monkeypatch.setenv("PROACTIVE_AGENT_EXTERNAL_GUILD_IDS", "111")
+        self._ownership(monkeypatch, external="111")
         db_session.add(
             ChatAgentGuildMemory(
                 guild_id="111",

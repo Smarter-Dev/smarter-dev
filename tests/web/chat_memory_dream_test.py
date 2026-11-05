@@ -23,7 +23,6 @@ from datetime import timezone
 
 import pytest
 from pydantic_ai import ModelRetry
-from pydantic_ai.models.test import TestModel
 from sqlalchemy import select
 
 from smarter_dev.web import chat_memory_dream
@@ -37,8 +36,7 @@ from smarter_dev.web.chat_memory_dream import compose_dream
 from smarter_dev.web.chat_memory_dream import dream_cutoff
 from smarter_dev.web.chat_memory_dream import dream_day
 from smarter_dev.web.chat_memory_dream import enforce_blob_limit
-from smarter_dev.web.chat_memory_dream import get_dream_agent
-from smarter_dev.web.chat_memory_dream import run_guild_dream
+from tests.web._dream_night import dream_one_night
 from smarter_dev.web.chat_memory_dream import should_keep_previous_blob
 from smarter_dev.web.chat_memory_dream import truncate_to_last_line
 from smarter_dev.web.crud import create_memory_note
@@ -391,7 +389,7 @@ async def test_invalid_identity_edit_preserves_blob_and_notes(db_session):
         )
     )
     with pytest.raises(ModelRetry):
-        await run_guild_dream(
+        await dream_one_night(
             db_session,
             guild_id=_GUILD,
             cutoff=_CUTOFF,
@@ -406,7 +404,7 @@ async def test_invalid_identity_edit_preserves_blob_and_notes(db_session):
 async def test_identity_is_preserved_in_saved_blob_and_revision(db_session):
     await _seed_blob(db_session, content=_IDENTITY)
     await _write_note(db_session, content=_KAI_NOTE)
-    result = await run_guild_dream(
+    result = await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -461,50 +459,35 @@ def test_a_later_night_carries_the_blob_and_no_nudge():
     assert chat_memory_dream.FIRST_NIGHT_NUDGE not in message
 
 
-# -- the agent singleton -------------------------------------------------------
-
-
-def test_unknown_dream_model_fails_fast(monkeypatch):
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
-    monkeypatch.setenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, "not-a-real-model")
-
-    with pytest.raises(RuntimeError, match="not in the catalog"):
-        get_dream_agent()
-
-
-def test_dream_agent_is_a_singleton(monkeypatch):
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
-    monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
-    monkeypatch.setattr(chat_memory_dream, "build_model_for", lambda _: TestModel())
-
-    first = get_dream_agent()
-    assert get_dream_agent() is first
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
-
-
-@pytest.mark.asyncio
-async def test_structured_agent_validates_with_guild_context(monkeypatch):
-    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
-    output = DreamOutput(memory="## Ongoing Context\nThe shader shipped.")
-    monkeypatch.setattr(
-        chat_memory_dream,
-        "build_model_for",
-        lambda _: TestModel(custom_output_args=output.model_dump()),
-    )
-    context = DreamContext(previous_blob=_IDENTITY, notes=[_KAI_NOTE])
-    result = await get_dream_agent().run("Distill today's notes.", deps=context)
-    assert result.output == output
-    assert compose_dream(result.output, context, retries_left=0).startswith(_IDENTITY)
-
-
 # -- one guild's dream ---------------------------------------------------------
 
 
-async def test_quiet_guild_never_calls_the_model(db_session):
+async def test_a_guild_with_a_memory_row_and_no_notes_is_still_dreamed(db_session):
     await _seed_blob(db_session, content="## Who's here\nkai (id 7)")
+    agent = _StubDreamAgent(output="## Who's here\nkai (id 7), still shipping.")
+
+    result = await dream_one_night(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=agent,
+    )
+
+    assert agent.call_count == 1
+    assert chat_memory_dream.EMPTY_NOTES_PLACEHOLDER in agent.prompts[0]
+    assert result.outcome is DreamOutcome.DREAMED
+    assert result.notes_consumed == 0
+    stored = await get_guild_memory_blob(db_session, _GUILD)
+    assert stored.last_dream_at.replace(tzinfo=UTC) == _DREAMED_AT
+    assert stored.content == "## Who's here\nkai (id 7), still shipping."
+    assert stored.revision == 2
+
+
+async def test_a_guild_with_no_memory_row_and_no_notes_costs_nothing(db_session):
     agent = _StubDreamAgent()
 
-    result = await run_guild_dream(
+    result = await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -514,10 +497,7 @@ async def test_quiet_guild_never_calls_the_model(db_session):
 
     assert agent.call_count == 0
     assert result.outcome is DreamOutcome.SKIPPED_NO_NOTES
-    stamped = await get_guild_memory_blob(db_session, _GUILD)
-    assert stamped.last_dream_at.replace(tzinfo=UTC) == _DREAMED_AT
-    assert stamped.content == "## Who's here\nkai (id 7)"
-    assert stamped.revision == 1  # the quiet stamp is not a new revision
+    assert await get_guild_memory_blob(db_session, _GUILD) is None
 
 
 async def test_dream_writes_the_blob_and_consumes_only_the_notes_it_read(db_session):
@@ -530,7 +510,7 @@ async def test_dream_writes_the_blob_and_consumes_only_the_notes_it_read(db_sess
     )
     agent = _StubDreamAgent(output="## Who's here\nkai (id 7) ships things.")
 
-    result = await run_guild_dream(
+    result = await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -564,7 +544,7 @@ async def test_dream_prompt_reads_the_day_oldest_first(db_session):
     )
     agent = _StubDreamAgent()
 
-    await run_guild_dream(
+    await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -583,7 +563,7 @@ async def test_model_failure_leaves_the_blob_and_the_notes_untouched(db_session)
     agent = _StubDreamAgent(raise_on_markers={_KAI_NOTE})
 
     with pytest.raises(RuntimeError):
-        await run_guild_dream(
+        await dream_one_night(
             db_session,
             guild_id=_GUILD,
             cutoff=_CUTOFF,
@@ -604,7 +584,7 @@ async def test_degenerate_output_keeps_yesterdays_blob_and_the_notes(db_session)
     await _write_note(db_session, content=_KAI_NOTE)
     agent = _StubDreamAgent(output="ok")
 
-    result = await run_guild_dream(
+    result = await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -626,7 +606,7 @@ async def test_disabled_guild_is_never_dreamed(db_session):
     await _write_note(db_session, content=_KAI_NOTE)
     agent = _StubDreamAgent()
 
-    result = await run_guild_dream(
+    result = await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -639,17 +619,6 @@ async def test_disabled_guild_is_never_dreamed(db_session):
     assert len((await db_session.scalars(select(ChatAgentMemoryNote.id))).all()) == 1
 
 
-def test_default_dream_model_is_gpt_6_1_sol_and_resolves_through_the_catalog(
-    monkeypatch,
-):
-    # An uncatalogued default would raise every night, silently skipping the
-    # dream, so the default must stay a catalog wire id.
-    monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
-    model = chat_memory_dream._dream_catalog_model()
-    assert model.model_id == "gpt-6.1-sol"
-    assert chat_memory_dream.DREAM_REASONING_LEVEL in model.reasoning_levels
-
-
 async def test_dream_consumes_site_originated_note(db_session):
     note = await _write_note(
         db_session,
@@ -659,7 +628,7 @@ async def test_dream_consumes_site_originated_note(db_session):
     )
     note_id = note.id
     agent = _StubDreamAgent(output="## Projects\nA new shader project.")
-    result = await run_guild_dream(
+    result = await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -682,7 +651,7 @@ async def _dream_facts(db_session, facts):
     agent = _StubDreamAgent(
         output=DreamOutput(memory="## Who's here\nkai (id 7) ships.", facts=facts)
     )
-    return await run_guild_dream(
+    return await dream_one_night(
         db_session,
         guild_id=_GUILD,
         cutoff=_CUTOFF,
@@ -710,7 +679,7 @@ async def test_null_facts_keeps_the_block(db_session):
         output=DreamOutput(memory="## Who's here\nkai (id 7) ships.", facts=None)
     )
 
-    await run_guild_dream(
+    await dream_one_night(
         db_session, guild_id=_GUILD, cutoff=later, dreamed_at=later, agent=agent
     )
 
@@ -726,7 +695,7 @@ async def test_a_new_facts_block_replaces_the_old(db_session):
         output=DreamOutput(memory="## Who's here\nkai (id 7) ships.", facts="It is Oak now.")
     )
 
-    await run_guild_dream(
+    await dream_one_night(
         db_session, guild_id=_GUILD, cutoff=later, dreamed_at=later, agent=agent
     )
 

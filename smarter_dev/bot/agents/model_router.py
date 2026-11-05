@@ -3,7 +3,7 @@
 This module was a byte-identical copy of the shared router until 2026-08-13.
 Two copies meant a routing change had to be made twice to take effect, and
 missing one would apply it to only half the callers — the bot's summarizer,
-rule matcher and dream job import from here, while chat jobs, the document
+rule matcher and memory purge import from here, while chat jobs, the document
 stream and the handler agent import from :mod:`smarter_dev.shared.model_router`.
 That is exactly the failure mode OpenRouter endpoint constraints cannot afford:
 a request that loses its ``provider`` block does not error, it just quietly gets

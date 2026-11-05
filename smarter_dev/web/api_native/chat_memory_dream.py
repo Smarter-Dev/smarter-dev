@@ -178,10 +178,11 @@ class ChatMemoryDreamController(Controller):
     ) -> DreamInputsRead:
         """Everything this guild's dream reads, withheld lines already removed.
 
-        Not free of side effects: when the guild has nothing the model may
-        read (no notes, or only notes about opted-out members) this stamps
-        ``last_dream_at`` and deletes the unreadable notes, exactly as the
-        cron's visit does, and answers ``needed: false``.
+        A guild with a memory row is ``needed`` even with no notes: the agent
+        dreams from its own history too. Not free of side effects when there is
+        nothing to read: a night whose only notes were about opted-out members
+        stamps ``last_dream_at`` and deletes them, and answers ``needed: false``
+        (``no_notes``); a paused guild answers ``memory_disabled``, untouched.
         """
         now = datetime.now(UTC)
         cutoff = dream_cutoff(now)

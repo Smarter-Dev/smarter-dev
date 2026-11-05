@@ -103,9 +103,42 @@ async def test_inputs_carry_blocks_notes_and_limits(client, db_session):
     assert "the shader shipped." in inputs["user_message"]
 
 
-async def test_inputs_say_nothing_to_do_for_a_quiet_guild(client, db_session):
+async def test_a_guild_with_a_memory_row_and_no_notes_is_needed(client, db_session):
     await _seed(db_session, notes=())
 
+    assert _GUILD in client.get("/api/chat-memory/dream/guilds").json()["guild_ids"]
+    inputs = client.get(_BASE).json()
+
+    assert inputs["needed"] is True
+    assert inputs["notes"] == []
+    assert "(no notes tonight)" in inputs["user_message"]
+    result = client.post(_BASE, json=_body(inputs, facts="Server is Pine.")).json()
+    assert result["accepted"] is True
+    # Dreamed tonight, so it is not offered again.
+    assert _GUILD not in client.get("/api/chat-memory/dream/guilds").json()["guild_ids"]
+
+
+async def test_a_no_notes_dream_goes_stale_when_a_note_arrives(client, db_session):
+    await _seed(db_session, notes=())
+    inputs = client.get(_BASE).json()
+    created = _CUTOFF - timedelta(hours=1)
+    await create_memory_note(
+        db_session,
+        guild_id=_GUILD,
+        channel_id="555000111222333444",
+        channel_name="dev-help",
+        content="a late note",
+        created_at=created,
+        day_start=created.replace(hour=0, minute=0),
+    )
+    await db_session.commit()
+
+    result = client.post(_BASE, json=_body(inputs)).json()
+
+    assert (result["accepted"], result["reason"]) == (False, "stale")
+
+
+async def test_a_guild_with_no_memory_row_and_no_notes_is_not_needed(client, db_session):
     inputs = client.get(_BASE).json()
 
     assert inputs["needed"] is False
