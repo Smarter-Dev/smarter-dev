@@ -124,9 +124,7 @@ def names_outside_tags(
     for name in set(names):
         if not name:
             continue
-        hits = re.finditer(
-            rf"(?<!\w){re.escape(name)}(?!\w)", stripped, re.IGNORECASE
-        )
+        hits = re.finditer(rf"(?<!\w){re.escape(name)}(?!\w)", stripped, re.IGNORECASE)
         exempt = len(name) <= acronym_up_to and name.isalpha()
         if any(not (exempt and hit[0].isupper()) for hit in hits):
             found.append(name)
