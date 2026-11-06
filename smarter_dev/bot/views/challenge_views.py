@@ -97,6 +97,7 @@ class SolutionSubmissionModalHandler:
                 json_data={
                     "guild_id": self.guild_id,
                     "user_id": str(self.user.id),
+                    "username": self.user.display_name or self.user.username,
                     "submitted_solution": solution.strip(),
                 },
             )
