@@ -138,8 +138,8 @@ def over_length_retry_message(limit: int) -> str:
         "every line to fit — that's how you end up remembering everyone equally "
         "and nobody at all. Drop whole things instead: the quietest thread, the "
         "joke that's gone still, the person you haven't spoken to in weeks. "
-        "Leave everything that survives written exactly as it was in "
-        "`# What I remember so far`."
+        "Keep the lines you are not cutting as you wrote them in this answer; "
+        "remove only whole items."
         " Identity is protected: cut episodic content, never identity to make room."
     )
 
@@ -301,6 +301,21 @@ def compose_dream(
     )
 
 
+# What to cut from a block that is over its limit; behavior and facts are
+# durable, so only what stopped being true goes (see dream_prompt.md).
+OVER_LIMIT_ADVICE = {
+    "behavior": (
+        "Merge lessons or drop one that is no longer true; never shave every "
+        "line, and never drop one just to make room."
+    ),
+    "facts": (
+        "Merge facts or drop one that is no longer true; never shave every "
+        "line, and never drop one just for being old."
+    ),
+    "default": "Merge or drop a whole item instead of shaving every line.",
+}
+
+
 def resolve_block(
     proposed: str | None,
     previous: str,
@@ -331,9 +346,9 @@ def resolve_block(
         )
     elif len(candidate) > limit:
         problem = (
-            f"`{name}` is over its {limit}-character limit. Merge or drop a whole "
-            f"item, the stalest first, instead of shaving every line, or return "
-            f"null to keep `{name}` as it was in `# My {name}`."
+            f"`{name}` is over its {limit}-character limit. "
+            f"{OVER_LIMIT_ADVICE.get(name, OVER_LIMIT_ADVICE['default'])} "
+            f"Or return null to keep `{name}` as it was in `# My {name}`."
         )
     if problem is None:
         return candidate
@@ -468,9 +483,9 @@ UNTAGGED_NAME_RETRY_MESSAGE = (
 )
 # How many names a retry message lists.
 MAX_NAMES_IN_RETRY = 5
-# A name this short counts only in the case it was given: a title like
-# "Council of AF" is not the member ``af``.
-SHORT_NAME_CHARS = 3
+# A letters-only name this short, written in ALL CAPS, is an acronym ("Council
+# of AF"), not the member ``af``. Any other case still names the member.
+ACRONYM_NAME_CHARS = 3
 
 
 def _new_lines(text: str, stored: str) -> str:
@@ -512,7 +527,8 @@ def untagged_names(
         "facts": _new_lines(facts, context.previous_facts),
     }
     names = context.member_names | member_names(*written.values())
-    found = {block: names_outside_tags(text, names, exact_case_up_to=SHORT_NAME_CHARS)
+    found = {
+        block: names_outside_tags(text, names, acronym_up_to=ACRONYM_NAME_CHARS)
         for block, text in written.items()
     }
     return {block: hits for block, hits in found.items() if hits}
@@ -667,9 +683,10 @@ def dream_rules(
         f"{behavior_limit}, facts {facts_limit}, memory {memory_limit}.\n"
         "- Name every person as `<userid:username>`, like `<101:kai>`, every "
         "time; `<:username>` only when you have no id.\n"
-        "- Over a limit: drop a whole item, the stalest first. Never shave "
-        "every line.\n"
-        "- Return null for a block to keep it unchanged."
+        "- Over a limit: merge or drop whole items, never shave every line. In "
+        "memory the stalest goes first; in behavior and facts, drop only what "
+        "is no longer true.\n"
+        "- Return null for behavior, personality or facts to keep it unchanged."
     )
 
 
@@ -911,6 +928,12 @@ async def prepare_guild_dream(
     previous_facts, withheld_facts = withhold_blocked_lines(
         stored_facts, gate, blocked_names
     )
+    limits = {
+        "memory_limit": room_for(MAX_MEMORY_BLOB_CHARS, withheld_blob),
+        "behavior_limit": room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
+        "personality_limit": room_for(MAX_PERSONALITY_CHARS, withheld_personality),
+        "facts_limit": room_for(MAX_FACTS_CHARS, withheld_facts),
+    }
     user_message = build_dream_user_message(
         previous_blob=previous_blob,
         note_lines=[render_note_line(note) for note in notes],
@@ -918,10 +941,7 @@ async def prepare_guild_dream(
         previous_behavior=previous_behavior,
         previous_personality=previous_personality,
         previous_facts=previous_facts,
-        memory_limit=room_for(MAX_MEMORY_BLOB_CHARS, withheld_blob),
-        behavior_limit=room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
-        personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
-        facts_limit=room_for(MAX_FACTS_CHARS, withheld_facts),
+        **limits,
     )
     context = DreamContext(
         previous_blob=previous_blob,
@@ -930,10 +950,7 @@ async def prepare_guild_dream(
         previous_personality=previous_personality,
         previous_facts=previous_facts,
         gate=gate,
-        memory_limit=room_for(MAX_MEMORY_BLOB_CHARS, withheld_blob),
-        behavior_limit=room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
-        personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
-        facts_limit=room_for(MAX_FACTS_CHARS, withheld_facts),
+        **limits,
         member_names=names,
     )
     return DreamInputs(

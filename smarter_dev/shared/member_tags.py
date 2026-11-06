@@ -109,21 +109,26 @@ def tagged_names(*texts: str) -> set[str]:
 
 
 def names_outside_tags(
-    text: str, names: Iterable[str], *, exact_case_up_to: int = 0
+    text: str, names: Iterable[str], *, acronym_up_to: int = 0
 ) -> list[str]:
     """Which of ``names`` (casefolded) ``text`` carries outside a tag, matched
-    as whole words. A name in the old ``username (id N)`` form is outside one.
+    as whole words, in any case. A name in the old ``username (id N)`` form is
+    outside one.
 
-    A name of ``exact_case_up_to`` characters or fewer counts only when written
-    as given (lowercase): "AF" in "Council of AF" is a title, not the member."""
+    A letters-only name of ``acronym_up_to`` characters or fewer does not count
+    where ``text`` writes it in ALL CAPS: "AF" in "Council of AF" is an acronym,
+    not the member. "Af", "af" and "Kai" still count, and so does a name with a
+    digit or underscore, whatever its case."""
     stripped = MEMBER_TAG.sub(" ", text or "")
-    rest = stripped.casefold()
     found = []
     for name in set(names):
         if not name:
             continue
-        haystack = stripped if len(name) <= exact_case_up_to else rest
-        if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", haystack):
+        hits = re.finditer(
+            rf"(?<!\w){re.escape(name)}(?!\w)", stripped, re.IGNORECASE
+        )
+        exempt = len(name) <= acronym_up_to and name.isalpha()
+        if any(not (exempt and hit[0].isupper()) for hit in hits):
             found.append(name)
     return sorted(found)
 

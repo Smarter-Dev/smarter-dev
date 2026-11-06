@@ -559,17 +559,47 @@ def test_a_line_copied_from_the_stored_memory_is_not_a_tag_error():
     )
 
 
-def test_a_short_name_in_a_title_is_not_the_member():
-    context = DreamContext(previous_blob="", notes=[], member_names=frozenset({"af"}))
+def _untagged(memory: str, *names: str, previous: str = "") -> dict:
+    context = DreamContext(
+        previous_blob=previous, notes=[], member_names=frozenset(names)
+    )
+    return chat_memory_dream.untagged_names(
+        DreamOutput(memory=memory), context, behavior="", personality="", facts=""
+    )
 
-    def hits(memory: str) -> dict:
-        return chat_memory_dream.untagged_names(
-            DreamOutput(memory=memory), context, behavior="", personality="", facts=""
-        )
 
-    assert hits("The Council of AF meets on fridays.") == {}
-    assert hits("af is back, and funny.") == {"memory": ["af"]}
-    assert hits("Council of AF; also af waved.") == {"memory": ["af"]}
+@pytest.mark.parametrize(
+    "memory",
+    ["The Council of AF meets on fridays.", "AF", "we love AF, and AF loves us"],
+)
+def test_a_short_name_in_all_caps_is_an_acronym_not_the_member(memory):
+    assert _untagged(memory, "af") == {}
+
+
+@pytest.mark.parametrize(
+    ("memory", "name"),
+    [
+        ("af is back, and funny.", "af"),
+        ("Af is back", "af"),
+        ("Council of AF; also af waved.", "af"),
+        ("Kai hates cmake", "kai"),
+        ("Bob shipped the parser.", "bob"),
+        ("Al is around", "al"),
+        ("A1 said hi", "a1"),
+        ("X_Y said hi", "x_y"),
+        ("- <1:Bob> is new.\n- Bob also fixed CI.", "bob"),
+    ],
+)
+def test_a_short_name_in_any_other_case_is_still_the_member(memory, name):
+    assert _untagged(memory, name) == {"memory": [name]}
+
+
+def test_an_all_caps_short_name_with_a_digit_or_underscore_is_still_refused():
+    assert _untagged("A1 said hi, X_Y too", "a1", "x_y") == {"memory": ["a1", "x_y"]}
+
+
+def test_an_all_caps_name_over_the_limit_is_still_refused():
+    assert _untagged("BAPP shipped", "bapp") == {"memory": ["bapp"]}
 
 
 def test_the_message_opens_with_the_rules_and_an_honest_today():
@@ -582,9 +612,25 @@ def test_the_message_opens_with_the_rules_and_an_honest_today():
 
     assert message.startswith("# Rules for tonight")
     assert "facts 900" in message
-    assert "`<userid:username>`" in message or "<userid:username>" in message
+    assert "`<userid:username>`" in message
+    assert "behavior, personality or facts" in message
     assert "no notes tonight" not in message
     assert "compaction note" in message
+
+
+def test_over_limit_refusals_fit_each_block():
+    facts = chat_memory_dream.resolve_block(
+        None, "x", name="facts", limit=5, retries_left=1
+    )
+    assert facts == "x"
+    with pytest.raises(ModelRetry, match="no longer true") as facts_error:
+        chat_memory_dream.resolve_block(
+            "y" * 9, "x", name="facts", limit=5, retries_left=1
+        )
+    assert "# My facts" in str(facts_error.value)
+    assert "stalest" not in str(facts_error.value)
+    with pytest.raises(ModelRetry, match="remove only whole items"):
+        chat_memory_dream.enforce_blob_limit("z" * 9, retries_left=1, limit=5)
 
 
 def test_default_dream_model_is_gpt_6_1_sol_with_high_reasoning(monkeypatch):
