@@ -25,6 +25,7 @@ import pytest
 from pydantic_ai import ModelRetry
 from sqlalchemy import select
 
+from smarter_dev.shared.member_tags import names_outside_tags
 from smarter_dev.web import chat_memory_dream
 from smarter_dev.web.chat_memory_dream import CUTOFF_SNAP_TOLERANCE
 from smarter_dev.web.chat_memory_dream import DreamContext
@@ -594,6 +595,20 @@ def test_a_short_name_in_any_other_case_is_still_the_member(memory, name):
     assert _untagged(memory, name) == {"memory": [name]}
 
 
+@pytest.mark.parametrize(
+    ("memory", "name"),
+    [
+        ("Weißbier shipped the parser", "weissbier"),
+        ("İlker shipped the parser", "İlker".casefold()),
+        ("ﬁona shipped the parser", "fiona"),
+    ],
+)
+def test_a_name_whose_casefold_differs_is_still_found(memory, name):
+    assert _untagged(memory, name) == {"memory": [name]}
+    assert names_outside_tags(memory, [name]) == [name]
+    assert names_outside_tags(memory, [name], acronym_up_to=0) == [name]
+
+
 def test_an_all_caps_short_name_with_a_digit_or_underscore_is_still_refused():
     assert _untagged("A1 said hi, X_Y too", "a1", "x_y") == {"memory": ["a1", "x_y"]}
 
@@ -616,6 +631,14 @@ def test_the_message_opens_with_the_rules_and_an_honest_today():
     assert "behavior, personality or facts" in message
     assert "no notes tonight" not in message
     assert "compaction note" in message
+
+
+def test_the_behavior_refusal_names_lessons():
+    with pytest.raises(ModelRetry, match="Merge lessons") as error:
+        chat_memory_dream.resolve_block(
+            "y" * 9, "x", name="behavior", limit=5, retries_left=1
+        )
+    assert "stalest" not in str(error.value)
 
 
 def test_over_limit_refusals_fit_each_block():
