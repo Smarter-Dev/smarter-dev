@@ -559,6 +559,34 @@ def test_a_line_copied_from_the_stored_memory_is_not_a_tag_error():
     )
 
 
+def test_a_short_name_in_a_title_is_not_the_member():
+    context = DreamContext(previous_blob="", notes=[], member_names=frozenset({"af"}))
+
+    def hits(memory: str) -> dict:
+        return chat_memory_dream.untagged_names(
+            DreamOutput(memory=memory), context, behavior="", personality="", facts=""
+        )
+
+    assert hits("The Council of AF meets on fridays.") == {}
+    assert hits("af is back, and funny.") == {"memory": ["af"]}
+    assert hits("Council of AF; also af waved.") == {"memory": ["af"]}
+
+
+def test_the_message_opens_with_the_rules_and_an_honest_today():
+    message = build_dream_user_message(
+        previous_blob="x",
+        note_lines=[],
+        day=(_CUTOFF - timedelta(days=1)).date(),
+        facts_limit=900,
+    )
+
+    assert message.startswith("# Rules for tonight")
+    assert "facts 900" in message
+    assert "`<userid:username>`" in message or "<userid:username>" in message
+    assert "no notes tonight" not in message
+    assert "compaction note" in message
+
+
 def test_default_dream_model_is_gpt_6_1_sol_with_high_reasoning(monkeypatch):
     monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
 

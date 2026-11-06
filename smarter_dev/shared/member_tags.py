@@ -108,15 +108,24 @@ def tagged_names(*texts: str) -> set[str]:
     }
 
 
-def names_outside_tags(text: str, names: Iterable[str]) -> list[str]:
+def names_outside_tags(
+    text: str, names: Iterable[str], *, exact_case_up_to: int = 0
+) -> list[str]:
     """Which of ``names`` (casefolded) ``text`` carries outside a tag, matched
-    as whole words. A name in the old ``username (id N)`` form is outside one."""
-    rest = MEMBER_TAG.sub(" ", text or "").casefold()
-    return sorted(
-        name
-        for name in set(names)
-        if name and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", rest)
-    )
+    as whole words. A name in the old ``username (id N)`` form is outside one.
+
+    A name of ``exact_case_up_to`` characters or fewer counts only when written
+    as given (lowercase): "AF" in "Council of AF" is a title, not the member."""
+    stripped = MEMBER_TAG.sub(" ", text or "")
+    rest = stripped.casefold()
+    found = []
+    for name in set(names):
+        if not name:
+            continue
+        haystack = stripped if len(name) <= exact_case_up_to else rest
+        if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", haystack):
+            found.append(name)
+    return sorted(found)
 
 
 def retag(text: str, names_by_id: Mapping[str, str] | None = None) -> tuple[str, int]:

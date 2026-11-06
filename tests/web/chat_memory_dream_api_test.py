@@ -111,7 +111,7 @@ async def test_a_guild_with_a_memory_row_and_no_notes_is_needed(client, db_sessi
 
     assert inputs["needed"] is True
     assert inputs["notes"] == []
-    assert "(no notes tonight)" in inputs["user_message"]
+    assert "You kept no notes today" in inputs["user_message"]
     result = client.post(_BASE, json=_body(inputs, facts="Server is Pine.")).json()
     assert result["accepted"] is True
     # Dreamed tonight, so it is not offered again.
