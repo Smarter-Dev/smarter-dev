@@ -33,7 +33,7 @@ def _handler(error: Exception) -> SolutionSubmissionModalHandler:
         challenge_id="c1",
         challenge_title="Frame one",
         guild_id="123",
-        user=SimpleNamespace(id=1001),
+        user=SimpleNamespace(id=1001, display_name="Katren", username="katren_"),
         api_client=api_client,
     )
 
