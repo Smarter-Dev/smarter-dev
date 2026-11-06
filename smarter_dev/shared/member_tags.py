@@ -108,15 +108,36 @@ def tagged_names(*texts: str) -> set[str]:
     }
 
 
-def names_outside_tags(text: str, names: Iterable[str]) -> list[str]:
+def names_outside_tags(
+    text: str, names: Iterable[str], *, acronym_up_to: int = 0
+) -> list[str]:
     """Which of ``names`` (casefolded) ``text`` carries outside a tag, matched
-    as whole words. A name in the old ``username (id N)`` form is outside one."""
-    rest = MEMBER_TAG.sub(" ", text or "").casefold()
-    return sorted(
-        name
-        for name in set(names)
-        if name and re.search(rf"(?<!\w){re.escape(name)}(?!\w)", rest)
-    )
+    as whole words on the casefolded text. A name in the old
+    ``username (id N)`` form is outside one.
+
+    A letters-only name of ``acronym_up_to`` characters or fewer does not count
+    where ``text`` writes it in ALL CAPS: "AF" in "Council of AF" is an acronym,
+    not the member. "Af", "af" and "Kai" still count, and so does a name with a
+    digit or underscore, whatever its case. With the default 0 nothing is
+    exempt."""
+    stripped = MEMBER_TAG.sub(" ", text or "")
+    rest = stripped.casefold()
+    found = []
+    for name in set(names):
+        if not name:
+            continue
+        pattern = rf"(?<!\w){re.escape(name)}(?!\w)"
+        haystack = rest
+        if len(name) <= acronym_up_to and name.isalpha():
+            haystack = re.sub(
+                pattern,
+                lambda hit: " " if hit[0].isupper() else hit[0],
+                stripped,
+                flags=re.IGNORECASE,
+            ).casefold()
+        if re.search(pattern, haystack):
+            found.append(name)
+    return sorted(found)
 
 
 def retag(text: str, names_by_id: Mapping[str, str] | None = None) -> tuple[str, int]:
