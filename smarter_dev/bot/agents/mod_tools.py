@@ -72,10 +72,9 @@ mod_action_ops = ModerationActionOperations()
 # Safety: at most this many destructive tool invocations (reserved slots) per
 # triage. hikari may retry one invocation's request internally; there is no
 # additional application-level retry.
-_PING_REFUSAL = "Cannot act on the ping that summoned you."
-
-
 MAX_ACTIONS_PER_INVOCATION = 3
+
+_PING_REFUSAL = "Cannot act on the ping that summoned you."
 
 MAX_PURGE_COUNT = 50
 
@@ -726,7 +725,7 @@ def create_moderation_tools(
 
     async def flag_users(user_ids: str) -> dict:
         """Flag one or more users for human moderator review. Flagged users
-        are named in the mod report, and the report pings them in the channel,
+        are named in the mod report, and the channel notice pings them,
         so flag only the users the ping actually reports or who clearly
         broke a rule.
 

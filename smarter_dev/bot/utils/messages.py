@@ -187,12 +187,19 @@ def _describe_attachments(message: hikari.Message) -> str:
     return " ".join(names)
 
 
+EMBED_TEXT_LIMIT = 1024
+
+
 def _describe_embeds(message: hikari.Message) -> str:
     """Render each embed's title, description and fields as plain text.
 
     Bot posts such as ``/warn`` are embeds with no ``content``; without this
-    they read as empty lines.
+    they read as empty lines. Only bot and webhook authors are rendered: a
+    link preview on a member's post is not something that member wrote. Each
+    embed is cut at ``EMBED_TEXT_LIMIT`` characters.
     """
+    if not (message.author.is_bot or message.webhook_id is not None):
+        return ""
     parts: list[str] = []
     for embed in getattr(message, "embeds", None) or []:
         pieces = [embed.title, embed.description]
@@ -201,7 +208,7 @@ def _describe_embeds(message: hikari.Message) -> str:
         pieces.append(footer)
         text = " | ".join(str(piece) for piece in pieces if piece)
         if text:
-            parts.append(f"[embed: {text}]")
+            parts.append(f"[embed: {text[:EMBED_TEXT_LIMIT]}]")
     return " ".join(parts)
 
 

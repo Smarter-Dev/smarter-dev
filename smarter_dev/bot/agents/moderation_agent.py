@@ -181,7 +181,8 @@ def format_context_messages(
             if len(snippet) > REPLY_SNIPPET_CHARS:
                 snippet = snippet[:REPLY_SNIPPET_CHARS] + "..."
             lines.append(f"  (reply to {msg.replied_to_author}: {snippet})")
-        lines.append(f"{prefix}: {msg.content}")
+        content = " ".join(msg.content.split())
+        lines.append(f"{prefix}: {content}")
     return "\n".join(lines)
 
 
