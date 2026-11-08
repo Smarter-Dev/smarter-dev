@@ -218,6 +218,7 @@ async def _handle_moderation(
             int(channel_id),
             guild_id=int(guild_id),
             limit=config.context_message_limit,
+            include_embeds=True,
         )
 
         # One incident per burst of pings, reported where the triage always

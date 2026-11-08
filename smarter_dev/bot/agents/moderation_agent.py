@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -141,18 +143,44 @@ async def load_triage_rules(guild_id: str) -> tuple[GuildRule, ...]:
     return rules
 
 
-def format_context_messages(messages: list[DiscordMessage]) -> str:
-    """Format a list of DiscordMessage objects into a readable string."""
+REPLY_SNIPPET_CHARS = 80
+
+
+def _age(now: datetime, then: datetime) -> str:
+    seconds = max(int((now - then).total_seconds()), 0)
+    if seconds < 3600:
+        return f"{seconds // 60}m ago"
+    if seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    return f"{seconds // 86400}d ago"
+
+
+def format_context_messages(
+    messages: list[DiscordMessage], now: datetime | None = None
+) -> str:
+    """Format a list of DiscordMessage objects into a readable string.
+
+    Each line carries the full UTC date and time; with ``now`` it also carries
+    how long before the ping it was posted. A reply shows who and what it
+    replies to on the line above it.
+    """
     lines = []
     for msg in messages:
-        timestamp = msg.timestamp.strftime("%H:%M")
-        prefix = f"[{timestamp}] {msg.author}"
+        stamp = msg.timestamp.strftime("%Y-%m-%d %H:%M UTC")
+        if now is not None:
+            stamp += f", {_age(now, msg.timestamp)}"
+        prefix = f"[{stamp}] {msg.author}"
         if msg.author_roles:
             prefix += f" ({', '.join(msg.author_roles)})"
         if msg.author_id:
             prefix += f" [id:{msg.author_id}]"
         if msg.message_id:
             prefix += f" [msg:{msg.message_id}]"
+        if msg.replied_to_author is not None:
+            snippet = " ".join((msg.replied_to_content or "").split())
+            if len(snippet) > REPLY_SNIPPET_CHARS:
+                snippet = snippet[:REPLY_SNIPPET_CHARS] + "..."
+            lines.append(f"  (reply to {msg.replied_to_author}: {snippet})")
         lines.append(f"{prefix}: {msg.content}")
     return "\n".join(lines)
 
@@ -206,7 +234,8 @@ async def run_moderation_agent(
         enforcing=enforcing,
     )
 
-    context_text = format_context_messages(context_messages)
+    now = datetime.now(UTC)
+    context_text = format_context_messages(context_messages, now=now)
 
     try:
         # Triage and its follow-up are one ledger operation; every request
@@ -218,6 +247,7 @@ async def run_moderation_agent(
             agent = get_moderation_agent()
             result = await agent.run(
                 render_inputs(
+                    current_time=now.strftime("%Y-%m-%d %H:%M UTC"),
                     conversation_context=context_text,
                     trigger_message=trigger_message_content,
                     trigger_author=trigger_author,
