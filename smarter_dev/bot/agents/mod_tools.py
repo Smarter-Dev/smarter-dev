@@ -74,6 +74,8 @@ mod_action_ops = ModerationActionOperations()
 # additional application-level retry.
 MAX_ACTIONS_PER_INVOCATION = 3
 
+_PING_REFUSAL = "Cannot act on the ping that summoned you."
+
 MAX_PURGE_COUNT = 50
 
 # Rule citations are not destructive, but each is a public post: a triage
@@ -456,7 +458,7 @@ def create_moderation_tools(
             # so /purge and this tool never diverge on which messages they delete.
             # Only the target's own messages are selected.
             selection = await select_purgeable_messages(
-                bot.rest.fetch_messages(int(channel_id)).limit(count * 3),
+                _without_ping(bot.rest.fetch_messages(int(channel_id)).limit(count * 3)),
                 count=count,
                 user_id=user_id,
             )
@@ -505,6 +507,13 @@ def create_moderation_tools(
         tracker.purges.append({**entry, "count": deleted_count})
         return {"success": True, "result": f"Deleted {deleted_count} message(s) from {username}."}
 
+    async def _without_ping(messages):
+        """The channel history minus the ping: it is the report, never an offence."""
+        async for message in messages:
+            if trigger_message_id and str(message.id) == str(trigger_message_id):
+                continue
+            yield message
+
     async def delete_message(message_id: str, reason: str) -> dict:
         """Delete a single message by its ID. Use this for surgical removal of
         a specific harmful message when you don't need to bulk-purge.
@@ -518,6 +527,8 @@ def create_moderation_tools(
         Returns:
             dict with 'success' boolean
         """
+        if trigger_message_id and str(message_id).strip() == str(trigger_message_id):
+            return {"success": False, "error": _PING_REFUSAL}
         limit_msg = _check_action_limit()
         if limit_msg:
             return {"success": False, "error": limit_msg}
@@ -713,8 +724,10 @@ def create_moderation_tools(
     # ── Utility tools (always available) ─────────────────────────────
 
     async def flag_users(user_ids: str) -> dict:
-        """Flag one or more users for human moderator review. This does NOT
-        notify the users — it only includes them in the mod report.
+        """Flag one or more users for human moderator review. Flagged users
+        are named in the mod report, and the channel notice pings them,
+        so flag only the users the ping actually reports or who clearly
+        broke a rule.
 
         Use this to mark users whose behavior needs human attention, even if
         you don't timeout or purge them.

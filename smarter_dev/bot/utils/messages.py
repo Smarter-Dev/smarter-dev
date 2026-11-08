@@ -187,6 +187,31 @@ def _describe_attachments(message: hikari.Message) -> str:
     return " ".join(names)
 
 
+EMBED_TEXT_LIMIT = 1024
+
+
+def _describe_embeds(message: hikari.Message) -> str:
+    """Render each embed's title, description and fields as plain text.
+
+    Bot posts such as ``/warn`` are embeds with no ``content``; without this
+    they read as empty lines. Only bot and webhook authors are rendered: a
+    link preview on a member's post is not something that member wrote. Each
+    embed is cut at ``EMBED_TEXT_LIMIT`` characters.
+    """
+    if not (message.author.is_bot or message.webhook_id is not None):
+        return ""
+    parts: list[str] = []
+    for embed in getattr(message, "embeds", None) or []:
+        pieces = [embed.title, embed.description]
+        pieces += [f"{field.name}: {field.value}" for field in embed.fields or []]
+        footer = getattr(getattr(embed, "footer", None), "text", None)
+        pieces.append(footer)
+        text = " | ".join(str(piece) for piece in pieces if piece)
+        if text:
+            parts.append(f"[embed: {text[:EMBED_TEXT_LIMIT]}]")
+    return " ".join(parts)
+
+
 def _build_discord_message(
     message: hikari.Message,
     content: str,
@@ -221,7 +246,8 @@ async def gather_message_context(
     limit: int = 5,
     skip_short_messages: bool = False,
     min_message_length: int = 10,
-    guild_id: int = None
+    guild_id: int = None,
+    include_embeds: bool = False,
 ) -> list[DiscordMessage]:
     """Gather recent messages from a channel for context.
 
@@ -231,6 +257,8 @@ async def gather_message_context(
         limit: Number of recent messages to gather
         skip_short_messages: Whether to skip very short messages
         min_message_length: Minimum message length to include (if skip_short_messages is True)
+        include_embeds: Append each embed's text to the message content (the
+            moderation triage needs to see mod warnings, which are embeds)
 
     Returns:
         List[DiscordMessage]: Recent messages for context, in chronological order
@@ -261,6 +289,10 @@ async def gather_message_context(
             attachment_names = _describe_attachments(message)
             if attachment_names:
                 content = f"{content} {attachment_names}".strip()
+            if include_embeds:
+                embed_text = _describe_embeds(message)
+                if embed_text:
+                    content = f"{content} {embed_text}".strip()
             content = await resolve_mentions(content, bot, guild_id)
 
             author_roles = []
