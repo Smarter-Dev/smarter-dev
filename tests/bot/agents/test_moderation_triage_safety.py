@@ -1022,3 +1022,12 @@ async def test_cite_that_times_out_is_possibly_posted_and_not_retried(discord, s
     assert tracker.cites[0]["possibly_applied"] is True
     notes = [text for _, text in mod_tools.triage_notes(tracker, "x")]
     assert any("Possibly cited" in text for text in notes)
+
+
+def test_triage_prompt_handles_any_clear_violation_not_just_the_ping_target():
+    from smarter_dev.bot.agents.moderation_agent import MODERATION_INSTRUCTIONS
+
+    assert "Act only on the message(s) the ping is about" not in MODERATION_INSTRUCTIONS
+    assert "take no action on context" not in MODERATION_INSTRUCTIONS
+    assert "any clear rule violation" in MODERATION_INSTRUCTIONS
+    assert "[id:...]" in MODERATION_INSTRUCTIONS
