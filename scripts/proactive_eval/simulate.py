@@ -57,9 +57,6 @@ from scripts.proactive_eval.twopass.agent import build_kimi_agent  # noqa: E402
 from scripts.proactive_eval.twopass.environment import InstructionStore  # noqa: E402
 from scripts.proactive_eval.twopass.models import build_twopass_model  # noqa: E402
 from scripts.proactive_eval.twopass.models import build_watcher_runner  # noqa: E402
-from scripts.proactive_eval.twopass.models import (  # noqa: E402
-    ensure_openrouter_key_alias,
-)
 from scripts.proactive_eval.twopass.models import resolve_agent_model_id  # noqa: E402
 from scripts.proactive_eval.twopass.watcher import SkimRunner  # noqa: E402
 from scripts.proactive_eval.twopass.windows import two_pass_windows  # noqa: E402
@@ -194,7 +191,6 @@ def _build_twopass_adapter(
     meta: dict,
     bot_display_name: str | None = None,
 ) -> tuple[TwoPassAdapter, str]:
-    ensure_openrouter_key_alias()
     agent_model_id = resolve_agent_model_id(
         args.model or DEFAULT_TWOPASS_AGENT_MODEL
     )

@@ -23,7 +23,6 @@ Run it (needs a real DigitalOcean inference key in the environment):
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,7 +41,7 @@ from smarter_dev.bot.agents.chat_models import (
     TurnDecision,
 )
 from smarter_dev.bot.agents.chat_tools import ChatDeps
-from smarter_dev.bot.agents.model_router import DIGITALOCEAN_API_KEY_ENV_VAR
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.shared.model_catalog import MODEL_CATALOG, CatalogModel, ModelProvider
 
 try:  # make a local .env's DO key visible to skipif at collection time
@@ -62,8 +61,8 @@ DIGITALOCEAN_MODELS: tuple[CatalogModel, ...] = tuple(
 pytestmark = [
     pytest.mark.do_live,
     pytest.mark.skipif(
-        not os.getenv(DIGITALOCEAN_API_KEY_ENV_VAR),
-        reason=f"{DIGITALOCEAN_API_KEY_ENV_VAR} not set — live DO model test skipped",
+        not get_credential("digitalocean_inference"),
+        reason="DigitalOcean inference key not set — live DO model test skipped",
     ),
 ]
 

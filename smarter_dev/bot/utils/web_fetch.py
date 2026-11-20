@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from urllib.parse import urlparse
 
@@ -18,6 +17,7 @@ from smarter_dev.shared import pdf_text
 from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
 from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import read_body
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def fetch_via_jina(url: str) -> dict[str, str] | None:
     Returns dict with keys ``title``, ``description``, ``content``, ``url``
     on success, or ``None`` on failure.
     """
-    api_key = os.environ.get("JINA_API_KEY", "")
+    api_key = get_credential("jina") or ""
     headers: dict[str, str] = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

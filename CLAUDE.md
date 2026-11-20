@@ -48,9 +48,13 @@ add `deploy-media.yaml` to the `<IMAGE_VERSION>` sed loop.
 
 - `MEDIA_SERVICE_URL` (`http://smarter-dev-media:8080`) lives in the
   `smarter-dev-config` ConfigMap; bot and web both pick it up via `envFrom`.
-- `MEDIA_API_KEY` comes from `smarter-dev-secrets`, key `media-api-key`, on
-  the bot, web and media deployments. The secret key is kebab-case and the
-  env var is screaming snake; both spellings are load-bearing.
+- The media key is `HVTH7T`, from `smarter-dev-secrets` key `hvth7t`, on the
+  bot, web and media deployments. Its value is stored encoded (`v1.…`, see
+  `smarter_dev/shared/credentials.py`; the media service decodes it in
+  `services/media/src/credentials.ts`). The secret key is the lowercase of the
+  env var name; both spellings are load-bearing. Until phase 2 the legacy
+  `MEDIA_API_KEY` env var / `media-api-key` secret key stay wired and are the
+  fallback when `HVTH7T` is unset.
 - The media Service is ClusterIP with no Ingress. The bearer token is defence
   in depth, not the only control.
 
@@ -70,9 +74,10 @@ The bot refuses to start without a reachable media service. Locally either:
 
 ### Rollout runbook
 
-1. **Before the first deploy**, add `media-api-key` to the live
-   `smarter-dev-secrets` — it is not created from `k8s/secrets.template.yaml`.
-   `openssl rand -hex 32`, prefixed `mk_`. Without it the media pods fail with
+1. **Before the first deploy**, add `hvth7t` (the encoded value) and, until
+   phase 2, `media-api-key` to the live `smarter-dev-secrets`. Generate with
+   `openssl rand -hex 32`, prefixed `mk_`, then encode with
+   `python -m smarter_dev.shared.credentials encode`. Without it the media pods fail with
    `CreateContainerConfigError` and the rollout hangs.
 2. Deploy. The workflow applies `k8s/deploy-media.yaml` and waits for its
    rollout before applying web and bot. That ordering is load-bearing: bot

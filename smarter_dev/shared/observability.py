@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 import logfire
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ def configure_observability(default_service_name: str) -> bool:
     if _configured:
         return True
 
-    token = os.getenv("LOGFIRE_TOKEN", "").strip()
+    token = (get_credential("logfire") or "").strip()
     if not token:
         return False
 

@@ -30,6 +30,7 @@ from pydantic_ai.models import infer_model
 from pydantic_ai.models.fallback import FallbackModel
 from pydantic_ai.models.wrapper import WrapperModel
 
+from smarter_dev.shared.agent_model_resolver import resolve_model_name
 from smarter_dev.shared.request_usage import RequestTokens
 from smarter_dev.shared.request_usage import usage_tokens
 
@@ -53,7 +54,12 @@ class UsageMeter:
         # as it is, unmetered.
         if isinstance(model, str):
             try:
-                model = infer_model(model)
+                # Explicit provider key for the names we route; anything else
+                # (``"test"``) goes through pydantic-ai's own resolution.
+                try:
+                    model = resolve_model_name(model)
+                except ValueError:
+                    model = infer_model(model)
             except Exception:  # noqa: BLE001
                 return model
         if not isinstance(model, Model):

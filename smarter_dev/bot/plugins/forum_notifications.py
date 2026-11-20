@@ -12,6 +12,7 @@ import lightbulb
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +29,10 @@ async def forum_autocomplete(
 
         # Get API client
         api_base_url = os.getenv("API_BASE_URL", "http://localhost:8000")
-        api_key = os.getenv("BOT_API_KEY")
+        api_key = get_credential("bot_api_key")
 
         if not api_key:
-            logger.error("BOT_API_KEY not found in environment")
+            logger.error("bot API key is not configured")
             return []
 
         async with aiohttp.ClientSession() as session:

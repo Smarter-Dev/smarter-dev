@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { loadConfig } from "../../src/config.js";
+import { encodeValue } from "../../src/credentials.js";
 
 const VALID_KEY = "media-test-key-0123456789";
 
 describe("loadConfig", () => {
   it("refuses to start without an API key", () => {
-    expect(() => loadConfig({})).toThrow(/MEDIA_API_KEY/);
+    expect(() => loadConfig({})).toThrow(/HVTH7T/);
   });
 
   it("refuses to start with a short API key", () => {
@@ -29,5 +30,32 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ MEDIA_API_KEY: VALID_KEY, MEDIA_PORT: "eight" })).toThrow(
       /MEDIA_PORT/,
     );
+  });
+
+  it("prefers the opaque HVTH7T over the legacy MEDIA_API_KEY", () => {
+    const config = loadConfig({ HVTH7T: encodeValue(VALID_KEY), MEDIA_API_KEY: "legacy-key-0123456789" });
+    expect(config.apiKey).toBe(VALID_KEY);
+  });
+
+  it.each([
+    ["no v1. prefix", VALID_KEY],
+    ["bad base64 length", "v1.abcde"],
+    ["= padding", "v1.abcd="],
+    ["invalid UTF-8", `v1.${Buffer.from([0xff, 0xfe, 0xfd]).toString("base64url")}`],
+  ])("falls back to MEDIA_API_KEY when HVTH7T is invalid (%s)", (_label, bad) => {
+    expect(loadConfig({ HVTH7T: bad, MEDIA_API_KEY: "legacy-key-0123456789" }).apiKey).toBe(
+      "legacy-key-0123456789",
+    );
+    expect(() => loadConfig({ HVTH7T: bad })).toThrow(/HVTH7T must be set/);
+  });
+
+  it("trims decoded and legacy values", () => {
+    expect(loadConfig({ HVTH7T: encodeValue(`${VALID_KEY}\n`) }).apiKey).toBe(VALID_KEY);
+    expect(loadConfig({ MEDIA_API_KEY: ` ${VALID_KEY}\n` }).apiKey).toBe(VALID_KEY);
+  });
+
+  it("falls back to the legacy name when HVTH7T decodes to whitespace", () => {
+    const config = loadConfig({ HVTH7T: encodeValue("  "), MEDIA_API_KEY: VALID_KEY });
+    expect(config.apiKey).toBe(VALID_KEY);
   });
 });

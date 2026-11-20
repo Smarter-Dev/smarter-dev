@@ -26,6 +26,7 @@ from pydantic_ai import RunContext
 from smarter_dev.shared.request_usage import response_request_tokens
 from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.shared.usage_meter import run_through
+from smarter_dev.shared.credentials import get_credential
 
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
 ANSWER_MODEL = os.getenv("WEB_SEARCH_ANSWER_MODEL", "claude-haiku-5-5")
@@ -88,7 +89,7 @@ async def read_page(client: httpx.AsyncClient, url: str) -> tuple[str, int]:
         "X-Retain-Images": "none",
         "X-Token-Budget": str(READ_TOKEN_BUDGET),
     }
-    if key := os.environ.get("JINA_API_KEY"):
+    if key := get_credential("jina"):
         headers["Authorization"] = f"Bearer {key}"
     response = await client.get(
         READER_URL + url, headers=headers, timeout=READ_TIMEOUT_SECONDS

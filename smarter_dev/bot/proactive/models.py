@@ -15,6 +15,7 @@ from pydantic_ai.providers.typesafe import TypeSafeProvider
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import build_model_for
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 
@@ -30,34 +31,12 @@ _LITELLM_MODEL_ALIASES = {
 }
 
 
-def ensure_openrouter_key_alias() -> None:
-    """The local .env spells the key OPEN_ROUTER_API_KEY; the router reads
-    OPENROUTER_API_KEY (or legacy OPEN_ROUTER). Bridge the gap."""
-    if not os.getenv("OPENROUTER_API_KEY") and os.getenv("OPEN_ROUTER_API_KEY"):
-        os.environ["OPENROUTER_API_KEY"] = os.environ["OPEN_ROUTER_API_KEY"]
-
-
-def ensure_typesafe_key_alias() -> None:
-    """Accept TypeSafe's earlier Jev-branded environment variable.
-
-    The native Pydantic AI provider only reads ``TYPESAFE_API_KEY``. Existing
-    Jev users may already have ``JEV_API_KEY`` in their local environment, so
-    bridge it in memory without reading, logging, or rewriting the secret.
-    """
-    if not os.getenv("TYPESAFE_API_KEY") and os.getenv("JEV_API_KEY"):
-        os.environ["TYPESAFE_API_KEY"] = os.environ["JEV_API_KEY"]
-
-
 def typesafe_key_present() -> bool:
-    return bool(os.getenv("TYPESAFE_API_KEY") or os.getenv("JEV_API_KEY"))
+    return get_credential("typesafe") is not None
 
 
 def _openrouter_key_present() -> bool:
-    return bool(
-        os.getenv("OPENROUTER_API_KEY")
-        or os.getenv("OPEN_ROUTER")
-        or os.getenv("OPEN_ROUTER_API_KEY")
-    )
+    return get_credential("openrouter") is not None
 
 
 def resolve_agent_model_id(requested: str) -> str:
@@ -73,13 +52,12 @@ def resolve_agent_model_id(requested: str) -> str:
         return KIMI_OPENROUTER_MODEL_ID
     raise SystemExit(
         "kimi-k3 needs an OpenRouter key "
-        "(OPENROUTER_API_KEY / OPEN_ROUTER_API_KEY) in the environment."
+        "in the environment."
     )
 
 
 def build_twopass_model(model_id: str) -> Model:
     if model_id.startswith("typesafe:"):
-        ensure_typesafe_key_alias()
         # httpx2 2.13 calls brotli.process with an unsupported buffer keyword
         # when the server returns br. Keep this client on gzip/deflate until
         # that decoder and the installed brotli implementation agree.
@@ -88,13 +66,14 @@ def build_twopass_model(model_id: str) -> Model:
         )
         return TypeSafeModel(
             model_id.removeprefix("typesafe:"),
-            provider=TypeSafeProvider(http_client=http_client),
+            provider=TypeSafeProvider(
+                api_key=get_credential("typesafe"), http_client=http_client
+            ),
         )
     if model_id.startswith("claude-"):
         # Claude is served by Anthropic directly, with the funded key and
         # 1-hour prompt caching, even when a LiteLLM proxy is configured.
         return build_agent_model(model_id)
-    ensure_openrouter_key_alias()
     litellm_endpoint = os.getenv("LITELLM_ENDPOINT", "").rstrip("/")
     litellm_api_key = os.getenv("LITELLM_API_KEY", "")
     if litellm_endpoint and litellm_api_key:

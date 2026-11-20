@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -32,6 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.billing import catalog
 from smarter_dev.web.models import SudoMembership
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -89,7 +89,7 @@ async def _get_discord_user_id(
 
 
 def _bot_token() -> Optional[str]:
-    return os.environ.get("DISCORD_BOT_TOKEN")
+    return get_credential("discord_bot_token")
 
 
 def _audit_reason(reason: str) -> str:

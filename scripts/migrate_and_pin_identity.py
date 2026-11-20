@@ -69,7 +69,9 @@ def run_migrations() -> None:
 
 
 def main() -> int:
-    key = os.environ.get("SITE_IDENTITY_FENCE_KEY")
+    from smarter_dev.shared.credentials import get_credential
+
+    key = get_credential("site_identity_fence_key")
     if not key or len(key) < 32:
         print(
             "Identity rollout blocked: dedicated fence key is unavailable.",

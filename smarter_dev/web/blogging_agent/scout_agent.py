@@ -19,6 +19,7 @@ from skrift.agents.models import ResumeContext
 
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_capabilities
 from smarter_dev.shared.skrift_models import agent_model_name
 from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.blogging_agent.cache import get_cache
@@ -92,6 +93,7 @@ def _build_deps(ctx: ResumeContext) -> ScoutDeps:
 scout_agent = skrift.Agent(
     agent_model_name(catalog_model_for_id(SCOUT_MODEL)),
     name=SCOUT_AGENT_NAME,
+    capabilities=agent_capabilities(),
     system_prompt=_PROMPT,
     output_type=ScoutOutput,
     model_settings=agent_model_settings(

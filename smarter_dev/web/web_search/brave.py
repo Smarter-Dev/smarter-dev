@@ -11,6 +11,7 @@ import time
 from urllib.parse import urlparse
 
 import httpx
+from smarter_dev.shared.credentials import get_credential
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
 BRAVE_HOST = urlparse(BRAVE_URL).hostname
@@ -58,9 +59,9 @@ def domain_of(url: str) -> str:
 
 async def _paced_get(client: httpx.AsyncClient, query: str, count: int) -> httpx.Response:
     global _last_call
-    api_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+    api_key = get_credential("brave_search") or ""
     if not api_key:
-        raise BraveError("BRAVE_SEARCH_API_KEY is not configured")
+        raise BraveError("Brave search key is not configured")
     async with _lock:
         wait = _last_call + MIN_INTERVAL_SECONDS - time.monotonic()
         if wait > 0:
