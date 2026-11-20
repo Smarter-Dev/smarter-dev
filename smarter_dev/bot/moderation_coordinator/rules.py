@@ -327,24 +327,25 @@ _DM_ME = r"\b(?:dm|pm|message|text|inbox|contact)\s+me\b"
 #: ("python-telegram-bot"), and "signal" alone is code (SIGTERM, "signal the
 #: thread", "connect to signal post_save").
 _OFF_PLATFORM = (
-    r"\b(?:dm|pm|message|text|contact|add|reach|ping|hit)\s+me\s+"
-    r"(?:up\s+)?(?:on|via|at)\s+(?:telegram|whatsapp|signal)\b"
+    r"\b(?:dm|pm|message|text|contact|add|reach|ping|hit|write)\s+(?:(?:out\s+)?to\s+)?"
+    r"(?:me|him|her|us)\s+(?:up\s+)?(?:on|via|at)\s+(?:telegram|whatsapp|signal)\b"
+    r"|\bsend\s+(?:me|us)\s+a\s+(?:message|dm)\s+(?:on|via)\s+(?:telegram|whatsapp|signal)\b"
     r"|\b(?:on|via)\s+(?:telegram|whatsapp|signal)\s+@\w{4,}"
-    r"|\b(?:telegram|whatsapp)\s*:\s*[@+\d]"
+    r"|\b(?:telegram|whatsapp|tg)\b[^\w\n]{0,4}(?:is\s+)?(?:@[A-Za-z]\w{3,}|\+\d)"
     r"|\bt\.me/|\bwa\.me/"
 )
 #: A payout pitch: "earn $500", "pay me 10%", "20% of the profit", guaranteed
 #: or daily profits, "invest with us ... returns". Each needs a dollar sign
 #: and digit, a percentage, or a phrase code talk does not use.
 _PAYOUT = (
-    r"\b(?:earn|make|receive|get)\s+(?:up\s+to\s+)?\$\s?\d"
+    r"\b(?:earn|make|receive|get)\s+(?:up\s+to\s+)?\$\s?\d{2,}"
     r"|\b(?:earn|make|receive|get)\s+(?:up\s+to\s+)?\d[\d,.]*\s?k?\s?"
     r"(?:usd|dollars|bucks)\b"
     r"|\bearn(?:ing)?\b[^.\n]{0,25}\$\s?\d[^.\n]{0,25}\bper\s+(?:day|week|month|hour)\b"
     r"|\bpay\s+me\s+\d+\s?%"
     r"|\b\d+\s?%\s+of\s+(?:the\s+|your\s+)?(?:profits?|earnings)\b"
     r"|\bguaranteed\s+(?:profits?|returns?)\b|\b(?:profits?|returns?)\s+guaranteed\b"
-    r"|\b(?:daily|weekly)\s+profits\b"
+    r"|\b(?:daily|weekly)\s+profits\b[^.\n]{0,30}\b(?:guaranteed|from\s+me|with\s+me|for\s+you)\b"
     r"|\binvest\s+(?:with|in)\s+(?:me|us)\b[^.\n]{0,40}\b(?:returns?|profits?)\b"
     r"|\b(?:double|triple|10x)\s+your\s+(?:money|investment|crypto|bitcoin)\b"
 )
