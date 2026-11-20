@@ -60,7 +60,6 @@ from smarter_dev.bot.proactive.environment import ChannelEnvironment  # noqa: E4
 from smarter_dev.bot.proactive.environment import InstructionStore  # noqa: E402
 from smarter_dev.bot.proactive.models import build_twopass_model  # noqa: E402
 from smarter_dev.bot.proactive.models import build_watcher_runner  # noqa: E402
-from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias  # noqa: E402
 from smarter_dev.bot.proactive.models import resolve_agent_model_id  # noqa: E402
 from smarter_dev.bot.proactive.notifications import NotificationQueue  # noqa: E402
 from smarter_dev.bot.proactive.parity import ProactiveDeps  # noqa: E402
@@ -123,7 +122,6 @@ def _fixture_ref(fixture_path: Path) -> str:
 
 
 async def run_guildwide(args: argparse.Namespace) -> None:
-    ensure_openrouter_key_alias()
     agent_model_id = resolve_agent_model_id(args.model)
     watcher_model_id = args.watcher_model
     skim_model_id = args.skim_model

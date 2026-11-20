@@ -48,6 +48,12 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: site-identity-fence-key
+            - name: JSGALT
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: jsgalt
+                  optional: false
             # The DB URL uses the admin (doadmin) direct connection — DDL needs it.
             - name: DATABASE_URL
               valueFrom:
@@ -65,16 +71,34 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: api-secret-key
+            - name: QT9YEP
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: qt9yep
+                  optional: false
             - name: WEB_SESSION_SECRET
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: web-session-secret
+            - name: URH8MJ
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: urh8mj
+                  optional: false
             - name: SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: secret-key
+            - name: AOR1KG
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: aor1kg
+                  optional: false
             # Interpolated by Skrift's app.yaml, which the core step loads.
             - name: DISCORD_APPLICATION_ID
               valueFrom:
@@ -86,6 +110,12 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: discord-client-secret
+            - name: SYJN54
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: syjn54
+                  optional: false
             - name: GITHUB_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -96,6 +126,12 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: github-client-secret
+            - name: RLOJVC
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: rlojvc
+                  optional: false
             - name: GOOGLE_CLIENT_ID
               valueFrom:
                 secretKeyRef:
@@ -106,13 +142,31 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: google-client-secret
+            - name: ZVHJYO
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: zvhjyo
+                  optional: false
             - name: SPACES_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: spaces-access-key
+            - name: RY7CUN
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: ry7cun
+                  optional: false
             - name: SPACES_SECRET_KEY
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: spaces-secret-key
+            - name: IJ2XAT
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: ij2xat
+                  optional: false

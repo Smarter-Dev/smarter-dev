@@ -82,7 +82,6 @@ from smarter_dev.bot.proactive.history_store import HistoryUnreadable
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.models import build_twopass_model
 from smarter_dev.bot.proactive.models import build_watcher_runner
-from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias
 from smarter_dev.bot.proactive.models import resolve_agent_model_id
 from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.proactive.notifications import NotificationQueue
@@ -711,7 +710,6 @@ class ProactiveRuntime:
     @property
     def agent_model_id(self) -> str:
         if self._agent_model_id is None:
-            ensure_openrouter_key_alias()
             self._agent_model_id = resolve_agent_model_id(
                 os.getenv(AGENT_MODEL_ENV_VAR, DEFAULT_AGENT_MODEL)
             )

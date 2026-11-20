@@ -16,18 +16,10 @@ this alias, leaving the real implementation untouched.
 
 from __future__ import annotations
 
-from smarter_dev.shared.model_router import DIGITALOCEAN_API_KEY_ENV_VAR
-from smarter_dev.shared.model_router import OPENCODE_ZEN_API_KEY_ENV_VAR
-from smarter_dev.shared.model_router import OPENROUTER_API_KEY_ENV_VAR
-from smarter_dev.shared.model_router import OPENROUTER_API_KEY_LEGACY_ENV_VAR
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 
 __all__ = [
-    "DIGITALOCEAN_API_KEY_ENV_VAR",
-    "OPENCODE_ZEN_API_KEY_ENV_VAR",
-    "OPENROUTER_API_KEY_ENV_VAR",
-    "OPENROUTER_API_KEY_LEGACY_ENV_VAR",
     "build_model_for",
     "model_settings_for",
 ]

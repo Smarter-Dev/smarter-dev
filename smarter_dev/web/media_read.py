@@ -35,6 +35,7 @@ from smarter_dev.shared.media_reads import media_read_slot
 from smarter_dev.shared.media_reads import read_body
 from smarter_dev.shared.media_reads import too_large_to_send
 from smarter_dev.web.research_tools import jina_read
+from smarter_dev.shared.credentials import get_credential
 
 if TYPE_CHECKING:
     from smarter_dev.shared.usage_meter import UsageMeter
@@ -181,7 +182,7 @@ def _get_audio_agent():
         from pydantic_ai.models.google import GoogleModelSettings
         from pydantic_ai.providers.google import GoogleProvider
 
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        api_key = get_credential("gemini") or ""
         model_id = os.getenv("MEDIA_READER_AUDIO_MODEL", "gemini-3.8-flash")
         _audio_agent = Agent(
             GoogleModel(model_id, provider=GoogleProvider(api_key=api_key)),

@@ -46,6 +46,7 @@ from smarter_dev.shared.model_catalog import direct_claude_model
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.shared.model_router import agent_retries_for
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +95,9 @@ def build_agent_model(model_id: str) -> Model:
 
         return OpenAIResponsesModel(
             model_id.removeprefix("openai/"),
-            provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
+            provider=OpenAIProvider(api_key=get_credential("openai") or ""),
         )
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    api_key = get_credential("gemini") or ""
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 

@@ -7,13 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from datetime import datetime
 from posixpath import normpath as _posix_normpath
 from urllib.parse import urlparse
 
 import httpx
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -86,9 +86,9 @@ async def brave_search(
     ``country`` (2-char, e.g. "US"), ``search_lang`` (e.g. "en"),
     ``ui_lang`` (e.g. "en-US"). Omit to let Brave decide.
     """
-    api_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+    api_key = get_credential("brave_search") or ""
     if not api_key:
-        return [{"error": "BRAVE_SEARCH_API_KEY not configured"}]
+        return [{"error": "Brave search is not configured"}]
 
     params: dict[str, str | int] = {
         "q": query,
@@ -138,7 +138,7 @@ async def jina_search(
     Returns a list of dicts with keys: title, url, description, content.
     Unlike Brave Search, Jina returns page content with each result.
     """
-    api_key = os.environ.get("JINA_API_KEY", "")
+    api_key = get_credential("jina") or ""
     headers: dict[str, str] = {
         "Accept": "application/json",
         "X-Retain-Images": "none",
@@ -188,9 +188,9 @@ async def youtube_search(
     Returns a list of dicts with keys: title, url, video_id.
     Channel and thumbnail info will be filled in by youtube_video_details().
     """
-    brave_key = os.environ.get("BRAVE_SEARCH_API_KEY", "")
+    brave_key = get_credential("brave_search") or ""
     if not brave_key:
-        return [{"error": "BRAVE_SEARCH_API_KEY not configured"}]
+        return [{"error": "Brave search is not configured"}]
 
     try:
         resp = await client.get(
@@ -246,7 +246,7 @@ async def youtube_video_details(
     if not video_ids:
         return []
 
-    api_key = os.environ.get("YOUTUBE_API_KEY", "")
+    api_key = get_credential("youtube") or ""
     if not api_key:
         return []
 
@@ -327,7 +327,7 @@ async def jina_read(
     Returns a dict with keys: title, description, content, url.
     ``log_host=False`` keeps the URL's host out of the failure log line.
     """
-    api_key = os.environ.get("JINA_API_KEY", "")
+    api_key = get_credential("jina") or ""
     headers: dict[str, str] = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"

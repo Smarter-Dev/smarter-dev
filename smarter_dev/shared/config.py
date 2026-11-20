@@ -5,10 +5,12 @@ from __future__ import annotations
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic import field_validator
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict
 
 from smarter_dev.shared.billing_urls import billing_url_origin
+from smarter_dev.shared.credentials import get_credential
 
 # ``Settings`` reads ``.env`` into *itself*, but plenty of code reads provider
 # credentials straight off the environment instead — ``model_router.build_model_for``
@@ -140,7 +142,7 @@ class Settings(BaseSettings):
 
     # Digital Ocean serverless inference (OpenAI-compatible). Hosts the
     # Kimi/GLM/DeepSeek/Gemma/Qwen catalog models. The secret is read from the
-    # DIGITALOCEAN_INFERENCE_API_KEY env var in model_router (matching the other
+    # digitalocean_inference credential in model_router (matching the other
     # LLM keys), not from this class; only the endpoint is configured here.
     digitalocean_inference_base_url: str = Field(
         default="https://inference.do-ai.run/v1",
@@ -151,7 +153,7 @@ class Settings(BaseSettings):
     # OpenCode Zen (OpenAI-compatible /chat/completions). Hosts the
     # Kimi K3/MiniMax/Qwen3.6/GLM/DeepSeek/Laguna catalog models. Like the DO
     # endpoint above, only the URL is configured here — the secret is read from
-    # the OPENCODE_ZEN_API_KEY env var in model_router.
+    # the opencode_zen credential in model_router.
     opencode_zen_base_url: str = Field(
         default="https://opencode.ai/zen/v1",
         description="Base URL for OpenCode Zen's OpenAI-compatible endpoint",
@@ -354,6 +356,30 @@ class Settings(BaseSettings):
         default=True,
         description="Enable verbose error messages (disable in production)",
     )
+
+    # Settings field -> credential registry name. The opaque (encoded) env var
+    # wins over the plain field value; absent, the plain field is kept so
+    # local ``.env`` files and tests keep working.
+    _CREDENTIAL_FIELDS = {
+        "discord_bot_token": "discord_bot_token",
+        "api_secret_key": "api_secret_key",
+        "bot_api_key": "bot_api_key",
+        "media_api_key": "media_api_key",
+        "web_session_secret": "web_session_secret",
+        "discord_client_secret": "discord_client_secret",
+        "resend_api_key": "resend",
+        "site_identity_fence_key": "site_identity_fence_key",
+        "polar_access_token": "polar_access_token",
+        "polar_webhook_secret": "polar_webhook_secret",
+    }
+
+    @model_validator(mode="after")
+    def _apply_credentials(self) -> Settings:
+        for field, logical in self._CREDENTIAL_FIELDS.items():
+            value = get_credential(logical)
+            if value is not None:
+                setattr(self, field, value)
+        return self
 
     @field_validator("environment")
     @classmethod

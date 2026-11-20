@@ -5,7 +5,7 @@ Routing by :class:`~smarter_dev.shared.model_catalog.ModelProvider`:
 - ``GOOGLE``       -> ``GoogleModel`` + ``GoogleProvider`` (Gemini keys).
 - ``OPENAI``       -> ``OpenAIResponsesModel`` + ``OpenAIProvider`` (OpenAI key).
 - ``ANTHROPIC``    -> ``AnthropicModel`` + ``AnthropicProvider`` (Anthropic key,
-  ``ANTHROPIC_API_KEY`` or ``CLAUDE_API_KEY``), with 1-hour prompt caching on
+  ``get_credential("anthropic")``), with 1-hour prompt caching on
   the tool definitions, the system prompt and the newest message.
 - ``OPENROUTER``   -> ``OpenAIChatModel`` + ``OpenRouterProvider``.
 - ``DIGITALOCEAN`` -> ``OpenAIChatModel`` pointed at DO's OpenAI-compatible
@@ -21,7 +21,6 @@ the endpoint can be overridden without a code change.
 
 from __future__ import annotations
 
-import os
 
 from pydantic_ai import AgentRetries
 from pydantic_ai.models import Model
@@ -43,19 +42,12 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.shared.skrift_models import ANTHROPIC_CACHE_TTL
-
-ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
-# The name the key was handed over under in ``.env``; ANTHROPIC_API_KEY wins.
-CLAUDE_API_KEY_ENV_VAR = "CLAUDE_API_KEY"
-DIGITALOCEAN_API_KEY_ENV_VAR = "DIGITALOCEAN_INFERENCE_API_KEY"
-OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
-OPENROUTER_API_KEY_LEGACY_ENV_VAR = "OPEN_ROUTER"
-OPENCODE_ZEN_API_KEY_ENV_VAR = "OPENCODE_ZEN_API_KEY"
 
 # Output retries for a model offered its output tool on "auto" (see
 # ``CatalogModel.supports_forced_tool_choice``). Such a model can answer in
@@ -89,21 +81,21 @@ ANTHROPIC_NO_MESSAGE_CACHE = AnthropicModelSettings(anthropic_cache_messages=Fal
 
 
 def anthropic_api_key() -> str:
-    """The direct Claude API key: ANTHROPIC_API_KEY, else CLAUDE_API_KEY."""
+    """The direct Claude API key (opaque name first, then legacy names)."""
     return (
-        os.getenv(ANTHROPIC_API_KEY_ENV_VAR) or os.getenv(CLAUDE_API_KEY_ENV_VAR) or ""
+        get_credential("anthropic") or ""
     )
 
 
 def build_model_for(model: CatalogModel) -> Model:
     """Return a configured Pydantic AI ``Model`` for ``model``."""
     if model.provider is ModelProvider.GOOGLE:
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        api_key = get_credential("gemini") or ""
         return GoogleModel(model.model_id, provider=GoogleProvider(api_key=api_key))
     if model.provider is ModelProvider.OPENAI:
         return OpenAIResponsesModel(
             model.model_id,
-            provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
+            provider=OpenAIProvider(api_key=get_credential("openai") or ""),
         )
     if model.provider is ModelProvider.ANTHROPIC:
         provider = AnthropicProvider(api_key=anthropic_api_key())
@@ -122,9 +114,7 @@ def build_model_for(model: CatalogModel) -> Model:
             settings=ANTHROPIC_CACHE_SETTINGS,
         )
     if model.provider is ModelProvider.OPENROUTER:
-        api_key = os.getenv(OPENROUTER_API_KEY_ENV_VAR) or os.getenv(
-            OPENROUTER_API_KEY_LEGACY_ENV_VAR
-        )
+        api_key = get_credential("openrouter")
         provider = OpenRouterProvider(api_key=api_key or "")
         if not model.supports_forced_tool_choice:
             # e.g. Claude Sonnet 5.5: its endpoints list tool_choice "required"
@@ -152,7 +142,7 @@ def build_model_for(model: CatalogModel) -> Model:
             model.model_id,
             provider=OpenAIProvider(
                 base_url=settings.opencode_zen_base_url,
-                api_key=os.getenv(OPENCODE_ZEN_API_KEY_ENV_VAR) or "",
+                api_key=get_credential("opencode_zen") or "",
             ),
             # Same open-weights caveats the DO branch documents below: these are
             # the same underlying models (Kimi/GLM/Qwen), so assume the same
@@ -169,7 +159,7 @@ def build_model_for(model: CatalogModel) -> Model:
             model.model_id,
             provider=OpenAIProvider(
                 base_url=settings.digitalocean_inference_base_url,
-                api_key=os.getenv(DIGITALOCEAN_API_KEY_ENV_VAR) or "",
+                api_key=get_credential("digitalocean_inference") or "",
             ),
             # DO's endpoint is only mostly OpenAI-compatible: several hosted
             # models (Kimi, GLM) return HTTP 500 for tool_choice="required"

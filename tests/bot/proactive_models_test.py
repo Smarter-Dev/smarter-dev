@@ -8,7 +8,6 @@ from pydantic_ai.models.typesafe import TypeSafeModel
 
 from smarter_dev.bot.proactive.models import build_twopass_model
 from smarter_dev.bot.proactive.models import build_watcher_runner
-from smarter_dev.bot.proactive.models import ensure_typesafe_key_alias
 from smarter_dev.bot.proactive.models import typesafe_key_present
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
@@ -47,13 +46,12 @@ def test_typesafe_route_accepts_legacy_jev_key_alias(monkeypatch) -> None:
     monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
     monkeypatch.setenv("JEV_API_KEY", "legacy-test-key")
 
-    ensure_typesafe_key_alias()
     model = build_twopass_model("typesafe:jev-latest")
 
     assert typesafe_key_present()
     assert isinstance(model, TypeSafeModel)
     assert model.model_name == "jev-latest"
-    assert os.environ["TYPESAFE_API_KEY"] == "legacy-test-key"
+    assert "TYPESAFE_API_KEY" not in os.environ  # no write-back
 
 
 def test_watcher_factory_selects_jev_without_changing_glm(monkeypatch) -> None:

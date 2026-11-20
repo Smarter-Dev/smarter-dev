@@ -52,6 +52,12 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: media-api-key
+                  - name: HVTH7T
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: hvth7t
+                        optional: false
                 # Node baseline ~50Mi, MathJax post-init ~80Mi, three decoded
                 # 960x540 backgrounds ~6Mi, sharp/libvips ~60Mi, plus
                 # per-request canvases. CPU is bursty (rasterisation), so the

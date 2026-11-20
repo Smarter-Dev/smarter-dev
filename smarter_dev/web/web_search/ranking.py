@@ -119,7 +119,14 @@ def build_model():
     # As in smarter_dev.bot.proactive.models: stay on gzip, since httpx2
     # can't decode TypeSafe's brotli responses.
     http_client = httpx2.AsyncClient(headers={"Accept-Encoding": "gzip, deflate"})
-    return TypeSafeModel(RANK_MODEL, provider=TypeSafeProvider(http_client=http_client))
+    from smarter_dev.shared.credentials import get_credential
+
+    return TypeSafeModel(
+        RANK_MODEL,
+        provider=TypeSafeProvider(
+            api_key=get_credential("typesafe"), http_client=http_client
+        ),
+    )
 
 
 def _best_index(verdicts: dict, judgments: list[dict]) -> int:

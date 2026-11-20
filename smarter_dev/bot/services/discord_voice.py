@@ -7,7 +7,6 @@ import base64
 import io
 import logging
 import math
-import os
 import re
 import struct
 import wave
@@ -16,7 +15,6 @@ from datetime import UTC
 from datetime import datetime
 
 import aiohttp
-import dotenv
 from google import genai
 from google.genai import types
 
@@ -28,6 +26,7 @@ from smarter_dev.bot.services.models import ServiceHealth
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.credentials import get_credential
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 VOICE_MESSAGE_FLAG = 8192
@@ -199,7 +198,7 @@ def get_gemini_client_for_tts(model_name: str | None = None):
     """Return a Gemini client and the bare TTS model id."""
     if model_name is None:
         model_name = get_settings().voice_tts_model
-    api_key = os.getenv("GEMINI_API_KEY") or dotenv.get_key(".env", "GEMINI_API_KEY")
+    api_key = get_credential("gemini")
     if model_name.startswith("gemini/"):
         model_name = model_name.removeprefix("gemini/")
     return genai.Client(api_key=api_key), model_name

@@ -27,7 +27,6 @@ import asyncio
 import functools
 import json
 import logging
-import os
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -61,6 +60,7 @@ from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
 from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
+from smarter_dev.shared.credentials import get_credential
 
 logger = logging.getLogger(__name__)
 
@@ -571,7 +571,7 @@ async def _list_channel_emojis(ctx: RunContext[_AuthorDeps]) -> list[dict]:
 
 
 def _build_google_model(model_id: str) -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    api_key = get_credential("gemini") or ""
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 

@@ -1,5 +1,7 @@
 /** Environment parsing. Every failure here stops the process before it listens. */
 
+import { decodeValue } from "./credentials.js";
+
 export interface MediaConfig {
   apiKey: string;
   port: number;
@@ -24,11 +26,25 @@ function readInteger(environment: NodeJS.ProcessEnv, name: string, fallback: num
   return parsed;
 }
 
+function readApiKey(environment: NodeJS.ProcessEnv): string {
+  const encoded = (environment.HVTH7T ?? "").trim();
+  if (encoded) {
+    const value = decodeValue(encoded).trim();
+    if (value) {
+      return value;
+    }
+    console.warn("credential: HVTH7T decodes to an empty value; using legacy names");
+  }
+  // --- PHASE 1 LEGACY FALLBACK: delete this block in phase 2 ---
+  return (environment.MEDIA_API_KEY ?? "").trim();
+  // --- END PHASE 1 LEGACY FALLBACK ---
+}
+
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): MediaConfig {
-  const apiKey = environment.MEDIA_API_KEY ?? "";
+  const apiKey = readApiKey(environment);
   if (apiKey.length < MINIMUM_API_KEY_LENGTH) {
     throw new Error(
-      `MEDIA_API_KEY must be set and at least ${MINIMUM_API_KEY_LENGTH} characters long`,
+      `HVTH7T must be set and at least ${MINIMUM_API_KEY_LENGTH} characters long`,
     );
   }
 

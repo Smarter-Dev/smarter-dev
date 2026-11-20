@@ -63,6 +63,12 @@ spec:
             secretKeyRef:
               name: smarter-dev-secrets
               key: api-secret-key
+        - name: QT9YEP
+          valueFrom:
+            secretKeyRef:
+              name: smarter-dev-secrets
+              key: qt9yep
+              optional: false
         - name: ENVIRONMENT
           valueFrom:
             configMapKeyRef:
