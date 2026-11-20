@@ -36,6 +36,7 @@ from dataclasses import field
 from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import Protocol
 
 from smarter_dev.bot.moderation_coordinator import rules
@@ -73,6 +74,7 @@ from smarter_dev.bot.spam_engine import NO_SPAM_ACTION
 from smarter_dev.bot.spam_engine import content_digest
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import TranscriptMessage
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.web.handler_recent_messages import content_hash
 
 logger = logging.getLogger(__name__)
@@ -590,7 +592,11 @@ class Coordinator:
                     history=history,
                     now=now_dt,
                     timeout_seconds=ladder.high_signal_timeout_seconds,
-                    ban_account_age=ladder.ban_account_age,
+                    # A policy that does not allow a ban keeps the timeout:
+                    # an unenforceable ban would take nothing in its place.
+                    ban_account_age=ladder.ban_account_age
+                    if policy.allows(mp.BAN)
+                    else timedelta(0),
                 )
             if promo_review is not None and claimed is not None:
                 # Asked with the scam check, in its one request: its copies

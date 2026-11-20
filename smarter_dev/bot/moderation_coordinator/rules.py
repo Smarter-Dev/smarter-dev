@@ -310,58 +310,84 @@ _RISKY_WORDS = re.compile(
     r"|fag(?:got)?|nigg(?:er|a)|kike|spic|chink|tranny)\b",
     re.IGNORECASE,
 )
-#: Get-rich-quick lures that need no link (#478: "I'll help the first 10
-#: people earn $50k... pay me 10%... DM me on TELEGRAM @x" passed no gate).
-#: The model still judges each message; this only decides what is shown to
-#: it, so each part is a phrase or a combination, not a common word on a
-#: programming server ("profit", "invest", "signal", "dm me" alone are not
-#: lures).
+#: Get-rich-quick and off-platform-contact lures that need no link (#478:
+#: "I'll help the first 10 people earn $50k... pay me 10%... DM me on
+#: TELEGRAM @x" passed no gate). The model still judges each message; this
+#: only decides what is shown to it, so every part is a phrase or a
+#: combination, never a common programming word ("profit", "invest",
+#: "signal", "telegram", "dm me", "$" alone are not lures).
 #:
-#: A large dollar figure: ``$50k``, ``$5,000``, ``$ 2000 a day``.
-_MONEY_FIGURE = (
-    r"\$\s?\d[\d.]*\s?k\b|\$\s?\d{1,3}(?:,\d{3})+|\$\s?\d{4,}"
-)
-#: Off-platform contact: Telegram or WhatsApp (a handle, a link, or the app
-#: named at all: "telegram" outside a bot library question is rare enough),
-#: and Signal only when named as the place to write ("on signal", "signal
-#: me"), never the word alone (signals, SIGINT, "signal handler").
+#: A large dollar figure: ``$50k``, ``$5,000``, ``$ 2000``.
+_MONEY_FIGURE = r"\$\s?\d[\d.]*\s?k\b|\$\s?\d{1,3}(?:,\d{3})+|\$\s?\d{4,}"
+#: Asking for the DM.
+_DM_ME = r"\b(?:dm|pm|message|text|inbox|contact)\s+me\b"
+#: Off-platform contact: a contact verb with "me on telegram/whatsapp/signal",
+#: the app followed by a handle or number ("on telegram @x", "telegram: @x"),
+#: or a ``t.me/``/``wa.me/`` link. The app named alone is a library question
+#: ("python-telegram-bot"), and "signal" alone is code (SIGTERM, "signal the
+#: thread", "connect to signal post_save").
 _OFF_PLATFORM = (
-    r"\b(?:telegram|whatsapp)\b|\bt\.me/|\bwa\.me/"
-    r"|\b(?:on|via|to|add me on|text me on|reach me on) signal\b"
-    r"(?!\s+(?:handler|processing|handling|library|module|name|\d))"
-    r"|\bsignal me\b"
+    r"\b(?:dm|pm|message|text|contact|add|reach|ping|hit)\s+me\s+"
+    r"(?:up\s+)?(?:on|via|at)\s+(?:telegram|whatsapp|signal)\b"
+    r"|\b(?:on|via)\s+(?:telegram|whatsapp|signal)\s+@\w{4,}"
+    r"|\b(?:telegram|whatsapp)\s*:\s*[@+\d]"
+    r"|\bt\.me/|\bwa\.me/"
 )
-#: Asking for the DM, and a payout: "dm me", "pay me 10%", "earn ... per
-#: day/week", a guaranteed or daily profit, an investment return.
-_DM_ME = r"\b(?:dm|pm|message|text|inbox|contact|whisper)\s+me\b"
+#: A payout pitch: "earn $500", "pay me 10%", "20% of the profit", guaranteed
+#: or daily profits, "invest with us ... returns". Each needs a dollar sign
+#: and digit, a percentage, or a phrase code talk does not use.
 _PAYOUT = (
-    r"\b(?:earn|make|receive|get)\s+(?:up to\s+)?(?:\$|\d[\d,.]*\s?k\b)"
-    r"|\bearn(?:ing)?\b[^.\n]{0,25}[$\d][^.\n]{0,25}\bper\s+(?:day|week|month|hour)\b"
+    r"\b(?:earn|make|receive|get)\s+(?:up\s+to\s+)?\$\s?\d"
+    r"|\b(?:earn|make|receive|get)\s+(?:up\s+to\s+)?\d[\d,.]*\s?k?\s?"
+    r"(?:usd|dollars|bucks)\b"
+    r"|\bearn(?:ing)?\b[^.\n]{0,25}\$\s?\d[^.\n]{0,25}\bper\s+(?:day|week|month|hour)\b"
     r"|\bpay\s+me\s+\d+\s?%"
-    r"|\b\d+\s?%\s+(?:of\s+(?:the\s+|your\s+)?)?(?:profits?|earnings|commission)\b"
-    r"|\b(?:guaranteed|daily|weekly|massive|huge)\s+(?:profits?|returns?)\b"
-    r"|\b(?:profits?|returns?)\s+(?:guaranteed|daily|weekly)\b"
-    r"|\binvest(?:ing|ment)?\b[^.\n]{0,40}\b(?:returns?|profits?|double|triple)\b"
+    r"|\b\d+\s?%\s+of\s+(?:the\s+|your\s+)?(?:profits?|earnings)\b"
+    r"|\bguaranteed\s+(?:profits?|returns?)\b|\b(?:profits?|returns?)\s+guaranteed\b"
+    r"|\b(?:daily|weekly)\s+profits\b"
+    r"|\binvest\s+(?:with|in)\s+(?:me|us)\b[^.\n]{0,40}\b(?:returns?|profits?)\b"
+    r"|\b(?:double|triple|10x)\s+your\s+(?:money|investment|crypto|bitcoin)\b"
 )
 _LURE_MONEY = re.compile(_MONEY_FIGURE, re.IGNORECASE)
-_LURE_OFF_PLATFORM = re.compile(_OFF_PLATFORM, re.IGNORECASE)
 _LURE_DM_ME = re.compile(_DM_ME, re.IGNORECASE)
+_LURE_OFF_PLATFORM = re.compile(_OFF_PLATFORM, re.IGNORECASE)
 _LURE_PAYOUT = re.compile(_PAYOUT, re.IGNORECASE)
-_HANDLE = re.compile(r"(?<![\w@.])@\w{4,}")
+#: A username-shaped handle: not a Discord mention (``<@123>``), a decorator
+#: (``@property``, or any ``@name`` opening a line) or an email.
+_HANDLE = re.compile(r"(?<![\w@.<!/])@([A-Za-z][\w.]{3,31})\b")
+_DECORATORS = frozenset(
+    {
+        "property",
+        "staticmethod",
+        "classmethod",
+        "dataclass",
+        "override",
+        "abstractmethod",
+    }
+)
+
+
+def _has_handle(content: str) -> bool:
+    for match in _HANDLE.finditer(content):
+        start = match.start()
+        if start == 0 or content[start - 1] == "\n":
+            continue
+        if match.group(1).lower() in _DECORATORS:
+            continue
+        return True
+    return False
 
 
 def scam_lure(content: str) -> bool:
-    """A get-rich-quick or off-platform-contact lure (see the block above).
-
-    Telegram/WhatsApp/"on Signal" alone, a payout phrase alone, or a money
+    """A get-rich-quick or off-platform-contact lure (see the block above):
+    an off-platform contact phrase or a payout pitch alone, or a dollar
     figure beside a DM request or a handle. "dm me" alone is a help offer,
-    and a dollar figure alone is a price.
-    """
+    and a dollar figure alone is a price."""
     if _LURE_OFF_PLATFORM.search(content) or _LURE_PAYOUT.search(content):
         return True
     return bool(
         _LURE_MONEY.search(content)
-        and (_LURE_DM_ME.search(content) or _HANDLE.search(content))
+        and (_LURE_DM_ME.search(content) or _has_handle(content))
     )
 
 
@@ -956,7 +982,11 @@ class PromoReview:
         """A ban needs a confident promotional-spam yes, an account under the
         ban age and a confident bad-faith yes. Good faith, unsure or unknown
         intent keeps the timeout (#478)."""
-        return self.asks_intent and verdicts[BAD_FAITH].yes
+        return (
+            self.asks_intent
+            and verdicts[PROMOTIONAL_SPAM].yes
+            and verdicts[BAD_FAITH].yes
+        )
 
     def resolve(
         self, verdicts: Verdicts, *, rater: str = "Jev"
@@ -987,8 +1017,8 @@ class PromoReview:
         reason = (
             f"{_promo_rating(verdict, rater)}, the same post in {channels} channels"
         )
-        if self.asks_intent:
-            reason += f", {_intent_rating(verdicts[BAD_FAITH])}"
+        # The reason reaches the member (their DM): the intent rating is for
+        # the moderators' report line only.
         if bans:
             reason += (
                 ", account under a week old"
@@ -1021,7 +1051,7 @@ class PromoReview:
 
 def _intent_rating(verdict: LabelVerdict) -> str:
     """The intent verdict as a moderator reads it: "bad faith 95%",
-    "good faith 90%", "intent unsure"."""
+    "good faith 90%", "intent unclear"."""
     if verdict.yes:
         return f"bad faith {percent(verdict.confidence or 0)}"
     if verdict.no:

@@ -34,9 +34,10 @@ PROMOTIONAL_SPAM = "promotional_spam"
 BAD_FAITH = "bad_faith"
 PARTICIPANT_PREFIX = "participant:"
 
-#: Labels only Claude Haiku answers. Jev serves the ring's validated yes/no
-#: questions; when any of these is needed, Haiku answers every label instead.
-HAIKU_LABELS = frozenset({SCAM, ABUSE})
+#: Labels only Claude Haiku answers (``bad_faith`` too: a ban rests on the
+#: validated rater, as every other automated ban does). Jev serves the ring's
+#: validated yes/no questions; when any of these is needed, Haiku answers every label instead.
+HAIKU_LABELS = frozenset({SCAM, ABUSE, BAD_FAITH})
 
 
 def participant_label(user_id: str) -> str:

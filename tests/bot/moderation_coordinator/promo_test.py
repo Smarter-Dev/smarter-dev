@@ -21,10 +21,12 @@ from smarter_dev.bot.moderation_coordinator import act as act_module
 from smarter_dev.bot.moderation_coordinator import rules
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierRequest
 from smarter_dev.bot.moderation_coordinator.classifier import jev_request
+from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import ANSWERED
 from smarter_dev.bot.moderation_coordinator.model import BAD_FAITH
 from smarter_dev.bot.moderation_coordinator.model import LOW_CONFIDENCE
 from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
+from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import Attachment
 from smarter_dev.bot.moderation_coordinator.model import AuthorHistory
 from smarter_dev.bot.moderation_coordinator.model import LabelVerdict
@@ -33,12 +35,16 @@ from smarter_dev.bot.moderation_coordinator.model import Verdicts
 from smarter_dev.bot.moderation_coordinator.model import percent
 from smarter_dev.bot.moderation_coordinator.replay import ReplayCase
 from smarter_dev.bot.moderation_coordinator.replay import ReplayReads
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.web.moderation_gateway import types as gw
 from tests.bot.moderation_coordinator.act_test import FIRST
 from tests.bot.moderation_coordinator.act_test import REPORTS
 from tests.bot.moderation_coordinator.act_test import _flood
 from tests.bot.moderation_coordinator.act_test import acting
 from tests.bot.moderation_coordinator.act_test import harness
+from tests.bot.moderation_coordinator.policy_revision_test import document
+from tests.bot.moderation_coordinator.policy_revision_test import on_revision
+from tests.bot.moderation_coordinator.policy_revision_test import policy_from
 from tests.bot.moderation_coordinator.replay_cases import GENERAL
 from tests.bot.moderation_coordinator.replay_cases import NOW
 from tests.bot.moderation_coordinator.replay_cases import OTHER
@@ -538,6 +544,13 @@ async def test_the_jeff_burst_from_an_18_hour_old_account_is_a_ban():
     )
     assert "account under a week old" in report
     assert "timed out" not in report
+    # One Haiku request asked promo and intent together; Jev was not used.
+    assert h.calls.jev == []
+    asked = h.calls.haiku[-1]
+    assert '"promotional_spam"' in asked and f'"{BAD_FAITH}"' in asked
+    # The member's DM says why, without the classifier's intent wording.
+    dm = " ".join(text for _, text in h.messenger.dms)
+    assert "bad faith" not in dm and "95%" not in dm and "intent" not in dm
 
 
 async def test_an_account_over_a_week_old_keeps_the_one_hour_timeout():
@@ -620,7 +633,8 @@ def test_the_ban_needs_bad_faith_and_follows_the_ladders_age():
     [hit], [line] = review.resolve(_intent(True, 0.95))
     assert hit.sanction.kind == gw.BAN
     assert "account under 30 days old" in hit.reason and "banned" in line
-    assert "bad faith 95%" in hit.reason and "bad faith 95%" in line
+    # The intent rating is the report's; the member's DM never carries it.
+    assert "bad faith 95%" in line and "bad faith" not in hit.reason
     # Good faith, unsure, or never asked: a timeout.
     for verdicts in (
         _intent(False, 0.9),
@@ -640,3 +654,92 @@ def test_the_ban_needs_bad_faith_and_follows_the_ladders_age():
     [hit], lines = copy.resolve(_intent(True, 0.95))
     assert hit.sanction is None and lines == [] and len(hit.cleanup) == 2
     assert review.resolve(_verdict(True, 0.5, LOW_CONFIDENCE))[0] == []
+
+
+FREELANCER_POST = "Freelance developer available for hire, DM me for my rates!"
+
+
+async def test_a_good_faith_freelancer_advert_is_a_timeout_not_a_ban():
+    posts = [
+        say(JEFF, FREELANCER_POST, NOW),
+        say(JEFF, FREELANCER_POST, NOW + timedelta(seconds=20), channel=OTHER),
+    ]
+    h = harness(
+        _case(
+            JEFF, posts, FIRST, {PROMOTIONAL_SPAM: (True, 0.9), BAD_FAITH: (False, 0.9)}
+        )
+    )
+
+    await h.judge(*posts)
+
+    assert h.port.count("ban", JEFF.id) == 0
+    assert h.port.count("timeout", JEFF.id) == 1
+    dm = " ".join(text for _, text in h.messenger.dms)
+    assert "good faith" not in dm.replace("in good faith", "") and "intent" not in dm
+    assert "good faith 90%" not in dm
+
+
+async def test_a_policy_that_allows_no_ban_gets_a_timeout_and_says_so():
+    posts = _jeff_posts()
+    case = _case(
+        JEFF, posts, FIRST, {PROMOTIONAL_SPAM: (True, 0.98), BAD_FAITH: (True, 0.95)}
+    )
+    no_ban = policy_from(document(sanctions__allowed=[mp.WARN, mp.TIMEOUT, mp.DELETE]))
+    h = harness(replace(case, policy=no_ban))
+    on_revision(h, {"revision": 1, "policy": no_ban})
+
+    await h.judge(*posts)
+
+    assert h.port.count("ban", JEFF.id) == 0
+    assert h.port.count("timeout", JEFF.id) == 1
+    report = h.port.latest_report_text(REPORTS)
+    assert "timed out and every copy removed" in report and "banned" not in report
+    assert all(f'"{BAD_FAITH}"' not in call for call in h.calls.haiku)
+
+
+async def test_scam_no_on_the_first_message_then_promo_and_bad_faith_is_one_ban():
+    posts = _jeff_posts()
+    h = harness(
+        _case(
+            JEFF,
+            posts,
+            FIRST,
+            {
+                SCAM: (False, 0.9),
+                ABUSE: (False, 0.9),
+                PROMOTIONAL_SPAM: (True, 0.98),
+                BAD_FAITH: (True, 0.95),
+            },
+        )
+    )
+
+    await h.judge(*posts)
+
+    assert h.port.count("ban", JEFF.id) == 1
+    assert h.port.count("timeout", JEFF.id) == 0
+    assert {p.message_id for p in posts} <= h.deleted()
+    assert h.calls.jev == []
+
+
+async def test_scam_yes_on_the_first_message_bans_once_and_never_asks_promo():
+    posts = _jeff_posts()
+    h = harness(
+        _case(
+            JEFF,
+            posts,
+            FIRST,
+            {
+                SCAM: (True, 0.97),
+                ABUSE: (False, 0.9),
+                PROMOTIONAL_SPAM: (True, 0.98),
+                BAD_FAITH: (True, 0.95),
+            },
+        )
+    )
+
+    await h.judge(*posts)
+
+    assert h.port.count("ban", JEFF.id) == 1
+    assert h.port.count("timeout", JEFF.id) == 0
+    assert {p.message_id for p in posts} <= h.deleted()
+    assert "promotional spam" not in h.port.latest_report_text(REPORTS)

@@ -525,6 +525,13 @@ def test_lures_open_the_scam_gate(text):
         "it costs $5k per year hm",
         "@alice thanks, dm me the log",
         "I earn this per day lol",
+        "use @property here, dm me if it breaks",
+        "decorate it with @staticmethod and message me the traceback",
+        "<@123456789> dm me the log",
+        "@pytest.fixture works on a profit-and-loss report",
+        "my script made $5 in test data",
+        "ping me on discord when it deploys",
+        "git@github.com:me/repo.git",
     ],
 )
 def test_ordinary_programming_talk_is_not_a_lure(text):
