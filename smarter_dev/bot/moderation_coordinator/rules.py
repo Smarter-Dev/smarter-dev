@@ -331,7 +331,8 @@ _OFF_PLATFORM = (
     r"(?:me|him|her|us)\s+(?:up\s+)?(?:on|via|at)\s+(?:telegram|whatsapp|signal)\b"
     r"|\bsend\s+(?:me|us)\s+a\s+(?:message|dm)\s+(?:on|via)\s+(?:telegram|whatsapp|signal)\b"
     r"|\b(?:on|via)\s+(?:telegram|whatsapp|signal)\s+@\w{4,}"
-    r"|\b(?:telegram|whatsapp|tg)\b[^\w\n]{0,4}(?:is\s+)?(?:@[A-Za-z]\w{3,}|\+\d)"
+    r"|\b(?:telegram|whatsapp|tg)\b[ \t:]{0,3}(?:is\s+)?"
+    r"(?:@[A-Za-z]\w{3,}|\+\d[\d\s()-]{6,}\d)"
     r"|\bt\.me/|\bwa\.me/"
 )
 #: A payout pitch: "earn $500", "pay me 10%", "20% of the profit", guaranteed
@@ -352,6 +353,25 @@ _PAYOUT = (
 _LURE_MONEY = re.compile(_MONEY_FIGURE, re.IGNORECASE)
 _LURE_DM_ME = re.compile(_DM_ME, re.IGNORECASE)
 _LURE_OFF_PLATFORM = re.compile(_OFF_PLATFORM, re.IGNORECASE)
+#: Bot-development talk on the line of an off-platform match ("ask Telegram
+#: @BotFather for a token", "my bot can send me a message on telegram when CI
+#: fails", "@mention", a webhook or handler): not a contact lure.
+_BOT_DEV = re.compile(
+    r"\b(?:bots?|botfather|webhooks?|api|handlers?|mentions?|ci)\b|\w+bot\b",
+    re.IGNORECASE,
+)
+
+
+def _contact_lure(content: str) -> bool:
+    for match in _LURE_OFF_PLATFORM.finditer(content):
+        start = content.rfind("\n", 0, match.start()) + 1
+        end = content.find("\n", match.end())
+        line = content[start : end if end != -1 else len(content)]
+        if not _BOT_DEV.search(line):
+            return True
+    return False
+
+
 _LURE_PAYOUT = re.compile(_PAYOUT, re.IGNORECASE)
 #: A username-shaped handle: not a Discord mention (``<@123>``), a decorator
 #: (``@property``, or any ``@name`` opening a line) or an email.
@@ -384,7 +404,7 @@ def scam_lure(content: str) -> bool:
     an off-platform contact phrase or a payout pitch alone, or a dollar
     figure beside a DM request or a handle. "dm me" alone is a help offer,
     and a dollar figure alone is a price."""
-    if _LURE_OFF_PLATFORM.search(content) or _LURE_PAYOUT.search(content):
+    if _contact_lure(content) or _LURE_PAYOUT.search(content):
         return True
     return bool(
         _LURE_MONEY.search(content)

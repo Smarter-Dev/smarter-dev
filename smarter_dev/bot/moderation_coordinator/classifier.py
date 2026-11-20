@@ -835,8 +835,9 @@ def haiku_prompt(
             '- "participants": an object with one entry per CANDIDATE id below, '
             "each answering: " + _PARTICIPANT_TEXT
         )
+    summary_line = '- "summary": ' + _SUMMARY_TEXT
     if request.summarize:
-        lines.append('- "summary": ' + _SUMMARY_TEXT)
+        lines.append(summary_line)
     if PROMOTIONAL_SPAM in request.labels:
         # Haiku rates a new account's promo too (#478), so it gets the rules
         # Jev gets: a shared project or a greeting is a no.
@@ -863,7 +864,7 @@ def haiku_prompt(
     if request.summarize:
         # The description's question comes out of the context's share, so
         # the worst request stays as bounded as before (#378).
-        room -= _size(lines[-1:])
+        room -= _size([summary_line])
     candidates = {c.user_id: c for c in request.ring_candidates}
     said: dict[str, list[str]] = {}
     for user_id in participants:

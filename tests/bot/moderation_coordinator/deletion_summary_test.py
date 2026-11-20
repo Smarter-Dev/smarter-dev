@@ -293,12 +293,23 @@ async def test_a_burst_of_identical_copies_gets_one_summary():
     assert len(haiku.classifier_prompts) == 2 and haiku.separate == []
     assert {p.message_id for p in posts.values()} <= h.deleted()
     report = h.port.latest_report_text(REPORTS)
-    print(report)
     groups = report_mod.deleted_posts(await _report_facts())
     assert len(groups) == 2
+
+    # Which message of a post is deleted (and so listed) first is a race
+    # between the post's own removal and its copy's, so pair the groups with
+    # the posts by the earliest id each holds, never by the first listed.
+    def earliest(*ids: str) -> str:
+        return min(ids, key=int)
+
     for group, (post, copy) in zip(
-        sorted(groups, key=lambda g: g.message_ids[0]),
-        sorted([("A", "D"), ("B", "C")], key=lambda pair: posts[pair[0]].message_id),
+        sorted(groups, key=lambda g: earliest(*g.message_ids)),
+        sorted(
+            [("A", "D"), ("B", "C")],
+            key=lambda pair: earliest(
+                posts[pair[0]].message_id, posts[pair[1]].message_id
+            ),
+        ),
         strict=True,
     ):
         assert group.text == CLASSIFIER_LINE
@@ -306,7 +317,8 @@ async def test_a_burst_of_identical_copies_gets_one_summary():
             [posts[post].message_id, posts[copy].message_id]
         )
         assert sorted(group.channel_ids) == sorted([INTRODUCTIONS, GENERAL])
-    times = f"(×2 in <#{INTRODUCTIONS}>, <#{GENERAL}>)"
+    first, second = sorted([INTRODUCTIONS, GENERAL], key=int)
+    times = f"(×2 in <#{first}>, <#{second}>)"
     assert report.count(times) == 4  # each post: its delete line and the summary
     deleted_line = next(line for line in report.splitlines() if "**Deleted:**" in line)
     assert deleted_line.count(CLASSIFIER_LINE) == 2
