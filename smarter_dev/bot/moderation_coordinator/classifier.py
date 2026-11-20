@@ -65,6 +65,7 @@ from pydantic_ai.usage import UsageLimits
 
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import ANSWERED
+from smarter_dev.bot.moderation_coordinator.model import BAD_FAITH
 from smarter_dev.bot.moderation_coordinator.model import BUDGET
 from smarter_dev.bot.moderation_coordinator.model import ERROR
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
@@ -727,6 +728,21 @@ _QUESTION_TEXT[PROMOTIONAL_SPAM] = (
     "to reach people rather than to take part? AUTHOR says who posted it "
     "and where else it was posted. A question, a bug report or a help "
     "request posted in two channels is not spam, however new the author."
+)
+
+_QUESTION_TEXT[BAD_FAITH] = (
+    "Is the MESSAGE posted in bad faith, meaning it exists to extract "
+    "something from its readers rather than to take part? Count it as bad "
+    'faith when it has a money or profit pitch ("earn $X", "pay me a '
+    'cut", investment returns), a hidden offer or an off-platform lure '
+    'that only works because the details are withheld, MLM or "work from '
+    'home" recruiting, phishing, or impersonation. A request to DM the '
+    "author is not bad faith by itself, and neither is recruitment by itself. "
+    "Count it as good faith when it is a genuine job post, a freelancer or "
+    "developer advertising their own services, someone sharing their own "
+    "project, server or tool, a misplaced cross-post, or a person asking for "
+    "help. Weigh both readings, and when the intent is unclear answer no "
+    "with a low confidence."
 )
 
 _PARTICIPANT_TEXT = (

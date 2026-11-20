@@ -492,3 +492,47 @@ def test_an_action_after_the_message_is_no_earlier_action():
     )
     assert rules.actions_within(history, rules.RECENT_ACTION_SECONDS, NOW) == []
     assert rules.recent_moderation(history, NOW) == []
+
+
+# -- #478: get-rich and off-platform-contact lures open the scam gate ------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I'll help the first 10 people… earn $50k… pay me 10%… DM me… on "
+        "TELEGRAM @Jeffmarcus33",
+        "message me on whatsapp for details",
+        "add me on signal",
+        "earn $500 a day from home",
+        "I made $5,000 this week, dm me",
+        "invest with us and get double returns",
+        "guaranteed profits, 20% of the profit goes to me",
+    ],
+)
+def test_lures_open_the_scam_gate(text):
+    assert rules.scam_gate_content(say(REGULAR, text, NOW))
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "dm me if you need help with that",
+        "how do I handle a signal in asyncio?",
+        "the signal handler runs on SIGINT",
+        "what is the profit margin of this function?",
+        "I invest a lot of time in learning rust",
+        "it costs $5k per year hm",
+        "@alice thanks, dm me the log",
+        "I earn this per day lol",
+        "use @property here, dm me if it breaks",
+        "decorate it with @staticmethod and message me the traceback",
+        "<@123456789> dm me the log",
+        "@pytest.fixture works on a profit-and-loss report",
+        "my script made $5 in test data",
+        "ping me on discord when it deploys",
+        "git@github.com:me/repo.git",
+    ],
+)
+def test_ordinary_programming_talk_is_not_a_lure(text):
+    assert not rules.scam_gate_content(say(REGULAR, text, NOW))

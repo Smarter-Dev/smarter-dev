@@ -36,6 +36,7 @@ from dataclasses import field
 from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import Protocol
 
 from smarter_dev.bot.moderation_coordinator import rules
@@ -48,6 +49,7 @@ from smarter_dev.bot.moderation_coordinator.classifier import choose_backend
 from smarter_dev.bot.moderation_coordinator.decide import decide
 from smarter_dev.bot.moderation_coordinator.decide import enforceable
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
+from smarter_dev.bot.moderation_coordinator.model import BAD_FAITH
 from smarter_dev.bot.moderation_coordinator.model import PROMOTIONAL_SPAM
 from smarter_dev.bot.moderation_coordinator.model import SCAM
 from smarter_dev.bot.moderation_coordinator.model import TIMEOUT
@@ -72,6 +74,7 @@ from smarter_dev.bot.spam_engine import NO_SPAM_ACTION
 from smarter_dev.bot.spam_engine import content_digest
 from smarter_dev.bot.spam_ring import AuthorFacts
 from smarter_dev.bot.spam_ring import TranscriptMessage
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.web.handler_recent_messages import content_hash
 
 logger = logging.getLogger(__name__)
@@ -581,15 +584,19 @@ class Coordinator:
                             [now, *(post.posted_at for post in promo_copies)]
                         ),
                     )
+                ladder = rules.ScamLadder.from_policy(policy.document)
                 promo_review = rules.promo_review(
                     facts,
                     key=key,
                     copies=promo_copies,
                     history=history,
                     now=now_dt,
-                    timeout_seconds=rules.ScamLadder.from_policy(
-                        policy.document
-                    ).high_signal_timeout_seconds,
+                    timeout_seconds=ladder.high_signal_timeout_seconds,
+                    # A policy that does not allow a ban keeps the timeout:
+                    # an unenforceable ban would take nothing in its place.
+                    ban_account_age=ladder.ban_account_age
+                    if policy.allows(mp.BAN)
+                    else timedelta(0),
                 )
             if promo_review is not None and claimed is not None:
                 # Asked with the scam check, in its one request: its copies
@@ -796,6 +803,14 @@ class Coordinator:
                     answer = {PROMOTIONAL_SPAM: LabelVerdict(PROMOTIONAL_SPAM, TIMEOUT)}
                 if PROMOTIONAL_SPAM in answer:
                     reused[PROMOTIONAL_SPAM] = answer[PROMOTIONAL_SPAM]
+        if (
+            PROMOTIONAL_SPAM in labels
+            and promo_review is not None
+            and promo_review.asks_intent
+        ):
+            # The ban needs an intent judgement (#478): same request, no
+            # extra call.
+            labels.add(BAD_FAITH)
         if ring_pending is not None:
             labels |= ring_pending.labels
         # A Haiku request also describes the message, in case it is deleted
@@ -881,6 +896,7 @@ class Coordinator:
                     label: verdicts[label]
                     for label in scam_review.labels
                     | ({PROMOTIONAL_SPAM} if PROMOTIONAL_SPAM in labels else set())
+                    | ({BAD_FAITH} if BAD_FAITH in labels else set())
                 },
             )
 
@@ -889,7 +905,11 @@ class Coordinator:
                 facts,
                 promo_key,
                 promo_asker,
-                {PROMOTIONAL_SPAM: verdicts[PROMOTIONAL_SPAM]},
+                {
+                    label: verdicts[label]
+                    for label in (PROMOTIONAL_SPAM, BAD_FAITH)
+                    if label in labels
+                },
             )
 
         # 6. Resolve and decide.
