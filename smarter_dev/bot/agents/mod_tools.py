@@ -2,6 +2,8 @@
 
 The agent acts as a stopgap while waiting for human moderators. It can:
 - Timeout users to freeze a situation
+- Ban a brand-new account posting a clear scam or bad-faith lure (age and
+  policy checked in code)
 - Purge harmful messages
 - Flag users for human mod review
 - Send a channel message explaining the situation
@@ -49,10 +51,14 @@ from smarter_dev.bot.plugins.rules import render_rule_citation
 from smarter_dev.bot.plugins.timeout import parse_duration
 from smarter_dev.bot.purge_core import select_purgeable_messages
 from smarter_dev.bot.staff_protection import staff_refusal
+from smarter_dev.bot.moderation_coordinator.rules import ScamLadder
+from smarter_dev.bot.triage_config import BAN_TOOL
 from smarter_dev.bot.triage_config import CITE_TOOL
 from smarter_dev.bot.triage_config import enabled_destructive_tools
+from smarter_dev.bot.triage_config import read_policy_document
 from smarter_dev.bot.triage_config import staff_exempt_role_ids
 from smarter_dev.bot.triage_config import tool_refusal
+from smarter_dev.shared import moderation_policy as mp
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.staff_protection import BOT_ITSELF
 from smarter_dev.shared.staff_protection import unknown
@@ -77,6 +83,10 @@ MAX_ACTIONS_PER_INVOCATION = 3
 _PING_REFUSAL = "Cannot act on the ping that summoned you."
 
 MAX_PURGE_COUNT = 50
+
+# The one guild whose triage may ban.
+BAN_GUILD_ID = "644299523686006834"
+MAX_BAN_REASON_CHARS = 400
 
 # Rule citations are not destructive, but each is a public post: a triage
 # cites at most this many messages.
@@ -103,6 +113,8 @@ DISCORD_EPOCH_MS = 1420070400000
 ConfigGate = Callable[[str, str], Awaitable[str | None]]
 # guild_id -> the guild's configured staff-exempt role ids.
 StaffRoles = Callable[[str], Awaitable[tuple[str, ...]]]
+# guild_id -> the guild's policy document (None: no policy). Raises when unreadable.
+PolicyReader = Callable[[str], Awaitable["mp.PolicyDocument | None"]]
 
 
 @dataclass
@@ -113,6 +125,7 @@ class ActionTracker:
     failed or was cancelled after it was sent: it may or may not have landed.
     """
     timeouts: list[dict] = field(default_factory=list)  # {user_id, username, duration, reason}
+    bans: list[dict] = field(default_factory=list)  # {user_id, username, reason}
     purges: list[dict] = field(default_factory=list)  # {user_id, username, count, reason}
     deletions: list[dict] = field(default_factory=list)  # {message_id, reason}
     flags: list[str] = field(default_factory=list)  # user_ids flagged for review
@@ -135,7 +148,7 @@ class ActionTracker:
 
     @property
     def has_actions(self) -> bool:
-        return bool(self.timeouts or self.purges or self.deletions or self.flags)
+        return bool(self.timeouts or self.bans or self.purges or self.deletions or self.flags)
 
 
 def snowflake_to_datetime(snowflake: str | int) -> datetime:
@@ -246,6 +259,7 @@ def create_moderation_tools(
     rules: Sequence[GuildRule] = (),
     context_messages: Sequence[DiscordMessage] = (),
     enforcing: bool = False,
+    policy_reader: PolicyReader | None = None,
 ) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
@@ -271,7 +285,11 @@ def create_moderation_tools(
             ``cite_rule`` may cite.
         enforcing: Triage is in enforce mode. ``cite_rule`` posts publicly, so
             it is offered only then (and re-checked at call time), whatever
-            ``enabled_tools`` says.
+            ``enabled_tools`` says. ``ban_user`` is offered only then too, and
+            only in the one guild that may ban; it is further bounded in code
+            by the policy's ban sanction and the scam ladder's account age.
+        policy_reader: The guild's policy document, read right before a ban.
+            Defaults to a fresh database read.
 
     Returns:
         Tuple of (tools list, ActionTracker)
@@ -279,6 +297,7 @@ def create_moderation_tools(
     enabled = set(enabled_destructive_tools(enabled_tools))
     gate = config_gate or tool_refusal
     read_staff_roles = staff_roles or staff_exempt_role_ids
+    read_policy = policy_reader or read_policy_document
     tracker = ActionTracker()
     action_count = 0
     ping = trigger or triage_trigger(
@@ -419,6 +438,126 @@ def create_moderation_tools(
             logger.info(f"Could not DM user {username} about timeout")
 
         return {"success": True, "result": f"{username} timed out for {duration}."}
+
+    async def ban_user(user_id: str, reason: str) -> dict:
+        """Ban a brand-new account (under a week old) whose post is a clear
+        scam or bad-faith lure: an off-platform money pitch ("earn $X", "pay
+        me a cut", "DM me on Telegram"), phishing, a fake job or impersonation.
+
+        NEVER use this for rudeness, off-topic posts, good-faith
+        self-promotion, a genuine job post, or a freelancer offering their
+        services. When unsure, do not ban: flag for human moderators. The tool
+        refuses accounts that are too old and bans the policy does not allow;
+        then delete, flag and timeout instead. The member is sent a DM first.
+
+        Args:
+            user_id: Discord user ID to ban
+            reason: Short reason naming the scam or lure (shown to moderators and the member)
+
+        Returns:
+            dict with 'success' boolean and details
+        """
+        if str(guild_id) != BAN_GUILD_ID:
+            return {"success": False, "error": "Banning is not available in this server."}
+        limit_msg = _check_action_limit()
+        if limit_msg:
+            return {"success": False, "error": limit_msg}
+        reason = " ".join((reason or "").split())[:MAX_BAN_REASON_CHARS]
+        if not reason:
+            return {"success": False, "error": "A short reason is required to ban."}
+        user_id = str(user_id).strip()
+        if not user_id.isdigit():
+            return {"success": False, "error": "Invalid user ID."}
+
+        refusal = await gate(guild_id, BAN_TOOL)
+        if refusal:
+            return {"success": False, "error": refusal}
+        try:
+            document = await read_policy(guild_id)
+        except Exception as e:  # noqa: BLE001 — unknown policy never bans
+            logger.warning(f"[ModTool] ban policy for guild {guild_id} unreadable: {type(e).__name__}")
+            return {"success": False, "error": "Moderation policy could not be read; not banned."}
+        if document is None or mp.BAN not in document.sanctions.allowed:
+            return {"success": False, "error": "The server's policy does not allow bans; not banned. Delete, flag and time out instead."}
+        ban_age = ScamLadder.from_policy(document).ban_account_age
+        age = datetime.now(timezone.utc) - snowflake_to_datetime(user_id)
+        if age >= ban_age:
+            return {
+                "success": False,
+                "error": (
+                    f"Account is {age.days} days old; bans are only for accounts under "
+                    f"{ban_age.days} days. Delete, flag and time out instead."
+                ),
+            }
+
+        try:
+            await bot.rest.fetch_ban(int(guild_id), int(user_id))
+            return {"success": True, "result": "Already banned; nothing to do."}
+        except hikari.NotFoundError:
+            pass
+        except Exception as e:  # noqa: BLE001 — the gateway checks again
+            logger.info(f"[ModTool] ban pre-check failed: {type(e).__name__}")
+
+        perm_msg = await _check_target_permissions(user_id)
+        if perm_msg:
+            return {"success": False, "error": perm_msg}
+
+        username = user_id
+        user = None
+        try:
+            member = await bot.rest.fetch_member(int(guild_id), int(user_id))
+            username = member.display_name or member.username
+            user = member.user
+        except Exception:  # noqa: BLE001 — left the server; still bannable
+            try:
+                user = await bot.rest.fetch_user(int(user_id))
+                username = user.username
+            except Exception:  # noqa: BLE001
+                user = None
+
+        refusal = await _clear_to_act("ban")
+        if refusal:
+            return {"success": False, "error": refusal}
+
+        # The DM goes first: Discord delivers nothing to a member who shares
+        # no server with the bot.
+        if user is not None:
+            try:
+                dm = await user.fetch_dm_channel()
+                await bot.rest.create_message(
+                    dm,
+                    "You have been banned from the server for posting a scam or "
+                    f"bad-faith offer.\n\n**Reason:** {reason}\n\n"
+                    "If you think this was a mistake, contact a moderator of the "
+                    "server to appeal.",
+                )
+            except Exception:  # noqa: BLE001
+                logger.info(f"Could not DM user {username} about ban")
+
+        entry = {"user_id": user_id, "username": username, "reason": reason}
+        try:
+            outcome = await _act(
+                Proposal(
+                    kind=gw.BAN,
+                    target_user_id=user_id,
+                    target_username=username,
+                    reason=reason,
+                    claim=f"triage:{trigger_message_id}",
+                )
+            )
+        except asyncio.CancelledError:
+            tracker.bans.append({**entry, "possibly_applied": True})
+            logger.warning(f"[ModTool] ban_user of user {user_id} possibly applied; triage cancelled")
+            raise
+        if outcome.state == gw.UNKNOWN:
+            tracker.bans.append({**entry, "possibly_applied": True})
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(outcome.detail)}
+        if outcome.state == gw.SKIPPED and "already banned" in (outcome.detail or ""):
+            return {"success": True, "result": f"{username} is already banned."}
+        if outcome.state != gw.CONFIRMED:
+            return {"success": False, "error": f"Not banned: {outcome.detail}."}
+        tracker.bans.append(entry)
+        return {"success": True, "result": f"{username} banned: {reason}"}
 
     async def purge_messages(user_id: str, count: int, reason: str) -> dict:
         """Delete recent messages from a user in this channel. Use this to
@@ -862,6 +1001,11 @@ def create_moderation_tools(
     # not destructive, so it does not depend on enabled_tools
     if rules and enforcing:
         functions.append(cite_rule)
+
+    # A ban is final, so only an enforcing triage in the one guild that may
+    # ban offers it; the policy and the account age are checked in the tool.
+    if enforcing and str(guild_id) == BAN_GUILD_ID:
+        functions.append(ban_user)
 
     # Always include utility tools
     functions.append(flag_users)

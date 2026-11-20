@@ -97,6 +97,8 @@ async def _enforce_channel_message(
     parts = []
     for t in tracker.timeouts:
         parts.append(f"Timed out {t['username']} for {t['duration']}: {t['reason']}")
+    for b in tracker.bans:
+        parts.append(f"Banned {b['username']}: {b['reason']}")
     for p in tracker.purges:
         parts.append(f"Purged {p['count']} messages from {p['username']}: {p['reason']}")
     for d in tracker.deletions:
