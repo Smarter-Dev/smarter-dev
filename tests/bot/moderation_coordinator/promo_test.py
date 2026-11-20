@@ -19,6 +19,7 @@ from datetime import timedelta
 
 from smarter_dev.bot.moderation_coordinator import act as act_module
 from smarter_dev.bot.moderation_coordinator import rules
+from smarter_dev.bot.moderation_coordinator.classifier import PROMO_POLICY
 from smarter_dev.bot.moderation_coordinator.classifier import ClassifierRequest
 from smarter_dev.bot.moderation_coordinator.classifier import jev_request
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
@@ -743,3 +744,23 @@ async def test_scam_yes_on_the_first_message_bans_once_and_never_asks_promo():
     assert h.port.count("timeout", JEFF.id) == 0
     assert {p.message_id for p in posts} <= h.deleted()
     assert "promotional spam" not in h.port.latest_report_text(REPORTS)
+
+
+async def test_haiku_is_given_the_promo_policy_when_it_rates_promo():
+    posts = [
+        say(JEFF, NEWCOMER_POST, NOW),
+        say(JEFF, NEWCOMER_POST, NOW + timedelta(seconds=20), channel=OTHER),
+    ]
+    h = harness(
+        _case(
+            JEFF, posts, FIRST, {PROMOTIONAL_SPAM: (True, 0.9), BAD_FAITH: (False, 0.9)}
+        )
+    )
+
+    await h.judge(*posts)
+
+    asked = [c for c in h.calls.haiku if '"promotional_spam"' in c]
+    assert asked and all(PROMO_POLICY in c for c in asked)
+    assert "a project someone asks for feedback on" in asked[0]
+    # Not asked about promo: no policy text.
+    assert all(PROMO_POLICY not in c for c in h.calls.haiku if c not in asked)

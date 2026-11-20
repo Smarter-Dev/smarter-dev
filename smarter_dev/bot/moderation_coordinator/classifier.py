@@ -684,7 +684,8 @@ async def load_images(
 def unseen_is_unknown(
     verdicts: dict[str, LabelVerdict], counts: ImageCounts
 ) -> dict[str, LabelVerdict]:
-    """A "no" on ``scam`` or ``abuse`` with an image unseen is unknown, not clean.
+    """A "no" on a Haiku label (``scam``, ``abuse``, ``bad_faith``) with an
+    image unseen is unknown, not clean.
 
     A "yes" stands: what was seen is enough to act on.
     """
@@ -836,6 +837,10 @@ def haiku_prompt(
         )
     if request.summarize:
         lines.append('- "summary": ' + _SUMMARY_TEXT)
+    if PROMOTIONAL_SPAM in request.labels:
+        # Haiku rates a new account's promo too (#478), so it gets the rules
+        # Jev gets: a shared project or a greeting is a no.
+        lines.append("\nThe promotional_spam question:\n\n" + PROMO_POLICY)
     # The MESSAGE is always the revision being judged; a follow-up's ring
     # questions are about the earlier AD, which gets its own block.
     material = ["MESSAGE:", _clip(request.content, MAX_MESSAGE_CHARS)]
