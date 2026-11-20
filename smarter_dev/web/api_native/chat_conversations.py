@@ -124,6 +124,8 @@ _MOVED_WIRE_IDS: dict[str, tuple[str, str]] = {
     # Kimi K3 and MiniMax M3 left OpenCode Zen for OpenRouter on 2026-11-03.
     "kimi-k3": ("opencode_zen", "kimi-k3"),
     "minimax-m3": ("opencode_zen", "minimax-m3"),
+    # Qwen3.5 397B moved from DigitalOcean inference to OpenRouter (#484).
+    "qwen3.5-397b-a17b": ("digitalocean", "qwen3-5-397b"),
 }
 
 

@@ -612,10 +612,11 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         output_mtok=Decimal("1.95"),
     ),
     # Qwen3.5 397B moved here from DigitalOcean inference (#484); OpenRouter's
-    # listed rate (2026-11-20). No cache tier published.
+    # listed rate (2026-11-20), including its published cache-read price.
     "qwen/qwen3.5-397b-a17b": types.ModelPrice(
         input_mtok=Decimal("0.45"),
         output_mtok=Decimal("3.00"),
+        cache_read_mtok=Decimal("0.22"),
     ),
     # GLM-5.2: fp8 pool. Sampling never reached sail-research's $0.50/$3.15 —
     # gmicloud and novita split every request at ~$0.742/$2.332, so that is what
