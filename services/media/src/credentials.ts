@@ -36,5 +36,14 @@ export function decodeValue(encoded: string): string {
   if (!/^[A-Za-z0-9_-]*$/.test(body)) {
     throw new Error("encoded credential is malformed");
   }
-  return xorKeystream(Buffer.from(body, "base64url")).toString("utf8");
+  // A base64 body can never be 1 mod 4 characters long (Python rejects it too).
+  if (body.length % 4 === 1) {
+    throw new Error("encoded credential is malformed");
+  }
+  const plain = xorKeystream(Buffer.from(body, "base64url"));
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(plain);
+  } catch {
+    throw new Error("encoded credential is malformed");
+  }
 }

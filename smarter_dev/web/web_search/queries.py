@@ -128,7 +128,9 @@ def model_for(name: str):
 
     host = os.getenv("LITE_LLM_PROXY_HOST", "").rstrip("/")
     if get_credential("openai") or not host:
-        return OpenAIResponsesModel(name)
+        return OpenAIResponsesModel(
+            name, provider=OpenAIProvider(api_key=get_credential("openai"))
+        )
     if not host.startswith("http"):
         host = f"https://{host}"
     return OpenAIResponsesModel(

@@ -10,13 +10,20 @@ settings types are TypedDicts, so they are identical at runtime).
 
 A name cannot carry what ``model_router.build_model_for`` puts on a direct
 Claude model, so :func:`agent_model_settings` carries the cache breakpoints,
-and the provider pydantic-ai builds for the name reads ``ANTHROPIC_API_KEY``
-only (not the ``CLAUDE_API_KEY`` fallback). The output tool is never forced:
+and a name makes pydantic-ai read the provider key from the environment
+itself, so every agent here also takes :func:`agent_capabilities`, which builds
+the model with an explicit provider key from ``get_credential`` instead
+(``agent_model_resolver``, imported only in the worker). The
+output tool is never forced:
 with thinking on, pydantic-ai asks a 5.5-generation Claude for native
 structured output instead.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterator
+from collections.abc import Sequence
+from typing import Any
 
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
@@ -40,6 +47,27 @@ def agent_model_name(model: CatalogModel) -> str:
     if prefix is None:
         raise ValueError(f"No model-name route for {model.provider!r}: {model.key}")
     return f"{prefix}:{model.model_id}"
+
+
+class _LazyCapabilities(Sequence):
+    """``capabilities=`` that imports pydantic-ai only when Skrift materializes
+    the agent in the worker; defining the agent on the web tier imports nothing."""
+
+    def __len__(self) -> int:
+        return 1
+
+    def __iter__(self) -> Iterator[Any]:
+        from smarter_dev.shared.agent_model_resolver import model_resolution_capability
+
+        yield model_resolution_capability()
+
+    def __getitem__(self, index: int) -> Any:  # type: ignore[override]
+        return list(self)[index]
+
+
+def agent_capabilities() -> Sequence:
+    """``capabilities=`` for every ``skrift.Agent`` that is given a model name."""
+    return _LazyCapabilities()
 
 
 def agent_model_settings(

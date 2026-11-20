@@ -37,8 +37,16 @@ describe("loadConfig", () => {
     expect(config.apiKey).toBe(VALID_KEY);
   });
 
-  it("rejects an HVTH7T without the v1. prefix", () => {
-    expect(() => loadConfig({ HVTH7T: VALID_KEY })).toThrow(/v1\./);
+  it.each([
+    ["no v1. prefix", VALID_KEY],
+    ["bad base64 length", "v1.abcde"],
+    ["= padding", "v1.abcd="],
+    ["invalid UTF-8", `v1.${Buffer.from([0xff, 0xfe, 0xfd]).toString("base64url")}`],
+  ])("falls back to MEDIA_API_KEY when HVTH7T is invalid (%s)", (_label, bad) => {
+    expect(loadConfig({ HVTH7T: bad, MEDIA_API_KEY: "legacy-key-0123456789" }).apiKey).toBe(
+      "legacy-key-0123456789",
+    );
+    expect(() => loadConfig({ HVTH7T: bad })).toThrow(/HVTH7T must be set/);
   });
 
   it("trims decoded and legacy values", () => {

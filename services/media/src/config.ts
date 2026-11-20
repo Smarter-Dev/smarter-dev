@@ -29,11 +29,15 @@ function readInteger(environment: NodeJS.ProcessEnv, name: string, fallback: num
 function readApiKey(environment: NodeJS.ProcessEnv): string {
   const encoded = (environment.HVTH7T ?? "").trim();
   if (encoded) {
-    const value = decodeValue(encoded).trim();
-    if (value) {
-      return value;
+    try {
+      const value = decodeValue(encoded).trim();
+      if (value) {
+        return value;
+      }
+      console.warn("credential: HVTH7T decodes to an empty value; using legacy names");
+    } catch {
+      console.error("credential: HVTH7T is not a valid v1 value; using legacy names");
     }
-    console.warn("credential: HVTH7T decodes to an empty value; using legacy names");
   }
   // --- PHASE 1 LEGACY FALLBACK: delete this block in phase 2 ---
   return (environment.MEDIA_API_KEY ?? "").trim();

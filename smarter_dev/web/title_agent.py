@@ -24,6 +24,7 @@ import skrift
 
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_capabilities
 from smarter_dev.shared.skrift_models import agent_model_name
 from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import UsageOwner
@@ -43,7 +44,7 @@ _SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "title_agent.md").read_tex
 _TITLE_MAX_LEN = 80
 
 
-# Model is a plain pydantic-ai model name ("anthropic:claude-haiku-5-5"), see
+# Model is a plain pydantic-ai model name (provider:model), see
 # shared.skrift_models. Passing a string (not a Model object) keeps this module
 # import free of pydantic-ai; Skrift materializes the real model lazily in the
 # worker that runs the agent. A title needs no deliberation, so effort runs
@@ -52,6 +53,7 @@ _title_model = catalog_model_for_id(TITLE_MODEL)
 title_agent = skrift.Agent(
     agent_model_name(_title_model),
     name=AGENT_NAME,
+    capabilities=agent_capabilities(),
     system_prompt=_SYSTEM_PROMPT,
     model_settings=agent_model_settings(
         _title_model, ReasoningLevel.LOW, cache_messages=False

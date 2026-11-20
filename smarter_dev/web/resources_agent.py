@@ -73,6 +73,7 @@ from skrift.notifications import notify_user
 
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_capabilities
 from smarter_dev.shared.skrift_models import agent_model_name
 from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
@@ -373,6 +374,7 @@ def _build_deps(ctx: ResumeContext) -> RunDeps:
 reframer_agent = skrift.Agent(
     _model_name(REFRAMER_MODEL),
     name=REFRAMER_AGENT_NAME,
+    capabilities=agent_capabilities(),
     system_prompt=_REFRAMER_PROMPT,
     output_type=ReframerOutput,
     model_settings=_reframer_model_settings(),
@@ -383,6 +385,7 @@ reframer_agent = skrift.Agent(
 researcher_agent = skrift.Agent(
     _model_name(RESEARCHER_MODEL),
     name=RESEARCHER_AGENT_NAME,
+    capabilities=agent_capabilities(),
     system_prompt=_RESEARCHER_PROMPT,
     output_type=ResearchOutput,
     model_settings=_researcher_model_settings(),
@@ -393,6 +396,7 @@ researcher_agent = skrift.Agent(
 gap_filler_agent = skrift.Agent(
     _model_name(GAP_FILLER_MODEL),
     name=GAP_FILLER_AGENT_NAME,
+    capabilities=agent_capabilities(),
     system_prompt=_GAP_FILLER_PROMPT,
     output_type=GapFillerOutput,
     model_settings=_gap_filler_model_settings(),
@@ -403,6 +407,7 @@ gap_filler_agent = skrift.Agent(
 author_agent = skrift.Agent(
     _model_name(AUTHOR_MODEL),
     name=AUTHOR_AGENT_NAME,
+    capabilities=agent_capabilities(),
     system_prompt=_SYSTEM_PROMPT,
     model_settings=_author_model_settings(),
     deps_type=RunDeps,

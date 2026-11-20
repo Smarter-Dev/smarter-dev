@@ -192,3 +192,103 @@ def test_legacy_env_names_only_read_through_the_registry() -> None:
                 line = text.count("\n", 0, match.start()) + 1
                 offenders.append(f"{path.relative_to(REPO)}:{line} {match.group(1)}")
     assert not offenders, "read credentials via get_credential():\n" + "\n".join(offenders)
+
+
+def _non_test_sources():
+    for root in ("smarter_dev", "scripts"):
+        for path in (REPO / root).rglob("*.py"):
+            rel = path.relative_to(REPO).as_posix()
+            if rel == "smarter_dev/shared/credentials.py":
+                continue
+            yield rel, path.read_text(encoding="utf-8")
+
+
+def test_no_bare_provider_model_strings_in_non_test_code() -> None:
+    """A ``"provider:model"`` string makes pydantic-ai build the provider and
+    read the SDK's env var itself. Only skrift_models names agents that way
+    (it resolves them with an explicit key)."""
+    bare = re.compile(
+        r"""["'](anthropic|openai|openai-responses|openai-chat|google-gla|google-vertex"""
+        r"""|openrouter|gemini|groq|mistral)\:[A-Za-z0-9][A-Za-z0-9._/-]*["']"""
+    )
+    exempt = {"smarter_dev/shared/skrift_models.py"}
+    offenders = [
+        f"{rel}:{text.count(chr(10), 0, m.start()) + 1} {m.group(0)}"
+        for rel, text in _non_test_sources()
+        if rel not in exempt
+        for m in bare.finditer(text)
+        # llm_pricing documents the name shape in a docstring.
+        if rel != "smarter_dev/web/llm_pricing.py"
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
+def test_no_provider_built_without_an_api_key() -> None:
+    bare = re.compile(
+        r"\b(Anthropic|OpenAI|Google|OpenRouter|Groq|Mistral)Provider\(\s*\)"
+    )
+    offenders = [
+        f"{rel}:{text.count(chr(10), 0, m.start()) + 1}"
+        for rel, text in _non_test_sources()
+        for m in bare.finditer(text)
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
+def test_unkeyed_infer_model_and_model_name_constructors_are_gone() -> None:
+    """``infer_model(<str>)`` and ``OpenAIResponsesModel(name)`` with no
+    provider read the SDK env; every remaining call site is on this list."""
+    allowed_infer = {"smarter_dev/shared/usage_meter.py"}
+    offenders: list[str] = []
+    for rel, text in _non_test_sources():
+        if "infer_model(" in text and rel not in allowed_infer:
+            offenders.append(f"{rel}: infer_model(")
+        for m in re.finditer(
+            r"\b(OpenAIResponsesModel|OpenAIChatModel|AnthropicModel|GoogleModel)\(([^()]*(?:\([^()]*\)[^()]*)*)\)",
+            text,
+        ):
+            if "provider" not in m.group(2):
+                offenders.append(
+                    f"{rel}:{text.count(chr(10), 0, m.start()) + 1} {m.group(1)}"
+                )
+    assert not offenders, "\n".join(offenders)
+
+
+def test_skrift_agent_names_resolve_with_explicit_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from smarter_dev.shared.agent_model_resolver import resolve_model_name
+    from smarter_dev.shared.skrift_models import agent_capabilities
+
+    for env in (
+        "ANTHROPIC_API_KEY", "CLAUDE_API_KEY", "OPENAI_API_KEY",
+        "GEMINI_API_KEY", "GOOGLE_API_KEY",
+    ):
+        monkeypatch.delenv(env, raising=False)
+    monkeypatch.setenv("KMSVP8", encode_value("sk-ant-test-key"))
+    monkeypatch.setenv("IRBCKR", encode_value("sk-openai-test-key"))
+    monkeypatch.setenv("IN8OID", encode_value("gem-test-key"))
+
+    anthropic = resolve_model_name("anthropic:claude-haiku-5-5")
+    assert anthropic.client.api_key == "sk-ant-test-key"
+    openai = resolve_model_name("openai-responses:gpt-6")
+    assert openai.client.api_key == "sk-openai-test-key"
+    google = resolve_model_name("google-gla:gemini-3.1-flash-lite-preview")
+    assert google.client._api_client.api_key == "gem-test-key"
+    with pytest.raises(ValueError):
+        resolve_model_name("mystery:model")
+
+    # Skrift passes this to the pydantic-ai Agent in the worker.
+    (capability,) = list(agent_capabilities())
+    assert capability.has_resolve_model_id
+
+
+def test_usage_meter_wraps_a_model_name_with_the_explicit_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from smarter_dev.shared.usage_meter import UsageMeter
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("KMSVP8", encode_value("sk-ant-test-key"))
+    wrapped = UsageMeter().wrap("anthropic:claude-haiku-5-5")
+    assert wrapped.wrapped.client.api_key == "sk-ant-test-key"
