@@ -99,6 +99,8 @@ async def _enforce_channel_message(
         parts.append(f"Timed out {t['username']} for {t['duration']}: {t['reason']}")
     for b in tracker.bans:
         parts.append(f"Banned {b['username']}: {b['reason']}")
+    for b in tracker.ban_failures:
+        parts.append(f"Tried to ban {b['username']} but it failed: {b['detail']}")
     for p in tracker.purges:
         parts.append(f"Purged {p['count']} messages from {p['username']}: {p['reason']}")
     for d in tracker.deletions:
@@ -146,6 +148,12 @@ async def load_triage_rules(guild_id: str) -> tuple[GuildRule, ...]:
 
 
 REPLY_SNIPPET_CHARS = 80
+
+
+def _one_line(text: str | None) -> str:
+    """Member-written text on one line, as the context lines are: line breaks
+    would let it fake a ``## section`` of the prompt."""
+    return " ".join((text or "").split())
 
 
 def _age(now: datetime, then: datetime) -> str:
@@ -252,11 +260,12 @@ async def run_moderation_agent(
                 render_inputs(
                     current_time=now.strftime("%Y-%m-%d %H:%M UTC"),
                     conversation_context=context_text,
-                    trigger_message=trigger_message_content,
-                    trigger_author=trigger_author,
-                    trigger_author_display_name=trigger_author_display_name
-                    or trigger_author,
-                    trigger_author_id=trigger_author_id or "unknown",
+                    trigger_message=_one_line(trigger_message_content),
+                    trigger_author=_one_line(trigger_author),
+                    trigger_author_display_name=_one_line(
+                        trigger_author_display_name or trigger_author
+                    ),
+                    trigger_author_id=_one_line(trigger_author_id or "unknown"),
                     guild_instructions=guild_instructions
                     or "Use your best judgment to moderate fairly.",
                     server_rules=format_rules_for_prompt(list(guild_rules))
