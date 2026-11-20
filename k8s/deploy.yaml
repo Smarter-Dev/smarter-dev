@@ -156,11 +156,6 @@ spec:
                         name: smarter-dev-secrets
                         key: kmsvp8
                         optional: false
-                  - name: OPENCODE_ZEN_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: opencode-zen-api-key
                   - name: RESEND_API_KEY
                     valueFrom:
                       secretKeyRef:

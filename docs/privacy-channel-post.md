@@ -43,7 +43,7 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and our 
 
 ## Who else processes your data
 
-- AI providers (Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen, DigitalOcean and TypeSafe) receive the content sent to AI features, including authors' Discord IDs.
+- AI providers (Google, OpenAI, Anthropic, OpenRouter and TypeSafe) receive the content sent to AI features, including authors' Discord IDs.
 - Brave receives web searches and Jina receives the addresses of pages read for you.
 - DigitalOcean hosts our servers, database and files. Polar processes payments. Resend sends email. Pydantic Logfire receives error reports, traces and security events.
 - Discord stores everything posted there.

@@ -21,15 +21,10 @@ from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.shared.model_catalog import successor_key
 
-# Open-weights families. These no longer map to a single provider: the same
-# family can be served by Digital Ocean and OpenCode Zen at once (Kimi K2.6 on
-# DO, Kimi K3 on Zen; Qwen3.5 on DO, Qwen3.6 Plus on Zen), so routing is
-# asserted per model rather than per family.
+# Open-weights families. Every open-weight catalog model is served via
+# OpenRouter.
 _OPEN_WEIGHTS_FAMILIES = {"Kimi", "GLM", "DeepSeek", "Gemma", "Qwen", "MiniMax"}
-_OPEN_WEIGHTS_PROVIDERS = {
-    ModelProvider.DIGITALOCEAN,
-    ModelProvider.OPENCODE_ZEN,
-}
+_OPEN_WEIGHTS_PROVIDERS = {ModelProvider.OPENROUTER}
 
 
 def test_catalog_entries_are_well_formed():
@@ -454,11 +449,16 @@ def test_qwen3_8_routes_through_openrouter_not_digital_ocean():
     assert model.default_reasoning is ReasoningLevel.MEDIUM
 
 
-def test_nothing_is_served_from_opencode_zen():
-    # Kimi K3 and MiniMax M3 were the last Zen models; they left on 2026-11-03
-    # when the Zen key expired. The provider stays in the enum and router for
-    # historical usage rows, but no catalog entry may route there.
-    assert not [m for m in MODEL_CATALOG if m.provider is ModelProvider.OPENCODE_ZEN]
+def test_digitalocean_and_zen_providers_are_gone():
+    assert {p.name for p in ModelProvider} == {
+        "GOOGLE", "OPENAI", "ANTHROPIC", "OPENROUTER",
+    }
+
+
+def test_qwen3_5_397b_serves_from_openrouter():
+    model = get_model("qwen3-5-397b")
+    assert model.provider is ModelProvider.OPENROUTER
+    assert model.model_id == "qwen/qwen3.5-397b-a17b"
 
 
 def test_kimi_and_minimax_route_to_their_authors_on_openrouter():

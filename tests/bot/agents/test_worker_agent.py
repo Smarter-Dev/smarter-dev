@@ -27,7 +27,6 @@ def _provider_keys(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
-    monkeypatch.setenv("DIGITALOCEAN_INFERENCE_API_KEY", "test-do-key")
 
 
 def _reset_caches():

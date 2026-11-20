@@ -18,11 +18,8 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 
-# Qwen3.5 397B is the ONLY model Digital Ocean still serves — Gemma, GLM and
-# DeepSeek moved to author-precision OpenRouter endpoints on 2026-08-13 — so it
-# stands in for both the plain-routing and the reasoning-knob cases here.
-_DO_MODEL = get_model("qwen3-5-397b")
-_DO_REASONING_MODEL = get_model("qwen3-5-397b")
+# Qwen3.5 397B (OpenRouter) stands in for the open-weight reasoning-knob case.
+_OPEN_REASONING_MODEL = get_model("qwen3-5-397b")
 _GOOGLE_MODEL = get_model("gemini-3-8-flash")
 _OPENAI_MODEL = get_model("gpt-6-1-sol")
 # A forced-tool-choice Claude entry, so the Anthropic branch's flag handling is
@@ -52,62 +49,17 @@ _ANTHROPIC_NO_REASONING_MODEL = CatalogModel(
     model_id="claude-haiku-4-5",
     supports_vision=True,
 )
-# No catalog model routes through Zen since 2026-11-03; the branch stays for
-# historical rows, so it is exercised with a synthetic entry.
-_OPENCODE_ZEN_MODEL = CatalogModel(
-    key="zen-test",
-    label="Zen test",
+# An open-weight entry that declares no effort contract, so it sends no
+# reasoning settings at all.
+_NO_REASONING_MODEL = CatalogModel(
+    key="no-reasoning-test",
+    label="No reasoning test",
     family="Kimi",
-    provider=ModelProvider.OPENCODE_ZEN,
-    model_id="kimi-k3",
+    provider=ModelProvider.OPENROUTER,
+    model_id="moonshotai/kimi-k3",
 )
 _OPENROUTER_MODEL = get_model("qwen3-8-2-4t")
 _OPENROUTER_REASONING_MODEL = get_model("grok-4-7")
-
-
-def test_digitalocean_threads_base_url_and_key(monkeypatch):
-    monkeypatch.setenv("DIGITALOCEAN_INFERENCE_API_KEY", "do-secret")
-    base_url = model_router.get_settings().digitalocean_inference_base_url
-    with (
-        patch.object(model_router, "OpenAIChatModel") as chat_model,
-        patch.object(model_router, "OpenAIProvider") as provider,
-    ):
-        build_model_for(_DO_MODEL)
-
-    provider.assert_called_once_with(base_url=base_url, api_key="do-secret")
-    chat_model.assert_called_once()
-    args, kwargs = chat_model.call_args
-    assert args == (_DO_MODEL.model_id,)
-    assert kwargs["provider"] is provider.return_value
-    # DO's endpoint quirks: forced tool choice 500s/stalls on several hosted
-    # models, and Qwen requires system messages only at position 0.
-    profile = kwargs["profile"]
-    assert profile["openai_supports_tool_choice_required"] is False
-    assert profile["openai_chat_supports_multiple_system_messages"] is False
-
-
-def test_digitalocean_missing_key_falls_back_to_empty(monkeypatch):
-    monkeypatch.delenv("DIGITALOCEAN_INFERENCE_API_KEY", raising=False)
-    with (
-        patch.object(model_router, "OpenAIChatModel"),
-        patch.object(model_router, "OpenAIProvider") as provider,
-    ):
-        build_model_for(_DO_MODEL)
-    _, kwargs = provider.call_args
-    assert kwargs["api_key"] == ""
-
-
-def test_digitalocean_uses_configured_base_url():
-    custom = "https://inference.example.test/v1"
-    fake_settings = MagicMock(digitalocean_inference_base_url=custom)
-    with (
-        patch.object(model_router, "get_settings", return_value=fake_settings),
-        patch.object(model_router, "OpenAIChatModel"),
-        patch.object(model_router, "OpenAIProvider") as provider,
-    ):
-        build_model_for(_DO_MODEL)
-    _, kwargs = provider.call_args
-    assert kwargs["base_url"] == custom
 
 
 def test_gemini_4_argon_never_sends_minimal_thinking():
@@ -228,19 +180,6 @@ def test_claude_ids_outside_the_catalog_route_direct(monkeypatch):
     assert model.model_name == "claude-opus-5-5"
     assert model.profile["supports_forced_tool_choice"] is False
     assert model.settings == model_router.ANTHROPIC_CACHE_SETTINGS
-
-
-def test_opencode_zen_threads_base_url_and_key(monkeypatch):
-    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "zen-secret")
-    base_url = model_router.get_settings().opencode_zen_base_url
-    with (
-        patch.object(model_router, "OpenAIChatModel") as chat_model,
-        patch.object(model_router, "OpenAIProvider") as provider,
-    ):
-        build_model_for(_OPENCODE_ZEN_MODEL)
-
-    provider.assert_called_once_with(base_url=base_url, api_key="zen-secret")
-    assert chat_model.call_args.args[0] == _OPENCODE_ZEN_MODEL.model_id
 
 
 def test_openrouter_model_reads_standard_key(monkeypatch):
@@ -576,7 +515,7 @@ def test_model_settings_per_provider_uses_model_default():
     openai_settings = model_settings_for(_OPENAI_MODEL)
     assert openai_settings["openai_reasoning_effort"] == "medium"
     # Open reasoning model routes reasoning through the chat-model settings.
-    do_settings = model_settings_for(_DO_REASONING_MODEL)
+    do_settings = model_settings_for(_OPEN_REASONING_MODEL)
     assert do_settings["openai_reasoning_effort"] == "medium"
     # Claude Sonnet 5 defaults to high effort with adaptive thinking.
     anthropic_settings = model_settings_for(_ANTHROPIC_MODEL)
@@ -584,8 +523,8 @@ def test_model_settings_per_provider_uses_model_default():
     assert anthropic_settings["anthropic_effort"] == "high"
     # Claude Haiku 4.5 has no effort knob -> no settings at all.
     assert model_settings_for(_ANTHROPIC_NO_REASONING_MODEL) is None
-    # Kimi K3 declares no effort contract on Zen -> no settings at all.
-    assert model_settings_for(_OPENCODE_ZEN_MODEL) is None
+    # Kimi K3 declares no effort contract -> no settings at all.
+    assert model_settings_for(_NO_REASONING_MODEL) is None
 
 
 def test_model_settings_applies_selected_reasoning_level():
@@ -593,7 +532,7 @@ def test_model_settings_applies_selected_reasoning_level():
     assert openai_settings["openai_reasoning_effort"] == "high"
     google_settings = model_settings_for(_GOOGLE_MODEL, ReasoningLevel.LOW)
     assert google_settings["google_thinking_config"] == {"thinking_level": "LOW"}
-    do_settings = model_settings_for(_DO_REASONING_MODEL, ReasoningLevel.HIGH)
+    do_settings = model_settings_for(_OPEN_REASONING_MODEL, ReasoningLevel.HIGH)
     assert do_settings["openai_reasoning_effort"] == "high"
     anthropic_settings = model_settings_for(_ANTHROPIC_MODEL, ReasoningLevel.MAX)
     assert anthropic_settings["anthropic_effort"] == "max"
@@ -604,4 +543,4 @@ def test_model_settings_clamps_unsupported_reasoning_level():
     google_settings = model_settings_for(_GOOGLE_MODEL, ReasoningLevel.MAX)
     assert google_settings["google_thinking_config"] == {"thinking_level": "HIGH"}
     # A model with no reasoning knob ignores any requested level.
-    assert model_settings_for(_OPENCODE_ZEN_MODEL, ReasoningLevel.HIGH) is None
+    assert model_settings_for(_NO_REASONING_MODEL, ReasoningLevel.HIGH) is None

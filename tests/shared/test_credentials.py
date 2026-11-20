@@ -141,12 +141,9 @@ def test_registry_names_are_unique_and_opaque() -> None:
     assert all(re.fullmatch(r"[A-Z0-9]{6}", o) for o in opaque)
 
 
-def test_digitalocean_and_zen_are_legacy_only(monkeypatch: pytest.MonkeyPatch) -> None:
-    assert REGISTRY["digitalocean_inference"][0] is None
-    assert REGISTRY["opencode_zen"][0] is None
-    _clear(monkeypatch, "opencode_zen")
-    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "zen")
-    assert get_credential("opencode_zen") == "zen"
+def test_digitalocean_and_zen_are_not_registered() -> None:
+    assert "digitalocean_inference" not in REGISTRY
+    assert "opencode_zen" not in REGISTRY
 
 
 def test_cli_encode_and_decode_check() -> None:

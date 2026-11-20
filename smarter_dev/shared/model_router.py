@@ -8,15 +8,9 @@ Routing by :class:`~smarter_dev.shared.model_catalog.ModelProvider`:
   ``get_credential("anthropic")``), with 1-hour prompt caching on
   the tool definitions, the system prompt and the newest message.
 - ``OPENROUTER``   -> ``OpenAIChatModel`` + ``OpenRouterProvider``.
-- ``DIGITALOCEAN`` -> ``OpenAIChatModel`` pointed at DO's OpenAI-compatible
-  serverless-inference Chat Completions endpoint. DO exposes
-  ``/v1/chat/completions`` (not OpenAI's Responses API), so the chat model —
-  not the responses model — is used, with a ``base_url`` override.
 
 API keys are read from the environment (matching the existing convention in
-``chat_agent.py``), not from the settings class. The DO
-base URL *is* configurable via ``Settings.digitalocean_inference_base_url`` so
-the endpoint can be overridden without a code change.
+``chat_agent.py``), not from the settings class.
 """
 
 from __future__ import annotations
@@ -129,49 +123,6 @@ def build_model_for(model: CatalogModel) -> Model:
                 ),
             )
         return OpenAIChatModel(model.model_id, provider=provider)
-    if model.provider is ModelProvider.OPENCODE_ZEN:
-        settings = get_settings()
-        # Zen routes by model family: Claude ids go to /messages, GPT to
-        # /responses, Gemini to /models/{id}, and everything else — every model
-        # we route here (Kimi, MiniMax, Qwen, GLM, DeepSeek, Laguna) — to the
-        # OpenAI-compatible /chat/completions, which is exactly what
-        # OpenAIChatModel speaks. Routing a Claude/GPT/Gemini id through this
-        # branch would hit the wrong endpoint; keep those on their native
-        # providers, where we already hold first-party keys.
-        return OpenAIChatModel(
-            model.model_id,
-            provider=OpenAIProvider(
-                base_url=settings.opencode_zen_base_url,
-                api_key=get_credential("opencode_zen") or "",
-            ),
-            # Same open-weights caveats the DO branch documents below: these are
-            # the same underlying models (Kimi/GLM/Qwen), so assume the same
-            # tool_choice and system-message limits rather than discovering them
-            # in production.
-            profile=OpenAIModelProfile(
-                openai_supports_tool_choice_required=False,
-                openai_chat_supports_multiple_system_messages=False,
-            ),
-        )
-    if model.provider is ModelProvider.DIGITALOCEAN:
-        settings = get_settings()
-        return OpenAIChatModel(
-            model.model_id,
-            provider=OpenAIProvider(
-                base_url=settings.digitalocean_inference_base_url,
-                api_key=get_credential("digitalocean_inference") or "",
-            ),
-            # DO's endpoint is only mostly OpenAI-compatible: several hosted
-            # models (Kimi, GLM) return HTTP 500 for tool_choice="required"
-            # and Qwen stalls on it, so never force tool choice; Qwen also
-            # rejects system messages anywhere but position 0, so pydantic_ai
-            # must merge them (PromptedOutput otherwise appends its schema
-            # instructions as a second system message).
-            profile=OpenAIModelProfile(
-                openai_supports_tool_choice_required=False,
-                openai_chat_supports_multiple_system_messages=False,
-            ),
-        )
     raise ValueError(f"Unhandled provider: {model.provider!r}")
 
 

@@ -26,8 +26,6 @@ def _provider_keys(monkeypatch):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-google-key")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
-    monkeypatch.setenv("DIGITALOCEAN_INFERENCE_API_KEY", "test-do-key")
-    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-zen-key")
 
 
 def _reset_cache():
@@ -175,9 +173,9 @@ def test_distinct_model_ids_yield_distinct_writer_agents():
     assert gpt is not gemini
 
 
-def test_digitalocean_writer_agent_uses_prompted_output_and_no_tools():
+def test_open_weight_writer_agent_uses_prompted_output_and_no_tools():
     _reset_cache()
-    agent = get_writer_agent("z-ai/glm-5.2")
+    agent = get_writer_agent("qwen/qwen3.5-397b-a17b")
     assert isinstance(agent.output_type, PromptedOutput)
     assert list(agent._function_toolset.tools.keys()) == []
 

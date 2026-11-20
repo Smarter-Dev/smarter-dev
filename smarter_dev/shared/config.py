@@ -140,25 +140,6 @@ class Settings(BaseSettings):
         "alone. Empty string disables the second judge.",
     )
 
-    # Digital Ocean serverless inference (OpenAI-compatible). Hosts the
-    # Kimi/GLM/DeepSeek/Gemma/Qwen catalog models. The secret is read from the
-    # digitalocean_inference credential in model_router (matching the other
-    # LLM keys), not from this class; only the endpoint is configured here.
-    digitalocean_inference_base_url: str = Field(
-        default="https://inference.do-ai.run/v1",
-        description="Base URL for Digital Ocean's OpenAI-compatible serverless "
-        "inference endpoint",
-    )
-
-    # OpenCode Zen (OpenAI-compatible /chat/completions). Hosts the
-    # Kimi K3/MiniMax/Qwen3.6/GLM/DeepSeek/Laguna catalog models. Like the DO
-    # endpoint above, only the URL is configured here — the secret is read from
-    # the opencode_zen credential in model_router.
-    opencode_zen_base_url: str = Field(
-        default="https://opencode.ai/zen/v1",
-        description="Base URL for OpenCode Zen's OpenAI-compatible endpoint",
-    )
-
     # API
     api_secret_key: str = Field(
         default="dev-secret-key-change-in-production",
