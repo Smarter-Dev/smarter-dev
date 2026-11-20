@@ -764,3 +764,28 @@ async def test_haiku_is_given_the_promo_policy_when_it_rates_promo():
     assert "a project someone asks for feedback on" in asked[0]
     # Not asked about promo: no policy text.
     assert all(PROMO_POLICY not in c for c in h.calls.haiku if c not in asked)
+
+
+def test_the_haiku_prompt_counts_the_summary_question_not_the_policy_line():
+    from smarter_dev.bot.moderation_coordinator import classifier
+
+    def request(summarize: bool) -> ClassifierRequest:
+        return ClassifierRequest(
+            guild_id="1",
+            channel_id="2",
+            author_id="3",
+            labels=frozenset({PROMOTIONAL_SPAM, BAD_FAITH, SCAM, ABUSE}),
+            content="x" * 500,
+            ring_context=tuple(f"line {i:04d} " + "y" * 8 for i in range(3000)),
+            promo_context=("a line",),
+            summarize=summarize,
+        )
+
+    plain = classifier.haiku_prompt(request(False))
+    summed = classifier.haiku_prompt(request(True))
+    summary_line = '- "summary": ' + classifier._SUMMARY_TEXT
+    # The summary question's bytes come out of the context's share, so asking
+    # for one neither lengthens nor shortens the prompt (to a context line).
+    assert abs(len(summed.encode()) - len(plain.encode())) <= 24  # one line
+    assert summary_line in summed and classifier.PROMO_POLICY in summed
+    assert summed.index(summary_line) < summed.index(classifier.PROMO_POLICY)

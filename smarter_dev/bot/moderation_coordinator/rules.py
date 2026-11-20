@@ -322,17 +322,24 @@ _MONEY_FIGURE = r"\$\s?\d[\d.]*\s?k\b|\$\s?\d{1,3}(?:,\d{3})+|\$\s?\d{4,}"
 #: Asking for the DM.
 _DM_ME = r"\b(?:dm|pm|message|text|inbox|contact)\s+me\b"
 #: Off-platform contact: a contact verb with "me on telegram/whatsapp/signal",
-#: the app followed by a handle or number ("on telegram @x", "telegram: @x"),
-#: or a ``t.me/``/``wa.me/`` link. The app named alone is a library question
-#: ("python-telegram-bot"), and "signal" alone is code (SIGTERM, "signal the
-#: thread", "connect to signal post_save").
+#: "on telegram @x", a ``t.me/``/``wa.me/`` link, or the app followed by a
+#: handle or full phone number ("telegram: @x", "Telegram \U0001f449 @x"). The app
+#: named alone is a library question ("python-telegram-bot"), and "signal"
+#: alone is code (SIGTERM, "signal the thread"). Handles @BotFather and
+#: @mention(s) are not contacts. Bot-dev talk is not skipped: a false match
+#: only costs a staff check, and any skip list is a bypass for scammers.
+_HANDLE_OK = r"@(?!(?:botfather|mentions?)\b)[A-Za-z]\w{3,}"
 _OFF_PLATFORM = (
     r"\b(?:dm|pm|message|text|contact|add|reach|ping|hit|write)\s+(?:(?:out\s+)?to\s+)?"
     r"(?:me|him|her|us)\s+(?:up\s+)?(?:on|via|at)\s+(?:telegram|whatsapp|signal)\b"
     r"|\bsend\s+(?:me|us)\s+a\s+(?:message|dm)\s+(?:on|via)\s+(?:telegram|whatsapp|signal)\b"
-    r"|\b(?:on|via)\s+(?:telegram|whatsapp|signal)\s+@\w{4,}"
-    r"|\b(?:telegram|whatsapp|tg)\b[^\w\n]{0,4}(?:is\s+)?(?:@[A-Za-z]\w{3,}|\+\d)"
-    r"|\bt\.me/|\bwa\.me/"
+    r"|\b(?:on|via)\s+(?:telegram|whatsapp|signal)\s+"
+    + _HANDLE_OK
+    + r"|\bt\.me/|\bwa\.me/"
+    r"|\b(?:telegram|whatsapp|tg)\b"
+    r"(?:(?:[ \t]*(?:[:\-\u2013\u2014\u279c\u2192(|=,.\U0001f449]|>>))+[ \t]*['\"]?|[ \t]+)"
+    r"(?:is\s+)?"
+    r"(?:" + _HANDLE_OK + r"|\+\d[\d\s()-]{6,}\d)"
 )
 #: A payout pitch: "earn $500", "pay me 10%", "20% of the profit", guaranteed
 #: or daily profits, "invest with us ... returns". Each needs a dollar sign
@@ -352,6 +359,8 @@ _PAYOUT = (
 _LURE_MONEY = re.compile(_MONEY_FIGURE, re.IGNORECASE)
 _LURE_DM_ME = re.compile(_DM_ME, re.IGNORECASE)
 _LURE_OFF_PLATFORM = re.compile(_OFF_PLATFORM, re.IGNORECASE)
+
+
 _LURE_PAYOUT = re.compile(_PAYOUT, re.IGNORECASE)
 #: A username-shaped handle: not a Discord mention (``<@123>``), a decorator
 #: (``@property``, or any ``@name`` opening a line) or an email.

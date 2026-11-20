@@ -310,6 +310,10 @@ class _Line:
     tag: str = _TAG_DONE
 
 
+def _snowflake(value: str) -> tuple[int, str]:
+    return (int(value), value) if value.isdigit() else (0, value)
+
+
 @dataclass(slots=True)
 class _Deleted:
     """One post's deleted messages and their one description."""
@@ -323,7 +327,11 @@ class _Deleted:
         text = sanitize(self.text, DELETED_LIMIT) if self.text else SUMMARY_UNAVAILABLE
         count = len(self.message_ids)
         if count > 1:
-            where = ", ".join(f"<#{channel}>" for channel in self.channel_ids)
+            # Which copy was removed first is a race: list the channels in
+            # one fixed order so the same incident always reads the same.
+            where = ", ".join(
+                f"<#{channel}>" for channel in sorted(self.channel_ids, key=_snowflake)
+            )
             text += f" (\u00d7{count}" + (f" in {where}" if where else "") + ")"
         return text
 
