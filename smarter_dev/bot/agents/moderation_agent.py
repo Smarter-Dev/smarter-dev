@@ -179,9 +179,9 @@ def format_context_messages(
         stamp = msg.timestamp.strftime("%Y-%m-%d %H:%M UTC")
         if now is not None:
             stamp += f", {_age(now, msg.timestamp)}"
-        prefix = f"[{stamp}] {msg.author}"
+        prefix = f"[{stamp}] {_one_line(msg.author)}"
         if msg.author_roles:
-            prefix += f" ({', '.join(msg.author_roles)})"
+            prefix += f" ({', '.join(_one_line(r) for r in msg.author_roles)})"
         if msg.author_id:
             prefix += f" [id:{msg.author_id}]"
         if msg.message_id:
@@ -190,7 +190,7 @@ def format_context_messages(
             snippet = " ".join((msg.replied_to_content or "").split())
             if len(snippet) > REPLY_SNIPPET_CHARS:
                 snippet = snippet[:REPLY_SNIPPET_CHARS] + "..."
-            lines.append(f"  (reply to {msg.replied_to_author}: {snippet})")
+            lines.append(f"  (reply to {_one_line(msg.replied_to_author)}: {snippet})")
         content = " ".join(msg.content.split())
         lines.append(f"{prefix}: {content}")
     return "\n".join(lines)

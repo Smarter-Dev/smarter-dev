@@ -85,7 +85,7 @@ def _tools(
         guild_id=guild_id,
         channel_id=CHANNEL_ID,
         trigger_message_id=PING_ID,
-        enabled_tools=["timeout", "delete"],
+        enabled_tools=["timeout", "delete", "purge"],
         config_gate=gate,
         staff_roles=_staff_roles,
         enforcing=enforcing,
@@ -143,7 +143,8 @@ async def test_jeff_style_post_from_an_18_hour_account_is_banned(announced):
     assert entry["user_id"] == str(user_id)
     assert entry["link"].endswith(f"/{CHANNEL_ID}/{POST_ID}")
     notes = mod_tools.triage_notes(tracker, "scam")
-    assert any(entry["link"] in text and "money pitch" in text for _, text in notes)
+    assert any(entry["link"] in text for _, text in notes)
+    assert not any("Banned" in text for _, text in notes)  # the gateway line says it
     # The member is told first, quoting the post, with the server and reason.
     [(_, dm_text, *_)] = discord.sent
     assert "banned" in dm_text and "off-platform money pitch" in dm_text
@@ -388,7 +389,7 @@ async def test_the_policy_can_turn_member_dms_off(announced):
     assert discord.sent == [] and user_id in discord.bans
 
 
-async def test_a_dm_the_coordinator_already_claimed_is_not_sent_twice(announced):
+async def test_a_ban_dm_the_incident_already_claimed_is_not_sent_again(announced):
     discord = FakeDiscord()
     user_id, _ = _post(discord, timedelta(hours=18))
     ping = mod_tools.triage_trigger(
@@ -450,3 +451,47 @@ def test_a_ping_cannot_fake_a_prompt_section():
     )
     sections = [row for row in rendered.splitlines() if row.startswith("## ")]
     assert sections == ["## trigger_message", "## guild_instructions"]
+
+
+async def test_delete_then_ban_still_bans_the_author(announced):
+    discord = FakeDiscord()
+    user_id, _ = _post(discord, timedelta(hours=18))
+    ban_user, tracker, tools = _ban_tool(discord, user_id)
+
+    deleted = await tools["delete_message"](str(POST_ID), "scam")
+    assert deleted["success"] is True, deleted
+    assert discord.messages == []  # the fake really removed it
+
+    result = await ban_user(str(POST_ID), "money pitch")
+
+    assert result["success"] is True, result
+    assert user_id in discord.bans and len(tracker.bans) == 1
+
+
+async def test_purge_then_ban_still_bans_the_author(announced):
+    discord = FakeDiscord()
+    # Purge skips posts older than Discord's 14-day bulk-delete limit.
+    post_id = _snowflake(timedelta(minutes=5))
+    user_id, _ = _post(discord, timedelta(hours=18), message_id=post_id)
+    tools, tracker = _tools(discord, posts=((post_id, user_id),))
+
+    purged = await tools["purge_messages"](str(user_id), 5, "scam")
+    assert purged["success"] is True and "Deleted 1" in purged["result"], purged
+    assert discord.messages == []
+
+    result = await tools["ban_user"](str(post_id), "money pitch")
+
+    assert result["success"] is True, result
+    assert user_id in discord.bans
+
+
+async def test_a_message_never_seen_this_run_and_gone_is_refused(announced):
+    discord = FakeDiscord()
+    user_id, _ = _post(discord, timedelta(hours=18))
+    discord.messages = []  # deleted by someone else before this run read it
+    ban_user, tracker, _ = _ban_tool(discord, user_id)
+
+    result = await ban_user(str(POST_ID), "money pitch")
+
+    assert result["success"] is False and "not found" in result["error"]
+    assert discord.bans == {} or user_id not in discord.bans

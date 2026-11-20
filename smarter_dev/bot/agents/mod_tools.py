@@ -216,7 +216,8 @@ def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str
 
     The assessment is the model's words (kept 5 hours); the rest is the
     system's own account of the run. Effects are not repeated here: the
-    gateway's operations already list them, confirmed or not.
+    gateway's operations already list them, confirmed or not. A ban adds
+    only the link to the post that prompted it.
     """
     notes: list[tuple[str, str]] = [
         (gw.ENTRY_ASSESSMENT, f"AI assessment (unverified): {assessment}")
@@ -225,10 +226,8 @@ def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str
         flagged = ", ".join(f"<@{uid}>" for uid in dict.fromkeys(tracker.flags))
         notes.append((gw.ENTRY_NOTE, f"Flagged for review: {flagged}"))
     for ban in tracker.bans:
-        where = f" (post: {ban['link']})" if ban.get("link") else ""
-        notes.append(
-            (gw.ENTRY_NOTE, f"Banned <@{ban['user_id']}>{where}: {ban['reason']}")
-        )
+        if ban.get("link"):
+            notes.append((gw.ENTRY_NOTE, f"Ban triggered by post: {ban['link']}"))
     for ban in tracker.ban_failures:
         told = (
             "The member was sent the ban DM"
@@ -330,6 +329,9 @@ def create_moderation_tools(
     tracker = ActionTracker()
     action_count = 0
     ban_taken = False
+    # Messages this run has read from Discord, by id: once one is deleted the
+    # author can no longer be fetched, but a ban must still find them.
+    seen_messages: dict[str, object] = {}
     ping = trigger or triage_trigger(
         guild_id=guild_id, channel_id=channel_id, trigger_message_id=trigger_message_id
     )
@@ -477,8 +479,8 @@ def create_moderation_tools(
 
         Name the post, not the person: message IDs are shown in the
         conversation context as [msg:ID]. It cannot be the ping that
-        summoned you, a bot's or a webhook's post. Delete the post
-        separately (delete_message): the ban does not remove messages.
+        summoned you, a bot's or a webhook's post. Ban first, then delete
+        the post (delete_message): the ban does not remove messages.
 
         NEVER use this for rudeness, off-topic posts, good-faith
         self-promotion, a genuine job post, or a freelancer offering their
@@ -531,7 +533,11 @@ def create_moderation_tools(
         try:
             message = await bot.rest.fetch_message(int(channel_id), int(message_id))
         except hikari.NotFoundError:
-            return {"success": False, "error": f"Message {message_id} not found."}
+            # Deleted since (perhaps by this run): only a message this run
+            # has itself read keeps its author on record.
+            message = seen_messages.get(message_id)
+            if message is None:
+                return {"success": False, "error": f"Message {message_id} not found."}
         except Exception as e:  # noqa: BLE001
             logger.error(f"[ModTool] ban_user message lookup failed: {type(e).__name__}")
             return {"success": False, "error": f"Could not read the message: {type(e).__name__}."}
@@ -614,8 +620,10 @@ def create_moderation_tools(
         user_id: str, username: str, message, reason: str, member_dms: bool
     ) -> bool:
         """The member's DM, sent through the incident's claim/record helpers
-        as the coordinator does (a coordinator ban at the same moment sends
-        no second one). The policy's ``destinations.member_dms`` is
+        as the coordinator does. The coordinator's incident is keyed on the
+        scam message and this one on the ping, so the claim does not stop a
+        simultaneous coordinator ban sending a second DM; the earlier
+        ``fetch_ban`` check closes most of that window. The policy's ``destinations.member_dms`` is
         respected. Never raises; True when it was delivered."""
         if not member_dms:
             return False
@@ -750,6 +758,7 @@ def create_moderation_tools(
         async for message in messages:
             if trigger_message_id and str(message.id) == str(trigger_message_id):
                 continue
+            seen_messages[str(message.id)] = message
             yield message
 
     async def delete_message(message_id: str, reason: str) -> dict:
@@ -778,6 +787,7 @@ def create_moderation_tools(
         except Exception as e:
             logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
+        seen_messages[str(message_id).strip()] = message
         # A webhook's message has no member behind it to protect: scam posts
         # through a leaked webhook are deleted like a member's. The bot's own
         # (an interaction response carries a webhook id) is still refused.

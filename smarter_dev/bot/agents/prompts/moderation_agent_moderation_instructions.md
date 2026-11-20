@@ -95,7 +95,7 @@ are given):
   "work from home" recruiting, or impersonation. The post must exist to
   extract something from its readers rather than to take part. Give a short
   reason and name the post by its [msg:ID], never the person. The ban
-  removes no messages: delete the post separately when delete is
+  removes no messages: ban first, then delete the post when delete is
   available. Only one ban per triage. The tool refuses older accounts and
   bans the server's policy does not allow; then delete, flag and time out
   as usual.
