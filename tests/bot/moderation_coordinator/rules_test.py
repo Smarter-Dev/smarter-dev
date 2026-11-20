@@ -531,6 +531,15 @@ def test_an_action_after_the_message_is_no_earlier_action():
         "Telegram \u279c @jeffmarcus33",
         "Telegram(@jeffmarcus33)",
         "Telegram: '@Jeffmarcus33'",
+        "MEV bot, Telegram @mevmaster",
+        "USDT bot, telegram @abcd",
+        "Telegram @CryptoKing bot",
+        "Telegram \U0001f449 @abcd",
+        "Telegram | @abcd",
+        "Telegram >> @abcd",
+        "Telegram = @abcd",
+        "telegram, @abcd",
+        "telegram. @abcd",
     ],
 )
 def test_lures_open_the_scam_gate(text):
@@ -551,15 +560,14 @@ def test_lures_open_the_scam_gate(text):
         "decorate it with @staticmethod, the bug bounty is $5,000",
         "<@123456789> dm me the log",
         "<@123> $150k",
-        "hey <@!alice1> $150k",
         "<@alice1> $150k",
         "@alice thanks, I paid $5k for it",
         "@pytest.fixture works on a profit-and-loss report, $5k",
         "ask Telegram @BotFather for a token",
-        "telegram @username mentions don't trigger my bot",
         "how do I make the whatsapp @mention work",
+        "go to telegram, @BotFather",
+        "my whatsapp +1 doesn't work",
         "my whatsapp +1 test number is not receiving webhooks",
-        "tg @channel_name posting via bot api",
         "send_message('telegram', '@durov')",
         "how do I get $1 to expand inside single quotes",
         "in JS replace() how do I get $1",
@@ -583,3 +591,19 @@ def test_lures_open_the_scam_gate(text):
 )
 def test_ordinary_programming_talk_is_not_a_lure(text):
     assert not rules.scam_gate_content(say(REGULAR, text, NOW))
+
+
+def test_the_lure_check_stays_fast_on_a_long_message():
+    """A scammer can pad a message to the length limit: the gate must not
+    slow down with the text (no per-match rescans)."""
+    import time
+
+    text = "telegram @abcd bot " * 210  # ~4000 chars
+    message = say(REGULAR, text, NOW)
+    best = min(
+        (lambda t0: (rules.scam_gate_content(message), time.perf_counter() - t0)[1])(
+            time.perf_counter()
+        )
+        for _ in range(5)
+    )
+    assert best < 0.01

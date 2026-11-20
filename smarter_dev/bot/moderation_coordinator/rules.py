@@ -321,26 +321,24 @@ _RISKY_WORDS = re.compile(
 _MONEY_FIGURE = r"\$\s?\d[\d.]*\s?k\b|\$\s?\d{1,3}(?:,\d{3})+|\$\s?\d{4,}"
 #: Asking for the DM.
 _DM_ME = r"\b(?:dm|pm|message|text|inbox|contact)\s+me\b"
-#: Off-platform contact. Two shapes:
-#:  - a contact verb with "me on telegram/whatsapp/signal", "on telegram @x",
-#:    or a ``t.me/``/``wa.me/`` link. Always a lure, whatever else the line says.
-#:  - the app followed by a handle or number ("telegram: @x", "Telegram ➜ @x").
-#:    Bot-dev talk uses this shape ("ask Telegram @BotFather"), so it can be
-#:    skipped (see ``_contact_lure``).
-#: The app named alone is a library question ("python-telegram-bot"), and
-#: "signal" alone is code (SIGTERM, "signal the thread").
+#: Off-platform contact: a contact verb with "me on telegram/whatsapp/signal",
+#: "on telegram @x", a ``t.me/``/``wa.me/`` link, or the app followed by a
+#: handle or full phone number ("telegram: @x", "Telegram \U0001f449 @x"). The app
+#: named alone is a library question ("python-telegram-bot"), and "signal"
+#: alone is code (SIGTERM, "signal the thread"). Handles @BotFather and
+#: @mention(s) are not contacts. Bot-dev talk is not skipped: a false match
+#: only costs a staff check, and any skip list is a bypass for scammers.
 _HANDLE_OK = r"@(?!(?:botfather|mentions?)\b)[A-Za-z]\w{3,}"
-_OFF_PLATFORM_CONTACT = (
+_OFF_PLATFORM = (
     r"\b(?:dm|pm|message|text|contact|add|reach|ping|hit|write)\s+(?:(?:out\s+)?to\s+)?"
     r"(?:me|him|her|us)\s+(?:up\s+)?(?:on|via|at)\s+(?:telegram|whatsapp|signal)\b"
     r"|\bsend\s+(?:me|us)\s+a\s+(?:message|dm)\s+(?:on|via)\s+(?:telegram|whatsapp|signal)\b"
     r"|\b(?:on|via)\s+(?:telegram|whatsapp|signal)\s+"
     + _HANDLE_OK
     + r"|\bt\.me/|\bwa\.me/"
-)
-_OFF_PLATFORM_APP = (
-    r"\b(?:telegram|whatsapp|tg)\b"
-    r"(?:[ \t]*[:\-\u2013\u2014\u279c\u2192(][ \t]*['\"]?|[ \t]+)(?:is\s+)?"
+    r"|\b(?:telegram|whatsapp|tg)\b"
+    r"(?:(?:[ \t]*(?:[:\-\u2013\u2014\u279c\u2192(|=,.\U0001f449]|>>))+[ \t]*['\"]?|[ \t]+)"
+    r"(?:is\s+)?"
     r"(?:" + _HANDLE_OK + r"|\+\d[\d\s()-]{6,}\d)"
 )
 #: A payout pitch: "earn $500", "pay me 10%", "20% of the profit", guaranteed
@@ -360,37 +358,7 @@ _PAYOUT = (
 )
 _LURE_MONEY = re.compile(_MONEY_FIGURE, re.IGNORECASE)
 _LURE_DM_ME = re.compile(_DM_ME, re.IGNORECASE)
-_LURE_CONTACT = re.compile(_OFF_PLATFORM_CONTACT, re.IGNORECASE)
-_LURE_APP = re.compile(_OFF_PLATFORM_APP, re.IGNORECASE)
-#: Explicit bot-development terms. Deliberately narrow: "api", "mention",
-#: "handler", "ci" and "...bot" names are all things a scammer can say or be.
-_BOT_DEV = re.compile(
-    r"\b(?:bots?|botfather|chatbots?|webhooks?|aiogram|telebot|pyrogram"
-    r"|python-telegram-bot)\b",
-    re.IGNORECASE,
-)
-#: Any money or payout signal on the line keeps the lure alive.
-_MONEY_SIGNAL = re.compile(
-    r"[$%\u20ac\u00a3]|\b(?:profits?|returns?|earn\w*|income|trading|trade[sd]?|forex"
-    r"|crypto|signals|invest\w*|paid|pay|money|passive|payout|salary|usd|btc)\b",
-    re.IGNORECASE,
-)
-
-
-def _contact_lure(content: str) -> bool:
-    if _LURE_CONTACT.search(content):
-        return True
-    for match in _LURE_APP.finditer(content):
-        start = content.rfind("\n", 0, match.start()) + 1
-        end = content.find("\n", match.end())
-        end = len(content) if end == -1 else end
-        # Judge the line without the matched handle itself, so a scammer's
-        # own "@cryptobot" neither turns the check off nor on.
-        line = content[start : match.start()] + " " + content[match.end() : end]
-        if _BOT_DEV.search(line) and not _MONEY_SIGNAL.search(line):
-            continue
-        return True
-    return False
+_LURE_OFF_PLATFORM = re.compile(_OFF_PLATFORM, re.IGNORECASE)
 
 
 _LURE_PAYOUT = re.compile(_PAYOUT, re.IGNORECASE)
@@ -425,7 +393,7 @@ def scam_lure(content: str) -> bool:
     an off-platform contact phrase or a payout pitch alone, or a dollar
     figure beside a DM request or a handle. "dm me" alone is a help offer,
     and a dollar figure alone is a price."""
-    if _contact_lure(content) or _LURE_PAYOUT.search(content):
+    if _LURE_OFF_PLATFORM.search(content) or _LURE_PAYOUT.search(content):
         return True
     return bool(
         _LURE_MONEY.search(content)
