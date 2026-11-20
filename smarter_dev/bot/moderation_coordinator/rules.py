@@ -37,6 +37,7 @@ from datetime import timedelta
 
 from smarter_dev.bot.attachment_filter import classify_attachments
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
+from smarter_dev.bot.moderation_coordinator.model import BAD_FAITH
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_BLOCKED
 from smarter_dev.bot.moderation_coordinator.model import NOTICE_ATTACHMENT_WARNED
@@ -309,6 +310,60 @@ _RISKY_WORDS = re.compile(
     r"|fag(?:got)?|nigg(?:er|a)|kike|spic|chink|tranny)\b",
     re.IGNORECASE,
 )
+#: Get-rich-quick lures that need no link (#478: "I'll help the first 10
+#: people earn $50k... pay me 10%... DM me on TELEGRAM @x" passed no gate).
+#: The model still judges each message; this only decides what is shown to
+#: it, so each part is a phrase or a combination, not a common word on a
+#: programming server ("profit", "invest", "signal", "dm me" alone are not
+#: lures).
+#:
+#: A large dollar figure: ``$50k``, ``$5,000``, ``$ 2000 a day``.
+_MONEY_FIGURE = (
+    r"\$\s?\d[\d.]*\s?k\b|\$\s?\d{1,3}(?:,\d{3})+|\$\s?\d{4,}"
+)
+#: Off-platform contact: Telegram or WhatsApp (a handle, a link, or the app
+#: named at all: "telegram" outside a bot library question is rare enough),
+#: and Signal only when named as the place to write ("on signal", "signal
+#: me"), never the word alone (signals, SIGINT, "signal handler").
+_OFF_PLATFORM = (
+    r"\b(?:telegram|whatsapp)\b|\bt\.me/|\bwa\.me/"
+    r"|\b(?:on|via|to|add me on|text me on|reach me on) signal\b"
+    r"(?!\s+(?:handler|processing|handling|library|module|name|\d))"
+    r"|\bsignal me\b"
+)
+#: Asking for the DM, and a payout: "dm me", "pay me 10%", "earn ... per
+#: day/week", a guaranteed or daily profit, an investment return.
+_DM_ME = r"\b(?:dm|pm|message|text|inbox|contact|whisper)\s+me\b"
+_PAYOUT = (
+    r"\b(?:earn|make|receive|get)\s+(?:up to\s+)?(?:\$|\d[\d,.]*\s?k\b)"
+    r"|\bearn(?:ing)?\b[^.\n]{0,25}[$\d][^.\n]{0,25}\bper\s+(?:day|week|month|hour)\b"
+    r"|\bpay\s+me\s+\d+\s?%"
+    r"|\b\d+\s?%\s+(?:of\s+(?:the\s+|your\s+)?)?(?:profits?|earnings|commission)\b"
+    r"|\b(?:guaranteed|daily|weekly|massive|huge)\s+(?:profits?|returns?)\b"
+    r"|\b(?:profits?|returns?)\s+(?:guaranteed|daily|weekly)\b"
+    r"|\binvest(?:ing|ment)?\b[^.\n]{0,40}\b(?:returns?|profits?|double|triple)\b"
+)
+_LURE_MONEY = re.compile(_MONEY_FIGURE, re.IGNORECASE)
+_LURE_OFF_PLATFORM = re.compile(_OFF_PLATFORM, re.IGNORECASE)
+_LURE_DM_ME = re.compile(_DM_ME, re.IGNORECASE)
+_LURE_PAYOUT = re.compile(_PAYOUT, re.IGNORECASE)
+_HANDLE = re.compile(r"(?<![\w@.])@\w{4,}")
+
+
+def scam_lure(content: str) -> bool:
+    """A get-rich-quick or off-platform-contact lure (see the block above).
+
+    Telegram/WhatsApp/"on Signal" alone, a payout phrase alone, or a money
+    figure beside a DM request or a handle. "dm me" alone is a help offer,
+    and a dollar figure alone is a price.
+    """
+    if _LURE_OFF_PLATFORM.search(content) or _LURE_PAYOUT.search(content):
+        return True
+    return bool(
+        _LURE_MONEY.search(content)
+        and (_LURE_DM_ME.search(content) or _HANDLE.search(content))
+    )
+
 
 HIGH_SIGNAL_SCAM_LINK = "scam link"
 HIGH_SIGNAL_NITRO_SCAM = "mass mention with nitro bait"
@@ -449,10 +504,12 @@ DEFAULT_LADDER = ScamLadder()
 
 
 def scam_gate_content(facts: MessageFacts) -> bool:
-    """scam-banner's first gate: a link, a risky word, or any attachment."""
+    """scam-banner's first gate: a link, a risky word, a get-rich or
+    off-platform-contact lure (:func:`scam_lure`), or any attachment."""
     return bool(
         _SCAM_GATE_LINK.search(facts.content)
         or _RISKY_WORDS.search(facts.content)
+        or scam_lure(facts.content)
         or facts.attachments
     )
 
@@ -883,8 +940,23 @@ class PromoReview:
     evidence: tuple[str, ...]
     timeout_seconds: int = HIGH_SIGNAL_TIMEOUT_SECONDS
     copy: bool = False
+    #: The author's account age, and the age under which a confirmed scam is
+    #: banned (the scam ladder's, so one setting governs both paths).
+    account_age: timedelta = timedelta.max
+    ban_account_age: timedelta = BAN_ACCOUNT_AGE
 
     labels: frozenset[str] = frozenset({PROMOTIONAL_SPAM})
+
+    @property
+    def asks_intent(self) -> bool:
+        """Only an account under the ban age is asked about bad faith."""
+        return not self.copy and self.account_age < self.ban_account_age
+
+    def bans(self, verdicts: Verdicts) -> bool:
+        """A ban needs a confident promotional-spam yes, an account under the
+        ban age and a confident bad-faith yes. Good faith, unsure or unknown
+        intent keeps the timeout (#478)."""
+        return self.asks_intent and verdicts[BAD_FAITH].yes
 
     def resolve(
         self, verdicts: Verdicts, *, rater: str = "Jev"
@@ -900,9 +972,13 @@ class PromoReview:
                 f"{PROMO_LINE} on {who}: warned, {_promo_rating(verdict, rater)}; "
                 f"not timed out. {evidence}."
             ]
+        bans = self.bans(verdicts)
+        outcome = "banned" if bans else "timed out"
+        intent = _intent_rating(verdicts[BAD_FAITH]) if self.asks_intent else ""
         line = (
-            f"{PROMO_LINE} on {who}: {_promo_rating(verdict, rater)}; "
-            f"timed out and every copy removed. {evidence}."
+            f"{PROMO_LINE} on {who}: {_promo_rating(verdict, rater)}"
+            f"{'; ' + intent if intent else ''}; "
+            f"{outcome} and every copy removed. {evidence}."
         )
         cleanup = (Cleanup(facts.channel_id, facts.message_id),) + tuple(
             Cleanup(post.channel_id, post.message_id) for post in self.copies
@@ -911,26 +987,46 @@ class PromoReview:
         reason = (
             f"{_promo_rating(verdict, rater)}, the same post in {channels} channels"
         )
+        if self.asks_intent:
+            reason += f", {_intent_rating(verdicts[BAD_FAITH])}"
+        if bans:
+            reason += (
+                ", account under a week old"
+                if self.ban_account_age == BAN_ACCOUNT_AGE
+                else f", account under {self.ban_account_age.days} days old"
+            )
+            sanction = Sanction(gw.BAN)
+        else:
+            sanction = Sanction(
+                gw.TIMEOUT,
+                duration_seconds=self.timeout_seconds,
+                claim=promo_claim(self.key),
+            )
         if self.copy:
             reason += ", copy of a post already judged"
+            sanction = None
         return [
             RuleHit(
                 rule=SCAM_GATE,
                 reason=reason,
                 target_user_id=facts.author_id,
                 target_name=facts.author_name,
-                sanction=None
-                if self.copy
-                else Sanction(
-                    gw.TIMEOUT,
-                    duration_seconds=self.timeout_seconds,
-                    claim=promo_claim(self.key),
-                ),
+                sanction=sanction,
                 cleanup=cleanup,
                 notice=NOTICE_COPY if self.copy else None,
                 model_justified=True,
             )
         ], [] if self.copy else [line]
+
+
+def _intent_rating(verdict: LabelVerdict) -> str:
+    """The intent verdict as a moderator reads it: "bad faith 95%",
+    "good faith 90%", "intent unsure"."""
+    if verdict.yes:
+        return f"bad faith {percent(verdict.confidence or 0)}"
+    if verdict.no:
+        return f"good faith {percent(verdict.confidence or 0)}"
+    return f"intent unclear ({verdict.describe()})"
 
 
 def _promo_rating(verdict: LabelVerdict, rater: str) -> str:
@@ -961,6 +1057,7 @@ def promo_review(
     known_copy: bool = False,
     timeout_seconds: int = HIGH_SIGNAL_TIMEOUT_SECONDS,
     min_length: int = PROMO_MIN_LENGTH,
+    ban_account_age: timedelta = BAN_ACCOUNT_AGE,
 ) -> PromoReview | None:
     """Whether a newer member's post asks for the promotional-spam rating.
 
@@ -1025,6 +1122,8 @@ def promo_review(
         evidence=evidence,
         timeout_seconds=timeout_seconds,
         copy=known_copy,
+        account_age=now - facts.account_created_at,
+        ban_account_age=ban_account_age,
     )
 
 

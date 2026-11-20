@@ -27,6 +27,11 @@ EVENT_PROMOTION = "event_promotion"
 #: (#407). Jev answers it when it is the only label; with ``scam``/``abuse``
 #: or an image in the request, Haiku answers it with the rest.
 PROMOTIONAL_SPAM = "promotional_spam"
+#: Asked with ``promotional_spam`` when the author's account is new enough to
+#: be banned (#478): the post exists to extract something from its readers
+#: (off-platform lure, money pitch, recruitment, impersonation) rather than
+#: being a newcomer's good-faith, if unwelcome, self-promotion.
+BAD_FAITH = "bad_faith"
 PARTICIPANT_PREFIX = "participant:"
 
 #: Labels only Claude Haiku answers. Jev serves the ring's validated yes/no

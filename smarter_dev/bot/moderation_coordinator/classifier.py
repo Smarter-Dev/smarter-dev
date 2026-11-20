@@ -65,6 +65,7 @@ from pydantic_ai.usage import UsageLimits
 
 from smarter_dev.bot.moderation_coordinator.model import ABUSE
 from smarter_dev.bot.moderation_coordinator.model import ANSWERED
+from smarter_dev.bot.moderation_coordinator.model import BAD_FAITH
 from smarter_dev.bot.moderation_coordinator.model import BUDGET
 from smarter_dev.bot.moderation_coordinator.model import ERROR
 from smarter_dev.bot.moderation_coordinator.model import EVENT_PROMOTION
@@ -729,6 +730,17 @@ _QUESTION_TEXT[PROMOTIONAL_SPAM] = (
     "request posted in two channels is not spam, however new the author."
 )
 
+_QUESTION_TEXT[BAD_FAITH] = (
+    "Is the MESSAGE posted in bad faith: does it exist to extract something "
+    "from its readers rather than to take part? Bad faith means luring people "
+    'off the platform (Telegram, WhatsApp, "DM me"), money, profit or '
+    '"earn $X" pitches, recruitment, impersonation, phishing, or fake jobs '
+    "or services. Weigh both readings: it could be a good-faith newcomer "
+    "sharing their own project, server or a misplaced cross-post (answer no), "
+    "or a post built to get something out of readers (answer yes). When the "
+    "intent is unclear, say so with a low confidence."
+)
+
 _PARTICIPANT_TEXT = (
     Path(__file__).parent / "prompts" / "classifier_participant_text.md"
 ).read_text(encoding="utf-8")
@@ -1012,6 +1024,7 @@ PROMO_POLICY = (
 ).read_text(encoding="utf-8")
 
 PROMO_FIELD = PROMOTIONAL_SPAM
+BAD_FAITH_FIELD = BAD_FAITH
 
 
 def _promo_block(request: ClassifierRequest) -> str:
@@ -1027,17 +1040,26 @@ def _with_promo(
 ) -> tuple[type[BaseModel], str, str, dict[str, str]]:
     """The ring's request with the promotional-spam question added."""
     model, material, instructions, fields = shape
+    extra = {PROMO_FIELD: (bool, Field(description=_QUESTION_TEXT[PROMOTIONAL_SPAM]))}
+    labelled = {**fields, PROMO_FIELD: PROMOTIONAL_SPAM}
+    if BAD_FAITH in request.labels:
+        extra[BAD_FAITH_FIELD] = (
+            bool,
+            Field(description=_QUESTION_TEXT[BAD_FAITH]),
+        )
+        labelled[BAD_FAITH_FIELD] = BAD_FAITH
     return (
-        create_model(
-            "PromoVerdicts",
-            __base__=model,
-            **{
-                PROMO_FIELD: (bool, Field(description=_QUESTION_TEXT[PROMOTIONAL_SPAM]))
-            },
-        ),
+        create_model("PromoVerdicts", __base__=model, **extra),
         material + "\n\n" + _promo_block(request),
-        instructions + "\n\nThe promotional_spam question:\n\n" + PROMO_POLICY,
-        {**fields, PROMO_FIELD: PROMOTIONAL_SPAM},
+        instructions
+        + "\n\nThe promotional_spam question:\n\n"
+        + PROMO_POLICY
+        + (
+            "\n\nThe bad_faith question:\n\n" + _QUESTION_TEXT[BAD_FAITH]
+            if BAD_FAITH in request.labels
+            else ""
+        ),
+        labelled,
     )
 
 
@@ -1052,23 +1074,30 @@ def jev_request(
     with the promotional-spam question when it is asked (#407)."""
     if PROMOTIONAL_SPAM not in request.labels:
         return _ring_jev_request(request)
-    if not request.labels - {PROMOTIONAL_SPAM}:
+    if not request.labels - {PROMOTIONAL_SPAM, BAD_FAITH}:
+        asks_intent = BAD_FAITH in request.labels
+        fields: dict = {
+            PROMO_FIELD: (bool, Field(description=_QUESTION_TEXT[PROMOTIONAL_SPAM]))
+        }
+        names = {PROMO_FIELD: PROMOTIONAL_SPAM}
+        if asks_intent:
+            fields[BAD_FAITH_FIELD] = (
+                bool,
+                Field(description=_QUESTION_TEXT[BAD_FAITH]),
+            )
+            names[BAD_FAITH_FIELD] = BAD_FAITH
         return (
-            create_model(
-                "PromoVerdict",
-                __base__=_PromoVerdictBase,
-                **{
-                    PROMO_FIELD: (
-                        bool,
-                        Field(description=_QUESTION_TEXT[PROMOTIONAL_SPAM]),
-                    )
-                },
-            ),
+            create_model("PromoVerdict", __base__=_PromoVerdictBase, **fields),
             "MESSAGE:\n"
             + _clip(request.content, MAX_MESSAGE_CHARS)
             + ("\n\n" + _promo_block(request) if request.promo_context else ""),
-            PROMO_POLICY,
-            {PROMO_FIELD: PROMOTIONAL_SPAM},
+            PROMO_POLICY
+            + (
+                "\n\nThe bad_faith question:\n\n" + _QUESTION_TEXT[BAD_FAITH]
+                if asks_intent
+                else ""
+            ),
+            names,
         )
     return _with_promo(_ring_jev_request(request), request)
 
