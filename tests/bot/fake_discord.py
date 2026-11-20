@@ -237,12 +237,19 @@ class _FakeRest:
     async def delete_message(self, channel_id, message_id, **kwargs):
         self._discord.destructive.append(("delete_message", int(message_id)))
         self._maybe_fail("delete_message")
+        self._remove_messages([message_id])
 
     async def delete_messages(self, channel_id, message_ids, **kwargs):
         self._discord.destructive.append(
             ("delete_messages", [int(m) for m in message_ids])
         )
         self._maybe_fail("delete_messages")
+        self._remove_messages(message_ids)
+
+    def _remove_messages(self, message_ids) -> None:
+        """A delete that worked: the message is gone, so a fetch 404s."""
+        gone = {int(m) for m in message_ids}
+        self._discord.messages = [m for m in self._discord.messages if int(m.id) not in gone]
 
     async def create_message(self, channel, content=hikari.UNDEFINED, **kwargs):
         self._maybe_fail("create_message")

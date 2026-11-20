@@ -97,6 +97,10 @@ async def _enforce_channel_message(
     parts = []
     for t in tracker.timeouts:
         parts.append(f"Timed out {t['username']} for {t['duration']}: {t['reason']}")
+    for b in tracker.bans:
+        parts.append(f"Banned {b['username']}: {b['reason']}")
+    for b in tracker.ban_failures:
+        parts.append(f"Tried to ban {b['username']} but it failed: {b['detail']}")
     for p in tracker.purges:
         parts.append(f"Purged {p['count']} messages from {p['username']}: {p['reason']}")
     for d in tracker.deletions:
@@ -146,6 +150,12 @@ async def load_triage_rules(guild_id: str) -> tuple[GuildRule, ...]:
 REPLY_SNIPPET_CHARS = 80
 
 
+def _one_line(text: str | None) -> str:
+    """Member-written text on one line, as the context lines are: line breaks
+    would let it fake a ``## section`` of the prompt."""
+    return " ".join((text or "").split())
+
+
 def _age(now: datetime, then: datetime) -> str:
     seconds = max(int((now - then).total_seconds()), 0)
     if seconds < 3600:
@@ -169,9 +179,9 @@ def format_context_messages(
         stamp = msg.timestamp.strftime("%Y-%m-%d %H:%M UTC")
         if now is not None:
             stamp += f", {_age(now, msg.timestamp)}"
-        prefix = f"[{stamp}] {msg.author}"
+        prefix = f"[{stamp}] {_one_line(msg.author)}"
         if msg.author_roles:
-            prefix += f" ({', '.join(msg.author_roles)})"
+            prefix += f" ({', '.join(_one_line(r) for r in msg.author_roles)})"
         if msg.author_id:
             prefix += f" [id:{msg.author_id}]"
         if msg.message_id:
@@ -180,7 +190,7 @@ def format_context_messages(
             snippet = " ".join((msg.replied_to_content or "").split())
             if len(snippet) > REPLY_SNIPPET_CHARS:
                 snippet = snippet[:REPLY_SNIPPET_CHARS] + "..."
-            lines.append(f"  (reply to {msg.replied_to_author}: {snippet})")
+            lines.append(f"  (reply to {_one_line(msg.replied_to_author)}: {snippet})")
         content = " ".join(msg.content.split())
         lines.append(f"{prefix}: {content}")
     return "\n".join(lines)
@@ -250,11 +260,12 @@ async def run_moderation_agent(
                 render_inputs(
                     current_time=now.strftime("%Y-%m-%d %H:%M UTC"),
                     conversation_context=context_text,
-                    trigger_message=trigger_message_content,
-                    trigger_author=trigger_author,
-                    trigger_author_display_name=trigger_author_display_name
-                    or trigger_author,
-                    trigger_author_id=trigger_author_id or "unknown",
+                    trigger_message=_one_line(trigger_message_content),
+                    trigger_author=_one_line(trigger_author),
+                    trigger_author_display_name=_one_line(
+                        trigger_author_display_name or trigger_author
+                    ),
+                    trigger_author_id=_one_line(trigger_author_id or "unknown"),
                     guild_instructions=guild_instructions
                     or "Use your best judgment to moderate fairly.",
                     server_rules=format_rules_for_prompt(list(guild_rules))

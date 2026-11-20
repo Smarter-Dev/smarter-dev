@@ -36,6 +36,11 @@ DESTRUCTIVE_TOOLS = ("timeout", "purge", "delete")
 # only that triage is enforcing.
 CITE_TOOL = "cite"
 
+# The ban is not in ``enabled_tools`` either: it is gated by the policy's
+# ``sanctions`` (the ban sanction and the scam ladder's account age, as the
+# automatic coordinator reads them) and needs that triage is enforcing.
+BAN_TOOL = "ban"
+
 
 @dataclass(frozen=True, slots=True)
 class TriageConfig:
@@ -114,6 +119,10 @@ async def tool_refusal(guild_id: str, tool: str) -> str | None:
         if not config.enforcing:
             return "Rule citations are only posted while triage is enforcing; nothing posted."
         return None
+    if tool == BAN_TOOL:
+        if not config.enforcing:
+            return "Bans are only made while triage is enforcing; no action taken."
+        return None
     if tool not in config.enabled_tools:
         return f"The {tool} action is not enabled for this server; no action taken."
     return None
@@ -128,3 +137,11 @@ async def staff_exempt_role_ids(guild_id: str) -> tuple[str, ...]:
     if stored is None:
         return ()
     return tuple(stored.document.protected_role_ids)
+
+
+async def read_policy_document(guild_id: str) -> mp.PolicyDocument | None:
+    """The guild's current policy document, or None without a policy.
+    Raises on DB errors and on a policy this code cannot read."""
+    async with get_db_session_context() as session:
+        stored = await read_policy(session, str(guild_id))
+    return None if stored is None else stored.document
