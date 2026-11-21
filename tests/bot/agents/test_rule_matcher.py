@@ -34,11 +34,11 @@ Do not advertise your own product without asking a moderator first.
 
 @pytest.fixture(autouse=True)
 def _offline_rule_matcher(monkeypatch):
-    # The Google SDK wants a key to construct the model; supply a dummy one.
+    # The Anthropic SDK wants a key to construct the model; supply a dummy one.
     # Every test that reaches the model swaps it out via ``agent.override``, so
     # the key is never used for a real request. The module-level singleton is
     # reset around each test so no override leaks between tests.
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     rule_matcher._rule_matcher_agent = None
     yield
     rule_matcher._rule_matcher_agent = None
@@ -438,3 +438,14 @@ class TestAgentConstruction:
         prompt = rule_matcher.SYSTEM_PROMPT.lower()
         assert "index" in prompt
         assert "quote" in prompt or "paraphrase" in prompt
+
+
+def test_rule_matcher_allows_output_retries_on_an_unforced_model():
+    # Haiku's output tool is not forced, so one plain-text reply must be
+    # retried rather than surfacing an error to the moderator.
+    from smarter_dev.shared.model_catalog import get_model
+    from smarter_dev.shared.model_router import UNFORCED_OUTPUT_RETRIES
+
+    assert not get_model(rule_matcher.RULE_MATCHER_MODEL_KEY).supports_forced_tool_choice
+    agent = rule_matcher.get_rule_matcher_agent()
+    assert agent._max_output_retries == UNFORCED_OUTPUT_RETRIES

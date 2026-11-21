@@ -1438,6 +1438,22 @@ def test_handler_model_settings_uses_the_requested_reasoning_level():
     assert sol_medium["openai_reasoning_effort"] == "medium"
 
 
+def test_handler_model_settings_for_an_unlisted_claude_id_is_anthropic_dialect():
+    # Opus 5.5 is the admin default but not a catalog entry: it must get
+    # adaptive thinking at the requested effort, not the Gemini fallback.
+    judge = _handler_model_settings(
+        "claude-opus-5-5", ReasoningLevel.MEDIUM, cache_messages=False
+    )
+    assert judge is not _HANDLER_THINKING
+    assert judge["anthropic_thinking"] == {"type": "adaptive"}
+    assert judge["anthropic_effort"] == "medium"
+    assert judge["anthropic_cache_messages"] is False
+
+    author = _handler_model_settings("claude-opus-5-5", ReasoningLevel.HIGH)
+    assert author["anthropic_effort"] == "high"
+    assert author["anthropic_cache_messages"] is True
+
+
 def test_handler_model_settings_falls_back_for_non_catalog_ids():
     assert (
         _handler_model_settings("gemini-3-flash-preview", ReasoningLevel.HIGH)

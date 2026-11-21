@@ -40,15 +40,15 @@ DEFAULT_COMPACTION_MODEL = "claude-haiku-5-5"
 # work runs on the Claude API credits, and it differs from the Haiku 5.5 primary
 # for compaction and the summarizer.
 DEFAULT_FALLBACK_MODEL = "claude-sonnet-5-5"
-# Laguna S 2.1 held this slot until it left the catalog on 2026-08-13. DeepSeek
-# V4 Flash is the closest replacement the catalog still carries: $0.14/$0.28 per
-# M against Laguna's $0.10/$0.20, and the cheapest remaining tool-capable model.
+# Claude Haiku 5.5 took this slot on 2026-11-21 (#489): internal work runs on
+# the Claude API credits, and Haiku is the cheap, fast Claude tier. DeepSeek V4
+# Flash held it before.
 DEFAULT_SUMMARIZER = "claude-haiku-5-5"
 # The idle evaluator in a Quick chat. Cheap is the whole specification: it reads
 # a few hundred tokens and answers one bit, and it must not cost a noticeable
-# fraction of the turn it is protecting. Always the catalog KEY — OpenCode Zen's
-# wire id for this model is "deepseek-v4-flash" and Digital Ocean's retired one
-# was "deepseek-4-flash", and both are still priced.
+# fraction of the turn it is protecting. Always the catalog KEY. Claude Haiku
+# 5.5 since 2026-11-21 (#489); it was DeepSeek V4 Flash, whose old wire ids
+# ("deepseek-v4-flash", "deepseek-4-flash") are still priced.
 DEFAULT_THREAD_EVALUATOR = "claude-haiku-5-5"
 DEFAULT_THREAD_IDLE_MINUTES = 15
 COST_TIERS = frozenset({"low", "medium", "high", "ultra"})
