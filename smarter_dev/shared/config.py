@@ -45,6 +45,13 @@ CREDENTIAL_FIELDS = {
     "polar_webhook_secret": "polar_webhook_secret",
 }
 
+# Their defaults are public placeholder strings. Outside dev a missing value
+# becomes "" (not the default) and the code that signs with it refuses to run
+# (``require_nonblank``). Raising while building Settings would crash the
+# workloads that never mount these secrets (bot, cron jobs).
+REQUIRED_OUTSIDE_DEV = frozenset({"api_secret_key", "web_session_secret"})
+
+
 class Settings(BaseSettings):
     """Application settings with environment-based configuration."""
 
@@ -363,7 +370,10 @@ class Settings(BaseSettings):
             if value is not None:
                 setattr(self, field, value)
             elif not plain_names_allowed():
-                setattr(self, field, type(self).model_fields[field].get_default())
+                default = type(self).model_fields[field].get_default()
+                # These two defaults are public placeholder strings; outside dev
+                # they must not stand in for a missing secret.
+                setattr(self, field, "" if field in REQUIRED_OUTSIDE_DEV else default)
         return self
 
     @field_validator("environment")
@@ -455,3 +465,4 @@ def get_settings() -> Settings:
 def override_settings(**kwargs) -> Settings:
     """Create a settings instance with overrides (useful for testing)."""
     return Settings(**kwargs)
+

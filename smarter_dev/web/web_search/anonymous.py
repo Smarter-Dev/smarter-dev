@@ -29,6 +29,7 @@ from uuid import UUID
 from uuid import uuid4
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.credentials import require_nonblank
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search.snapshot import EVENT_TYPE
 from smarter_dev.web.web_search.snapshot import snapshot
@@ -166,7 +167,7 @@ def visitor_limit_key(namespace: str, visitor: str) -> str:
     daily key, or an address): never the caller's text, which could be any
     secret it was handed, but its HMAC-SHA-256 under the app's secret."""
     digest = hmac.new(
-        get_settings().api_secret_key.encode(),
+        require_nonblank(get_settings().api_secret_key, "api_secret_key").encode(),
         f"{namespace}\n{visitor}".encode(),
         hashlib.sha256,
     ).hexdigest()

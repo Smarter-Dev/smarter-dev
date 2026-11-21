@@ -71,14 +71,53 @@ def interpolate_env_vars(value, strict: bool = True, _path: str = ""):
     return value
 
 
+def _with_credential_secret_key(base):
+    """``base`` with ``secret_key`` taken from the ``secret_key`` credential.
+
+    Skrift's ``Settings.secret_key`` is required and read by pydantic-settings
+    straight from env ``SECRET_KEY``, which no longer exists in prod. Outside
+    dev the opaque value is the only source (a plain ``SECRET_KEY`` is ignored);
+    in dev ``get_credential`` also accepts the plain name.
+    """
+    from pydantic import model_validator
+
+    class SkriftSettings(base):
+        @model_validator(mode="before")
+        @classmethod
+        def _secret_key_from_credential(cls, data):
+            data = dict(data) if isinstance(data, dict) else {}
+            value = get_credential("secret_key")
+            if value:
+                data["secret_key"] = value
+            else:
+                from smarter_dev.shared.credentials import require_credential
+
+                require_credential("secret_key")  # raises MissingCredentialError
+            return data
+
+    SkriftSettings.__name__ = base.__name__
+    return SkriftSettings
+
+
 def install() -> None:
-    """Patch Skrift's interpolation once; safe to call again."""
+    """Patch Skrift's interpolation and secret key once; safe to call again."""
     global _installed
     if _installed:
         return
     import skrift.config
 
     skrift.config.interpolate_env_vars = interpolate_env_vars
+    original = skrift.config._settings_model
+    cache: dict = {}
+
+    def _settings_model():
+        base = original()
+        if base not in cache:
+            cache[base] = _with_credential_secret_key(base)
+        return cache[base]
+
+    skrift.config._settings_model = _settings_model
+    skrift.config.get_settings.cache_clear()
     _installed = True
 
 

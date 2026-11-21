@@ -179,6 +179,13 @@ def require_credential(logical: str) -> str:
     return value
 
 
+def require_nonblank(value: str, logical: str) -> str:
+    """``value`` (read from a Settings field); blank is an error outside dev."""
+    if not value and not plain_names_allowed():
+        raise MissingCredentialError(f"credential {logical!r} is not configured")
+    return value
+
+
 def _main(argv: list[str]) -> int:
     if len(argv) < 2 or argv[1] not in ("encode", "decode"):
         print("usage: credentials (encode | decode --check) < value", file=sys.stderr)

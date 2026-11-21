@@ -7,6 +7,7 @@ and the proactive-agent port; change them in all three places or none.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -447,3 +448,68 @@ def test_no_builder_passes_an_empty_default_api_key() -> None:
         for m in pattern.finditer(text)
     ]
     assert not offenders, "use require_credential() for SDK keys:\n" + "\n".join(offenders)
+
+
+def _production_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for logical in REGISTRY:
+        _clear(monkeypatch, logical, "production")
+    monkeypatch.delenv("SECRET_KEY", raising=False)
+    monkeypatch.setenv("AOR1KG", encode_value("s" * 40))
+
+
+def test_skrift_secret_key_comes_from_the_opaque_credential(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Skrift requires ``secret_key``; prod has no ``SECRET_KEY`` env var."""
+    script = (
+        "import os\n"
+        "from smarter_dev.shared.skrift_secrets import install\n"
+        "install()\n"
+        "from skrift.config import get_settings\n"
+        "s = get_settings()\n"
+        "assert s.secret_key == 's' * 40, 'wrong secret_key'\n"
+        "assert 'SECRET_KEY' not in os.environ\n"
+        "print('ok')\n"
+    )
+    env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
+        "ENVIRONMENT": "production",
+        "AOR1KG": encode_value("s" * 40),
+        "DATABASE_URL": "sqlite+aiosqlite:///x.db",
+        "REDIS_URL": "redis://localhost:6379/0",
+        "DISCORD_APPLICATION_ID": "1",
+        "GITHUB_CLIENT_ID": "1",
+        "GOOGLE_CLIENT_ID": "1",
+        **{n: encode_value("v-" + n) for n in ("IJ2XAT", "RLOJVC", "RY7CUN", "SYJN54", "ZVHJYO")},
+    }
+    result = subprocess.run(
+        [sys.executable, "-c", script], cwd=REPO, env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr[-1500:]
+    assert result.stdout.strip() == "ok"
+    # A plain SECRET_KEY is ignored in production, and a missing one is an error.
+    env2 = {**env, "SECRET_KEY": "plain-" + "x" * 40}
+    del env2["AOR1KG"]
+    bad = subprocess.run(
+        [sys.executable, "-c", script], cwd=REPO, env=env2, capture_output=True, text=True
+    )
+    assert bad.returncode != 0
+    assert "MissingCredentialError" in bad.stderr
+
+
+def test_signing_secrets_are_blank_not_public_defaults_outside_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from smarter_dev.shared.config import Settings
+    from smarter_dev.shared.credentials import MissingCredentialError
+    from smarter_dev.shared.credentials import require_nonblank
+
+    _production_env(monkeypatch)
+    settings = Settings(_env_file=None)
+    assert settings.api_secret_key == ""
+    assert settings.web_session_secret == ""
+    with pytest.raises(MissingCredentialError):
+        require_nonblank(settings.api_secret_key, "api_secret_key")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    assert require_nonblank("", "api_secret_key") == ""

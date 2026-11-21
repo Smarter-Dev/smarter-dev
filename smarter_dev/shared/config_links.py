@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.credentials import require_nonblank
 
 # Long enough to walk to a browser and fill the form, short enough that a
 # link pasted somewhere it shouldn't be goes stale quickly.
@@ -47,7 +48,7 @@ class ConfigLinkPayload:
 
 def _serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(
-        get_settings().api_secret_key, salt=_SIGNER_SALT
+        require_nonblank(get_settings().api_secret_key, "api_secret_key"), salt=_SIGNER_SALT
     )
 
 
