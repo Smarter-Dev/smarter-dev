@@ -308,7 +308,7 @@ def _migration():
     ("before", "after_upgrade"),
     [
         ("gpt-6-luna", "claude-haiku-5-5"),
-        ("gemini-3.8-flash", "gemini-3.8-flash"),
+        ("gemini-4-hydrogen", "gemini-4-hydrogen"),
         # Chosen before the upgrade: the downgrade must not turn it into Luna.
         ("claude-haiku-5-5", "claude-haiku-5-5"),
     ],

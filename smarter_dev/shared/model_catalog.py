@@ -302,6 +302,9 @@ _GEMINI_4_THINKING = (
     ReasoningLevel.MEDIUM,
     ReasoningLevel.HIGH,
 )
+# Gemini 4 Hydrogen and Neon add "xhigh" above Carbon's ladder (Google docs,
+# 2026-11-21).
+_GEMINI_4_FLASH_THINKING = _GEMINI_4_THINKING + (ReasoningLevel.XHIGH,)
 _OPEN_EFFORT = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
 # Claude Sonnet and Haiku 5.5: thinking is adaptive and never sent disabled
 # (no "none"), and the supported efforts run low → max.
@@ -503,52 +506,56 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         ),
     ),
     # --- Gemini via Google ---
-    # Gemini 3 Flash left the catalog on 2026-08-13 — the oldest Flash we
-    # carried, and still on a *preview* wire id — to make room for 3.7 Flash.
-    # 3.6 Flash and 3.7 Flash left on 2026-09-24, so 3.8 Flash is the one
-    # full Gemini Flash in the catalog: the selections on the retired keys read
-    # as 3.8 Flash (``RETIRED_SUCCESSORS``), and the agents that pinned Gemini
-    # Flash wire ids directly — the rule matcher, the summarizer fallback, the
-    # resources agent, the blogging agents and the handler author/judge — moved
-    # to it the same day. Their price patches and provider mappings stay for the
-    # usage rows that carry their wire ids. 3.5 Flash Lite was retired with them
-    # by mistake and came back on 2026-09-25 (below).
+    # 2026-11-21 (#489): the catalog carries Gemini 4 Hydrogen, Neon and Carbon
+    # and 3.5 Flash Lite. 3.8 Flash, 3.1 Pro and 4 Argon left; their selections
+    # read as Hydrogen, Neon and Carbon through ``RETIRED_SUCCESSORS`` and the
+    # agents that pinned 3.8 Flash moved to Hydrogen. Their price patches and
+    # provider mappings stay for the usage rows that carry their wire ids.
     #
-    # Gemini 3.8 Flash joined on 2026-09-03 when it became the proactive
-    # agent's model. It is in the catalog for the usage ledger's benefit as much
-    # as the picker's: ``_normalized_model_identity`` resolves a wire id through
-    # this catalog, so an absent entry files the proactive agent's whole spend
-    # under provider "unknown" in the invoice breakdown. Same promotional
-    # $0.75/$3.75 per M as 3.6 and 3.7 Flash were.
+    # The three Gemini 4 models below share one spec, read from
+    # https://aistudio.google.com/docs/models/gemini-4-<name> (the ai.google.dev
+    # pages redirect there) on 2026-11-21: stable wire ids, 1,048,576 context,
+    # 65,536 default output, text/image/video/audio/PDF in, text out. The pages
+    # name no default thinking level, so MEDIUM is ours, as for Argon. Prices
+    # live in llm_pricing.
+    # Flash-class: $1.50/$7.50 per M, thinking low -> xhigh. Takes 3.8 Flash's pins (rule matcher, summarizer fallback, audio reading).
     CatalogModel(
-        key="gemini-3-8-flash",
-        label="Gemini 3.8 Flash",
+        key="gemini-4-hydrogen",
+        label="Gemini 4 Hydrogen",
         family="Gemini",
         provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.8-flash",
+        model_id="gemini-4-hydrogen",
         supports_vision=True,
-        # Verified against the Gemini models API, not assumed: 1M in, 64K out.
         context_window=1_048_576,
         max_output_tokens=65_536,
-        reasoning_levels=_GEMINI_THINKING,
+        reasoning_levels=_GEMINI_4_FLASH_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
-    # Gemini 3.1 Flash Lite left the catalog on 2026-08-13, superseded by 3.5
-    # Flash Lite in the same class, freeing the last slot for DeepSeek V4 Pro.
-    # Its direct pins — title generation, media reading, image prompt review
-    # and the blogging review/summariser agents — moved to GPT-6 Luna on
-    # 2026-09-24; only ``gemini-3.1-flash-lite-image``, which *generates*
-    # images and has no Luna equivalent, is still in service.
-    # 3.1 Pro stays: it is not a Flash, and nothing has replaced it.
+    # $3/$15 per M, thinking low -> xhigh.
     CatalogModel(
-        key="gemini-3-1-pro",
-        label="Gemini 3.1 Pro",
+        key="gemini-4-neon",
+        label="Gemini 4 Neon",
         family="Gemini",
         provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.1-pro",
+        model_id="gemini-4-neon",
         supports_vision=True,
-        reasoning_levels=_GEMINI_THINKING,
-        default_reasoning=ReasoningLevel.HIGH,
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        reasoning_levels=_GEMINI_4_FLASH_THINKING,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # $2/$10 per M through 2026-11-30, $4/$20 from 2026-12-01 (dated in llm_pricing); thinking low -> high.
+    CatalogModel(
+        key="gemini-4-carbon",
+        label="Gemini 4 Carbon",
+        family="Gemini",
+        provider=ModelProvider.GOOGLE,
+        model_id="gemini-4-carbon",
+        supports_vision=True,
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        reasoning_levels=_GEMINI_4_THINKING,
+        default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # 3.5 Flash Lite left on 2026-09-24 alongside 3.6 and 3.7 Flash, but only
     # 3.5 Flash (``gemini-3-5-flash``, gone since 2026-07-21) was meant to go;
@@ -561,28 +568,6 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="gemini-3.5-flash-lite",
         supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    # Gemini 4 Argon joined on 2026-10-16 at the user's request, admitted only:
-    # no default or agent pin moved onto it. Verified against the Gemini models
-    # API and live generateContent calls with the production key (2026-10-16):
-    # wire id ``gemini-4-argon``, stable rather than preview, 1M context, image
-    # input, and thinking at low/medium/high only (see _GEMINI_4_THINKING).
-    # $2/$10/$0.10 per M is a promotional rate that doubles on 2026-12-01; the
-    # rate lives in llm_pricing.
-    CatalogModel(
-        key="gemini-4-argon",
-        label="Gemini 4 Argon",
-        family="Gemini",
-        provider=ModelProvider.GOOGLE,
-        model_id="gemini-4-argon",
-        supports_vision=True,
-        context_window=1_048_576,
-        # The models API reports outputTokenLimit 32,768 for our key; Google's
-        # model page says 65,536 by default (1M with long decode). The API
-        # figure is the one verified, so it is the one recorded.
-        max_output_tokens=32_768,
-        reasoning_levels=_GEMINI_4_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- GPT via OpenAI ---
@@ -799,14 +784,19 @@ RETIRED_SUCCESSORS: dict[str, str] = {
     # 2026-09-24: 3.8 Flash is the only full Gemini Flash left, and Grok 4.7
     # replaced 4.6. (3.5 Flash Lite, retired the same day by mistake, was
     # restored on 2026-09-25 and is no longer mapped.)
-    "gemini-3-6-flash": "gemini-3-8-flash",
-    "gemini-3-7-flash": "gemini-3-8-flash",
+    "gemini-3-6-flash": "gemini-4-hydrogen",
+    "gemini-3-7-flash": "gemini-4-hydrogen",
     "grok-4-6": "grok-4-7",
     # 2026-09-29, the one exception to the rule above (#37): the user asked for
     # every GPT-6 Sol selection — conversations, queued turns and channel pins
     # included — to move to GPT-6.1 Sol, and 7c2d9e4b1a60 moved them. It sets
     # no precedent; the next retirement moves nothing again unless asked.
     "gpt-6-sol": "gpt-6-1-sol",
+    # 2026-11-21 (#489): 3.8 Flash -> its Flash-class successor, 3.1 Pro and
+    # Argon -> the nearest-priced Gemini 4 ($3/$15 and the same $2/$10 launch rate).
+    "gemini-3-8-flash": "gemini-4-hydrogen",
+    "gemini-3-1-pro": "gemini-4-neon",
+    "gemini-4-argon": "gemini-4-carbon",
 }
 
 

@@ -169,7 +169,7 @@ def test_default_reasoning_is_distinct_from_explicit_level():
 def test_distinct_model_ids_yield_distinct_writer_agents():
     _reset_cache()
     gpt = get_writer_agent("gpt-6.1-sol")
-    gemini = get_writer_agent("gemini-3.1-pro")
+    gemini = get_writer_agent("gemini-4-neon")
     assert gpt is not gemini
 
 

@@ -7,6 +7,7 @@ the exact Decimal math so a silent pricing regression cannot reappear.
 
 from __future__ import annotations
 
+import datetime
 import logging
 from decimal import Decimal
 
@@ -596,10 +597,57 @@ class TestGooglePricing:
         assert cost == Decimal("1.00")
         assert "priced at the base rate" not in caplog.text
 
-    def test_gemini_4_argon_prices_its_catalog_entry(self):
-        rates = price_rates_for_model(get_model("gemini-4-argon"))
-        assert rates.input_mtok == Decimal("2.00")
-        assert rates.output_mtok == Decimal("10.00")
+    def test_gemini_4_argon_still_prices_after_leaving_the_catalog(self):
+        # Retired 2026-11-21 (#489); rows written under it keep pricing.
+        assert get_model("gemini-4-argon") is None
+        assert calc_cost(1_000_000, 1_000_000, "gemini-4-argon") == Decimal("12.00")
+
+    def test_gemini_4_hydrogen_and_neon_prices_their_catalog_entries(self):
+        # https://aistudio.google.com/docs/pricing, read 2026-11-21.
+        hydrogen = price_rates_for_model(get_model("gemini-4-hydrogen"))
+        assert (hydrogen.input_mtok, hydrogen.output_mtok) == (
+            Decimal("1.50"),
+            Decimal("7.50"),
+        )
+        neon = price_rates_for_model(get_model("gemini-4-neon"))
+        assert (neon.input_mtok, neon.output_mtok) == (Decimal("3.00"), Decimal("15.00"))
+        assert calc_cost(1_000_000, 1_000_000, "gemini-4-hydrogen") == Decimal("9.00")
+        assert calc_cost(1_000_000, 1_000_000, "gemini-4-neon") == Decimal("18.00")
+
+    def test_gemini_4_cache_reads(self):
+        assert calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=500_000,
+            cache_write_tokens=0,
+            model_name="gemini-4-hydrogen",
+        ) == Decimal("0.7875")  # 500K at $1.50 + 500K cached at $0.075
+
+    def test_gemini_4_carbon_launch_rate_and_the_dated_doubling(self):
+        from genai_prices import Usage
+        from genai_prices import calc_price
+
+        usage = Usage(input_tokens=1_000_000, output_tokens=1_000_000)
+
+        def total(day: datetime.date) -> Decimal:
+            stamp = datetime.datetime.combine(
+                day, datetime.time(12), tzinfo=datetime.timezone.utc
+            )
+            return calc_price(
+                usage,
+                "gemini-4-carbon",
+                provider_id="google",
+                genai_request_timestamp=stamp,
+            ).total_price
+
+        assert total(datetime.date(2026, 11, 30)) == Decimal("12.00")
+        assert total(datetime.date(2026, 12, 1)) == Decimal("24.00")
+        assert calc_cost(1_000_000, 1_000_000, "gemini-4-carbon") in (
+            Decimal("12.00"),
+            Decimal("24.00"),
+        )
+        rates = price_rates_for_model(get_model("gemini-4-carbon"))
+        assert rates is not None
 
 
 class TestOpenAIPricing:

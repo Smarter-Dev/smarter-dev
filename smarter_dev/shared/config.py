@@ -148,20 +148,20 @@ class Settings(BaseSettings):
         description="Model that reviews candidate handler scripts (Claude Haiku 5.5)",
     )
     handler_admin_author_model: str = Field(
-        default="gpt-6.1-sol",
+        default="claude-opus-5-5",
         description="Model that writes ADMIN handler scripts, first draft and fix "
-        "round (GPT-6.1 Sol at high reasoning effort). Admin scripts carry "
+        "round (Claude Opus 5.5 at high reasoning effort). Admin scripts carry "
         "moderation powers, so they get a stronger author than the member tier.",
     )
     handler_admin_judge_model: str = Field(
-        default="gpt-6.1-sol",
-        description="Primary judge for ADMIN handler scripts (GPT-6.1 Sol)",
+        default="claude-opus-5-5",
+        description="Primary judge for ADMIN handler scripts (Claude Opus 5.5)",
     )
     handler_admin_second_judge_model: str = Field(
-        default="gpt-6.1-sol",
+        default="claude-opus-5-5",
         description="Second judge for ADMIN handlers. Both judges review in "
         "parallel and either rejection blocks install; a second judge naming the "
-        "same model as the primary is dropped, so the default panel is GPT-6.1 Sol "
+        "same model as the primary is dropped, so the default panel is Claude Opus 5.5 "
         "alone. Empty string disables the second judge.",
     )
 

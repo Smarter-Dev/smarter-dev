@@ -183,7 +183,7 @@ def _get_audio_agent():
         from pydantic_ai.providers.google import GoogleProvider
 
         api_key = require_credential("gemini")
-        model_id = os.getenv("MEDIA_READER_AUDIO_MODEL", "gemini-3.8-flash")
+        model_id = os.getenv("MEDIA_READER_AUDIO_MODEL", "gemini-3.5-flash-lite")
         _audio_agent = Agent(
             GoogleModel(model_id, provider=GoogleProvider(api_key=api_key)),
             output_type=str,

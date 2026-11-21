@@ -156,7 +156,7 @@ SKIM_MODEL_ENV_VAR = "PROACTIVE_SKIM_MODEL"
 DEFAULT_AGENT_MODEL = "claude-opus-5-5"
 DEFAULT_WATCHER_MODEL = "typesafe:jev-1.13.0"
 # The agent's skim tool still needs a separate text model.
-DEFAULT_SKIM_MODEL = "z-ai/glm-5.3-flash"
+DEFAULT_SKIM_MODEL = "claude-haiku-5-5"
 HISTORY_FETCH_LIMIT = 60
 # Cap on one compaction-summarize LLM call; past it the wake falls back to
 # the agent model, then to truncation. A hung summarize blocks the guild's

@@ -35,20 +35,21 @@ DEFAULT_MODEL = "gpt-6-luna"
 DEFAULT_COMPACTION_MODEL = "claude-haiku-5-5"
 # Where auxiliary work goes when the model configured for it fails. Deliberately
 # a DIFFERENT vendor from DEFAULT_MODEL — a fallback that shares an upstream
-# with the thing it is backstopping is not a fallback. 3.8 Flash took the slot
-# on 2026-09-24, when it became the only Gemini Flash in the catalog; 3.5 Flash
-# Lite held it before.
-DEFAULT_FALLBACK_MODEL = "gemini-3-8-flash"
+# with the thing it is backstopping is not a fallback. Claude Sonnet 5.5 took
+# the slot on 2026-11-21 (#489) from 3.8 Flash, which left the catalog: internal
+# work runs on the Claude API credits, and it differs from the Haiku 5.5 primary
+# for compaction and the summarizer.
+DEFAULT_FALLBACK_MODEL = "claude-sonnet-5-5"
 # Laguna S 2.1 held this slot until it left the catalog on 2026-08-13. DeepSeek
 # V4 Flash is the closest replacement the catalog still carries: $0.14/$0.28 per
 # M against Laguna's $0.10/$0.20, and the cheapest remaining tool-capable model.
-DEFAULT_SUMMARIZER = "deepseek-v4"
+DEFAULT_SUMMARIZER = "claude-haiku-5-5"
 # The idle evaluator in a Quick chat. Cheap is the whole specification: it reads
 # a few hundred tokens and answers one bit, and it must not cost a noticeable
 # fraction of the turn it is protecting. Always the catalog KEY — OpenCode Zen's
 # wire id for this model is "deepseek-v4-flash" and Digital Ocean's retired one
 # was "deepseek-4-flash", and both are still priced.
-DEFAULT_THREAD_EVALUATOR = "deepseek-v4"
+DEFAULT_THREAD_EVALUATOR = "claude-haiku-5-5"
 DEFAULT_THREAD_IDLE_MINUTES = 15
 COST_TIERS = frozenset({"low", "medium", "high", "ultra"})
 

@@ -1328,12 +1328,12 @@ def test_configured_model_builder_routes_catalog_ids_through_model_router(monkey
     assert isinstance(gemini, GoogleModel)
 
 
-def test_admin_model_defaults_are_gpt_6_1_sol():
-    assert Settings.model_fields["handler_admin_author_model"].default == "gpt-6.1-sol"
-    assert Settings.model_fields["handler_admin_judge_model"].default == "gpt-6.1-sol"
+def test_admin_model_defaults_are_claude_opus_5_5():
+    assert Settings.model_fields["handler_admin_author_model"].default == "claude-opus-5-5"
+    assert Settings.model_fields["handler_admin_judge_model"].default == "claude-opus-5-5"
     assert (
         Settings.model_fields["handler_admin_second_judge_model"].default
-        == "gpt-6.1-sol"
+        == "claude-opus-5-5"
     )
 
 
@@ -1363,9 +1363,9 @@ def test_standard_tier_agents_run_claude_haiku_at_medium(monkeypatch):
     monkeypatch.setattr(handler_authoring, "_judge_agent", None)
 
 
-def test_admin_judge_panel_defaults_to_gpt_6_1_sol_alone(monkeypatch):
+def test_admin_judge_panel_defaults_to_claude_opus_5_5_alone(monkeypatch):
     monkeypatch.setattr(handler_authoring, "get_settings", _settings_with)
-    assert _admin_judge_models() == ["gpt-6.1-sol"]
+    assert _admin_judge_models() == ["claude-opus-5-5"]
 
 
 def test_admin_judge_panel_keeps_two_distinct_judges_in_order(monkeypatch):
@@ -1373,11 +1373,11 @@ def test_admin_judge_panel_keeps_two_distinct_judges_in_order(monkeypatch):
         handler_authoring,
         "get_settings",
         lambda: _settings_with(
-            handler_admin_judge_model="gemini-3.8-flash",
+            handler_admin_judge_model="gemini-4-hydrogen",
             handler_admin_second_judge_model="gpt-6.1-sol",
         ),
     )
-    assert _admin_judge_models() == ["gemini-3.8-flash", "gpt-6.1-sol"]
+    assert _admin_judge_models() == ["gemini-4-hydrogen", "gpt-6.1-sol"]
 
 
 def test_admin_judge_panel_ignores_the_standard_tier_judge(monkeypatch):
@@ -1394,11 +1394,11 @@ def test_empty_second_judge_leaves_a_single_judge_panel(monkeypatch):
         handler_authoring,
         "get_settings",
         lambda: _settings_with(
-            handler_admin_judge_model="gemini-3.8-flash",
+            handler_admin_judge_model="gemini-4-hydrogen",
             handler_admin_second_judge_model="",
         ),
     )
-    assert _admin_judge_models() == ["gemini-3.8-flash"]
+    assert _admin_judge_models() == ["gemini-4-hydrogen"]
 
 
 def test_duplicate_admin_judge_models_are_deduplicated(monkeypatch):
@@ -1406,11 +1406,11 @@ def test_duplicate_admin_judge_models_are_deduplicated(monkeypatch):
         handler_authoring,
         "get_settings",
         lambda: _settings_with(
-            handler_admin_judge_model="gemini-3.8-flash",
-            handler_admin_second_judge_model="gemini-3.8-flash",
+            handler_admin_judge_model="gemini-4-hydrogen",
+            handler_admin_second_judge_model="gemini-4-hydrogen",
         ),
     )
-    assert _admin_judge_models() == ["gemini-3.8-flash"]
+    assert _admin_judge_models() == ["gemini-4-hydrogen"]
 
 
 def test_admin_author_agent_uses_the_admin_author_model(monkeypatch):
@@ -1431,7 +1431,7 @@ def test_handler_model_settings_uses_the_requested_reasoning_level():
     sol_high = _handler_model_settings("gpt-6.1-sol", ReasoningLevel.HIGH)
     assert sol_high["openai_reasoning_effort"] == "high"
 
-    gemini_high = _handler_model_settings("gemini-3.8-flash", ReasoningLevel.HIGH)
+    gemini_high = _handler_model_settings("gemini-4-hydrogen", ReasoningLevel.HIGH)
     assert gemini_high["google_thinking_config"] == {"thinking_level": "HIGH"}
 
     sol_medium = _handler_model_settings("gpt-6.1-sol", ReasoningLevel.MEDIUM)

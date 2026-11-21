@@ -656,12 +656,12 @@ def test_over_limit_refusals_fit_each_block():
         chat_memory_dream.enforce_blob_limit("z" * 9, retries_left=1, limit=5)
 
 
-def test_default_dream_model_is_gpt_6_1_sol_with_high_reasoning(monkeypatch):
+def test_default_dream_model_is_claude_sonnet_5_5_with_high_reasoning(monkeypatch):
     monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
 
     model = chat_memory_dream._dream_catalog_model()
 
-    assert model.model_id == "gpt-6.1-sol"
+    assert model.model_id == "claude-sonnet-5-5"
     assert chat_memory_dream.DREAM_REASONING_LEVEL in model.reasoning_levels
 
 

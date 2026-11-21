@@ -38,7 +38,7 @@ data:
   # the bot's embedded guilds and the proactive-agent deployment alike.
   PROACTIVE_AGENT_MODEL: "claude-opus-5-5"
   PROACTIVE_WATCHER_MODEL: "typesafe:jev-1.13.0"
-  PROACTIVE_SKIM_MODEL: "z-ai/glm-5.3-flash"
+  PROACTIVE_SKIM_MODEL: "claude-haiku-5-5"
 
   # Public pages keep their canonical, OG and policy links on the public host.
   SITE_BASE_URL: "https://smarter.dev"

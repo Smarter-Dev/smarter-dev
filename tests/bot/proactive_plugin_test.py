@@ -53,7 +53,7 @@ def test_production_default_is_pinned_jev_with_separate_skim(monkeypatch):
 
     assert run.watcher_model_id == "typesafe:jev-1.13.0"
     assert run.uses_jev_batching
-    assert run.skim_model_id == "z-ai/glm-5.3-flash"
+    assert run.skim_model_id == "claude-haiku-5-5"
     assert isinstance(watcher, JevWatcherRunner)
     assert watcher.minimum_confidence == 0.0
     assert not hasattr(watcher, "fallback")

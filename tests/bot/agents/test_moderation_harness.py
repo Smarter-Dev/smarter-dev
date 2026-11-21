@@ -79,7 +79,7 @@ SERVER_RULES = format_rules_for_prompt(
 # path the bot's triage agent takes.
 MODELS_TO_TEST = {
     "gpt-6-luna": "gpt-6-luna",
-    "gemini-flash": "gemini-3-8-flash",
+    "gemini-flash": "gemini-4-hydrogen",
     "claude-haiku": "claude-haiku-5-5",
 }
 

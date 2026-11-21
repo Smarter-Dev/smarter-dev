@@ -94,10 +94,10 @@ async def test_retired_gemini_flash_and_grok_selections_read_as_successors(db_se
 
     settings = await db_session.get(ChatSettings, 1)
 
-    assert settings.summarizer_fallback_model_key == "gemini-3-8-flash"
+    assert settings.summarizer_fallback_model_key == "gemini-4-hydrogen"
     # 3.5 Flash Lite was restored on 2026-09-25: it reads as itself again.
     assert settings.compaction_fallback_model_key == "gemini-3-5-flash-lite"
-    assert settings.thread_evaluator_fallback_model_key == "gemini-3-8-flash"
+    assert settings.thread_evaluator_fallback_model_key == "gemini-4-hydrogen"
     assert settings.summarizer_model_key == "grok-4-7"
 
 
@@ -150,6 +150,18 @@ def test_migration_successors_match_the_catalog_map():
     restored = _load_migration("479f5fca562d")._KEY
     assert restored in combined
     del combined[restored]
+    # b4e7a2c9d1f6 retired 3.8 Flash, 3.1 Pro and Argon for Hydrogen, Neon and
+    # Carbon; the keys that went to 3.8 Flash follow it.
+    for retired, successor in combined.items():
+        if successor == "gemini-3-8-flash":
+            combined[retired] = "gemini-4-hydrogen"
+    combined.update(
+        {
+            "gemini-3-8-flash": "gemini-4-hydrogen",
+            "gemini-3-1-pro": "gemini-4-neon",
+            "gemini-4-argon": "gemini-4-carbon",
+        }
+    )
     assert combined == RETIRED_SUCCESSORS
 
 
@@ -1040,10 +1052,10 @@ def test_argon_admission_follows_the_site_identity_revision():
 
     module = _load_migration("a3f6c9e2d4b8")
     assert module.down_revision == "d8e3f0a5b2c7"
-    assert get_model(module._KEY).model_id == "gemini-4-argon"
-    # The cost-tier peer bills the same $2/$10.
-    assert get_model(module._PRICE_PEER) is not None
-    assert module._KEY not in RETIRED_SUCCESSORS.values()
+    assert module._KEY == "gemini-4-argon"
+    # Argon left the catalog in b4e7a2c9d1f6; it now reads as Carbon.
+    assert get_model(module._KEY) is None
+    assert RETIRED_SUCCESSORS[module._KEY] == "gemini-4-carbon"
 
 
 async def test_argon_admission_is_enabled_at_sol_tier_and_sorts_last(db_session):
@@ -1052,7 +1064,8 @@ async def test_argon_admission_is_enabled_at_sol_tier_and_sorts_last(db_session)
 
     await ensure_settings(db_session)
     seeded = await db_session.get(ChatCatalogModel, "gemini-4-argon")
-    await db_session.delete(seeded)
+    if seeded is not None:  # Argon is no longer seeded
+        await db_session.delete(seeded)
     sol = await db_session.get(ChatCatalogModel, "gpt-6-1-sol")
     sol.cost_tier = "high"
     sol.enabled = False
@@ -1105,25 +1118,6 @@ def test_argon_downgrade_deletes_only_its_row():
         "DELETE FROM chat_catalog_models WHERE model_key = :key"
     )
     assert statement.compile().params == {"key": "gemini-4-argon"}
-
-
-async def test_argon_is_selectable_once_admitted(db_session):
-    from smarter_dev.web.chat.api import resolved_conversation_settings
-    from smarter_dev.web.chat.settings import ensure_settings
-    from smarter_dev.web.models import ChatCatalogModel
-
-    await ensure_settings(db_session)
-    seeded = await db_session.get(ChatCatalogModel, "gemini-4-argon")
-    await db_session.delete(seeded)
-    await db_session.commit()
-    [statement] = _argon_statements()
-    await db_session.execute(statement)
-    await db_session.commit()
-
-    _, key, _ = await resolved_conversation_settings(
-        db_session, permissions=frozenset(), model_key="gemini-4-argon"
-    )
-    assert key == "gemini-4-argon"
 
 
 async def test_an_unknown_claude_key_is_refused_even_with_an_enabled_row(db_session):

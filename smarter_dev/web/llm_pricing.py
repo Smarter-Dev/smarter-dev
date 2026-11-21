@@ -10,6 +10,7 @@ ingested usage only; it does not retroactively reprice existing invoice rows.
 
 from __future__ import annotations
 
+import datetime
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -168,6 +169,60 @@ _patch_provider(
             cache_read_mtok=Decimal("0.10"),
         ),
     ),
+)
+
+# Gemini 4 Hydrogen, Neon and Carbon — admitted 2026-11-21 (#489). Standard-tier
+# rates per M from https://aistudio.google.com/docs/pricing (ai.google.dev
+# redirects there), read 2026-11-21: no prompt-length tiers, implicit caching
+# only. genai-prices does not know them yet, so they are patched ahead of the
+# library; once it ships them, add the ids to _LIBRARY_PRICES_OWN_ID.
+for _gemini_4_id, _in, _out, _cache in (
+    ("gemini-4-hydrogen", "1.50", "7.50", "0.075"),
+    ("gemini-4-neon", "3.00", "15.00", "0.15"),
+):
+    _patch_provider(
+        "google",
+        types.ModelInfo(
+            id=_gemini_4_id,
+            match=types.ClauseStartsWith(starts_with=_gemini_4_id),
+            prices=types.ModelPrice(
+                input_mtok=Decimal(_in),
+                output_mtok=Decimal(_out),
+                cache_read_mtok=Decimal(_cache),
+            ),
+        ),
+        ahead_of_library=True,
+    )
+
+# Carbon's launch rate is $2/$10/$0.10 through 2026-11-30 and doubles to
+# $4/$20/$0.20 on 2026-12-01, dated the way genai-prices dates Argon's change.
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-4-carbon",
+        match=types.ClauseStartsWith(starts_with="gemini-4-carbon"),
+        prices=[
+            types.ConditionalPrice(
+                constraint=None,
+                prices=types.ModelPrice(
+                    input_mtok=Decimal("2.00"),
+                    output_mtok=Decimal("10.00"),
+                    cache_read_mtok=Decimal("0.10"),
+                ),
+            ),
+            types.ConditionalPrice(
+                constraint=types.StartDateConstraint(
+                    start_date=datetime.date(2026, 12, 1)
+                ),
+                prices=types.ModelPrice(
+                    input_mtok=Decimal("4.00"),
+                    output_mtok=Decimal("20.00"),
+                    cache_read_mtok=Decimal("0.20"),
+                ),
+            ),
+        ],
+    ),
+    ahead_of_library=True,
 )
 
 # GPT-5.4 Nano
