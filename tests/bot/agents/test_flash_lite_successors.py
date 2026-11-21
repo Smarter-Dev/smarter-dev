@@ -54,10 +54,10 @@ def test_media_reader_reads_images_with_claude_haiku():
     assert agent.model_settings == ONE_SHOT_LOW
 
 
-def test_media_reader_reads_audio_with_gemini_3_8_flash():
+def test_media_reader_reads_audio_with_gemini_3_5_flash_lite():
     agent = media_reader.get_audio_reader_agent()
     assert isinstance(agent.model, GoogleModel)
-    assert agent.model.model_name == "gemini-3.8-flash"
+    assert agent.model.model_name == "gemini-3.5-flash-lite"
 
 
 @pytest.mark.parametrize(
@@ -89,7 +89,7 @@ def test_worker_media_reader_matches_the_bot_one():
     assert image.model.model_name == "claude-haiku-5-5"
     assert image.model_settings == ONE_SHOT_LOW
     assert isinstance(audio.model, GoogleModel)
-    assert audio.model.model_name == "gemini-3.8-flash"
+    assert audio.model.model_name == "gemini-3.5-flash-lite"
 
 
 async def test_worker_media_reader_dispatches_audio_to_gemini(monkeypatch):

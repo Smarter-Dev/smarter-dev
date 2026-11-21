@@ -41,6 +41,9 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         # bills with). $2.00 in / $10.00 out / $0.10 cached-read through
         # 2026-11-30; doubles on 2026-12-01.
         "gemini-4-argon": ("Gemini 4 Argon", "2", "10", "0.1", None),
+        "gemini-4-hydrogen": ("Gemini 4 Hydrogen", "1.5", "7.5", "0.075", None),
+        "gemini-4-neon": ("Gemini 4 Neon", "3", "15", "0.15", None),
+        "gemini-4-carbon": ("Gemini 4 Carbon", "2", "10", "0.1", None),
         # Gemini 3.1 Flash Lite — GA 2026-05-07. $0.25 in / $1.50 out.
         # https://devtk.ai/en/models/gemini-3-1-flash-lite/
         "gemini-3.1-flash-lite": ("Gemini 3.1 Flash Lite", "0.25", "1.5", None, None),

@@ -27,7 +27,7 @@ from smarter_dev.web.llm_pricing import calc_cost_by_request
 from smarter_dev.web.models import UsageCostRow
 
 HAIKU = "claude-haiku-5-5"
-GEMINI = "gemini-3.8-flash"
+GEMINI = "gemini-4-hydrogen"
 ENGAGEMENT = "8f2ca1de-4b7e-4c3a-9d1f-0e6b5a7c9d2e"
 
 

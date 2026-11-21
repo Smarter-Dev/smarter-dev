@@ -71,6 +71,11 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-sol", "openai")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.5-flash-lite", "google")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.6-flash", "google")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.7-flash", "google")
+# Retired on 2026-11-21 (#489) for Gemini 4 Hydrogen, Neon and Carbon: 3.8
+# Flash, 3.1 Pro and 4 Argon. Their priced rows keep their wire ids.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.8-flash", "google")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.1-pro", "google")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-4-argon", "google")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("x-ai/grok-4.6", "openrouter")
 # Retired on 2026-09-29 for GPT-6.1 Sol.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-6-sol", "openai")

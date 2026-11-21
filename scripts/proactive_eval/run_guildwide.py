@@ -73,7 +73,7 @@ eval_prices.install()
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 RUNS_DIR = DATA_DIR / "runs"
-DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
+DEFAULT_AGENT_MODEL = "claude-opus-5-5"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
 DEFAULT_SKIM_MODEL = DEFAULT_WATCHER_MODEL
 

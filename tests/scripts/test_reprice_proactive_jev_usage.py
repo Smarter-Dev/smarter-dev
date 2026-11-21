@@ -56,7 +56,7 @@ async def _seed(db_session):
             _row("zero-2", input_tokens=1_000_000, output_tokens=0),
             _row("already-priced", cost="0.01"),
             _row("search-ranking", operation_type="web_search_ranking"),
-            _row("other-model", model_id="gemini-3.8-flash"),
+            _row("other-model", model_id="gemini-4-hydrogen"),
         ]
     )
     await db_session.commit()

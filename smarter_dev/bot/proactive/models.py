@@ -26,8 +26,9 @@ if TYPE_CHECKING:
 KIMI_OPENROUTER_MODEL_ID = "moonshotai/kimi-k3"
 _LITELLM_MODEL_ALIASES = {
     "z-ai/glm-5.3-flash": "glm-5.3-flash",
-    "gemini-3.7-flash": "gemini/gemini-3.7-flash",
-    "gemini-3.8-flash": "gemini/gemini-3.8-flash",
+    "gemini-4-hydrogen": "gemini/gemini-4-hydrogen",
+    "gemini-4-neon": "gemini/gemini-4-neon",
+    "gemini-4-carbon": "gemini/gemini-4-carbon",
 }
 
 

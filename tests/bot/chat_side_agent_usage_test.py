@@ -61,7 +61,7 @@ from tests.bot.test_rules_command import _ctx as _rule_ctx
 from tests.bot.test_rules_command import _FakeSessionCtx
 
 HAIKU = "claude-haiku-5-5"
-GEMINI = "gemini-3.8-flash"
+GEMINI = "gemini-4-hydrogen"
 SOL = "gpt-6.1-sol"
 GUILD = 333333333333333333
 CHANNEL = 555555555555555555

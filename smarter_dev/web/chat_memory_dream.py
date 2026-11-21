@@ -109,7 +109,9 @@ DREAM_MODEL_ENV_VAR = "CHAT_DREAM_MODEL"
 # remembers long-term, so it gets the capable model in the chat agent's own
 # family (voice continuity) rather than the cheap one. Quality compounds here
 # in a way it does not anywhere else in the chat stack.
-DEFAULT_DREAM_MODEL = "gpt-6.1-sol"
+# Claude Sonnet 5.5 since 2026-11-21 (#489): internal work runs on the Claude API
+# credits; the dream resolves through the catalog, which carries Sonnet, not Opus.
+DEFAULT_DREAM_MODEL = "claude-sonnet-5-5"
 DREAM_REASONING_LEVEL = ReasoningLevel.HIGH
 IDENTITY_HEADING = "## Identity & Voice"
 MAX_IDENTITY_CHARS = 800

@@ -34,9 +34,9 @@ logger = logging.getLogger(__name__)
 
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
 PRIMARY_MODEL_KEY = "claude-haiku-5-5"
-# 3.8 Flash since 2026-09-24, when 3.5 Flash Lite left the catalog. Still a
-# different vendor from the primary, which is the point of a fallback.
-FALLBACK_MODEL_KEY = "gemini-3-8-flash"
+# Claude Sonnet 5.5 since 2026-11-21 (#489; 3.8 Flash before it): internal work
+# runs on the Claude API credits, and a different model from the primary.
+FALLBACK_MODEL_KEY = "claude-sonnet-5-5"
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "web_summarizer.md").read_text(
     encoding="utf-8"
