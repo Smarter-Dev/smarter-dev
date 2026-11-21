@@ -1598,3 +1598,107 @@ async def test_admin_pipeline_lint_sends_a_prefix_command_back_to_the_author():
     assert result.script == CLEAN_ADMIN_SCRIPT
     assert len(requests) == 2
     assert "prefix commands are prohibited" in requests[1]
+
+
+# --- Anthropic strict schema keeps the settings fields (#491) ---------------
+
+_SETTINGS_KEYS = {
+    "interval_seconds",
+    "daily_time",
+    "start_at",
+    "delay_seconds",
+    "fire_at",
+    "include_bot_messages",
+}
+
+
+async def _captured_anthropic_schema(model_id, output_type, level):
+    import json
+
+    import httpx2
+    from anthropic import AsyncAnthropic
+    from pydantic_ai import Agent
+    from pydantic_ai.models.anthropic import AnthropicModel
+    from pydantic_ai.providers.anthropic import AnthropicProvider
+
+    captured = {}
+
+    def respond(request):
+        captured["body"] = json.loads(request.content)
+        return httpx2.Response(
+            500, json={"type": "error", "error": {"type": "api_error", "message": "x"}}
+        )
+
+    client = AsyncAnthropic(
+        api_key="test",
+        http_client=httpx2.AsyncClient(transport=httpx2.MockTransport(respond)),
+        max_retries=0,
+    )
+    agent = Agent(
+        AnthropicModel(model_id, provider=AnthropicProvider(anthropic_client=client)),
+        output_type=output_type,
+        model_settings=_handler_model_settings(model_id, level),
+    )
+    with pytest.raises(Exception):
+        await agent.run("hi")
+    return captured["body"]
+
+
+def _settings_properties(body):
+    schema = body["output_config"]["format"]["schema"]
+    node = schema["properties"]["settings"]
+    node = node.get("$ref") and schema["$defs"][node["$ref"].split("/")[-1]] or node
+    return node["properties"]
+
+
+@pytest.mark.parametrize(
+    ("model_id", "plan", "level", "extra"),
+    [
+        ("claude-haiku-5-5", HandlerPlan, ReasoningLevel.MEDIUM, set()),
+        ("claude-opus-5-5", AdminHandlerPlan, ReasoningLevel.HIGH, {"allowed_role_ids"}),
+    ],
+)
+async def test_anthropic_request_schema_keeps_settings_fields(
+    model_id, plan, level, extra
+):
+    body = await _captured_anthropic_schema(model_id, plan, level)
+    assert body["thinking"] == {"type": "adaptive"}
+    assert set(_settings_properties(body)) == _SETTINGS_KEYS | extra
+
+
+def test_plan_settings_dump_drops_unset_keys():
+    from smarter_dev.bot.agents.handler_authoring import settings_dict
+
+    assert settings_dict(_plan().settings) == {}
+    plan = _plan(
+        trigger_type="schedule", settings={"daily_time": "08:00", "start_at": None}
+    )
+    assert settings_dict(plan.settings) == {"daily_time": "08:00"}
+    assert settings_dict(
+        AdminHandlerPlan(
+            feasible=True,
+            settings={"include_bot_messages": True, "allowed_role_ids": ["1"]},
+        ).settings
+    ) == {"include_bot_messages": True, "allowed_role_ids": ["1"]}
+
+
+@pytest.mark.parametrize(
+    ("trigger_type", "settings"),
+    [
+        ("schedule", {"interval_seconds": 3600}),
+        ("schedule", {"daily_time": "08:00"}),
+        ("timer", {"delay_seconds": 600}),
+    ],
+)
+async def test_pipeline_round_trips_time_settings(trigger_type, settings):
+    result = await run_creation_pipeline(
+        request="do it",
+        trigger_type=trigger_type,
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(_plan(trigger_type=trigger_type, settings=settings)),
+        judge=_judge_approving(),
+        now_utc=NOW_UTC,
+    )
+    assert result.ok, result.error
+    assert result.settings == settings
