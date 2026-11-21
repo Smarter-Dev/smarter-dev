@@ -12,6 +12,10 @@ Every SDK/client constructor takes its key from :func:`get_credential`; nothing
 else may read the legacy env names (``tests/shared/test_credentials.py``
 enforces that) and nothing writes keys back into ``os.environ``.
 
+Outside ``ENVIRONMENT`` in ``DEV_ENVIRONMENTS`` only the opaque ``v1.`` value is
+read; the legacy names are ignored. In development the legacy names, or a plain
+(non-``v1.``) value in the opaque name, still work so ``.env`` stays simple.
+
 CLI::
 
     printf %s "$RAW" | python -m smarter_dev.shared.credentials encode
@@ -32,7 +36,8 @@ logger = logging.getLogger(__name__)
 PREFIX = "v1."
 MASK = bytes.fromhex("f57d64f1e6341340da83b07d00003b1cb3478f4083d21eda")
 
-# logical name -> (opaque env var, legacy env vars in lookup order).
+# logical name -> (opaque env var, legacy env vars in lookup order). The legacy
+# names are read only in development and tests (see ``plain_names_allowed``).
 # The k8s secret key is the opaque env var lowercased.
 # The opaque name is ``None`` for a legacy-only entry (none at present).
 REGISTRY: dict[str, tuple[str | None, tuple[str, ...]]] = {
@@ -73,7 +78,17 @@ REGISTRY: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "admin_password": ("HDEAGJ", ("ADMIN_PASSWORD",)),
 }
 
+# Plain names and plain values are read only when ENVIRONMENT says this is a
+# developer machine or a test run. Unset or anything else (production, staging,
+# a typo) means opaque only, so a pod that loses its ConfigMap fails closed.
+DEV_ENVIRONMENTS = frozenset({"development", "test", "testing"})
+
 _logged: set[str] = set()
+
+
+def plain_names_allowed() -> bool:
+    """True on a developer machine or in tests (see ``DEV_ENVIRONMENTS``)."""
+    return os.environ.get("ENVIRONMENT", "").strip().lower() in DEV_ENVIRONMENTS
 
 
 def _keystream(length: int) -> bytes:
@@ -128,20 +143,40 @@ def get_credential(logical: str) -> str | None:
             if value:
                 _note_source(logical, "opaque")
                 return value
-            logger.warning(
-                "credential %s: %s decodes to an empty value; using legacy names",
-                logical,
-                opaque,
-            )
-    # --- PHASE 1 LEGACY FALLBACK: delete this block in phase 2 ---
-    for name in legacy:
-        value = os.environ.get(name, "").strip()
-        if value:
-            _note_source(logical, "legacy")
-            return value
-    # --- END PHASE 1 LEGACY FALLBACK ---
+            logger.warning("credential %s: %s decodes to an empty value", logical, opaque)
+    if plain_names_allowed():
+        # Local dev and tests only: a plain name (``OPENAI_API_KEY=...``) or a
+        # plain, non-``v1.`` value in the opaque name.
+        if encoded and not encoded.startswith(PREFIX):
+            _note_source(logical, "dev-plain")
+            return encoded
+        for name in legacy:
+            value = os.environ.get(name, "").strip()
+            if value:
+                _note_source(logical, "dev-plain")
+                return value
     _note_source(logical, "missing")
     return None
+
+
+class MissingCredentialError(RuntimeError):
+    """A client or model builder needs a credential that is not configured."""
+
+
+def require_credential(logical: str) -> str:
+    """Return the credential for ``logical`` or raise ``MissingCredentialError``.
+
+    Model and client builders use this instead of ``get_credential(...) or ""``:
+    the provider SDKs read their plain env var (``OPENAI_API_KEY`` ...) when
+    handed an empty key, which would bring the legacy fallback back.
+    """
+    value = get_credential(logical)
+    if not value:
+        opaque = REGISTRY[logical][0]
+        raise MissingCredentialError(
+            f"credential {logical!r} is not configured (set {opaque})"
+        )
+    return value
 
 
 def _main(argv: list[str]) -> int:

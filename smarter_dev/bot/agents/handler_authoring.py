@@ -60,7 +60,7 @@ from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
 from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import require_credential
 
 logger = logging.getLogger(__name__)
 
@@ -571,7 +571,7 @@ async def _list_channel_emojis(ctx: RunContext[_AuthorDeps]) -> list[dict]:
 
 
 def _build_google_model(model_id: str) -> GoogleModel:
-    api_key = get_credential("gemini") or ""
+    api_key = require_credential("gemini")
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 

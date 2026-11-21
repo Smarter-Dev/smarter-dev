@@ -20,7 +20,7 @@ auth:
   providers:
     discord:
       client_id: $DISCORD_APPLICATION_ID
-      client_secret: $DISCORD_APPLICATION_SECRET
+      client_secret: $SYJN54 # discord_client_secret
       scopes:
         - identify
         - email
@@ -28,12 +28,12 @@ auth:
     # with them before the site went Discord-only could not sign in.
     github:
       client_id: $GITHUB_CLIENT_ID
-      client_secret: $GITHUB_CLIENT_SECRET
+      client_secret: $RLOJVC # github_client_secret
       scopes:
         - user:email
     google:
       client_id: $GOOGLE_CLIENT_ID
-      client_secret: $GOOGLE_CLIENT_SECRET
+      client_secret: $ZVHJYO # google_client_secret
       scopes:
         - openid
         - email
@@ -194,8 +194,8 @@ storage:
         bucket: production-bucket-zechz-1234
         region: sfo3
         endpoint_url: https://sfo3.digitaloceanspaces.com
-        access_key_id: $SPACES_ACCESS_KEY
-        secret_access_key: $SPACES_SECRET_KEY
+        access_key_id: $RY7CUN # spaces_access_key
+        secret_access_key: $IJ2XAT # spaces_secret_key
         acl: public-read
         public_url: https://production-bucket-zechz-1234.sfo3.digitaloceanspaces.com
     chat_attachments:
@@ -205,8 +205,8 @@ storage:
         bucket: production-bucket-zechz-1234
         region: sfo3
         endpoint_url: https://sfo3.digitaloceanspaces.com
-        access_key_id: $SPACES_ACCESS_KEY
-        secret_access_key: $SPACES_SECRET_KEY
+        access_key_id: $RY7CUN # spaces_access_key
+        secret_access_key: $IJ2XAT # spaces_secret_key
         acl: private
         prefix: chat-attachments
 

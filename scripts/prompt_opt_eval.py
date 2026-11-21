@@ -65,6 +65,7 @@ from pydantic_ai.providers.google import GoogleProvider  # noqa: E402
 
 from chat_eval import _StubBot, _build_call, _parse_scenario  # noqa: E402
 
+from smarter_dev.shared.credentials import require_credential
 from smarter_dev.bot.agents import chat_models as cm  # noqa: E402
 from smarter_dev.bot.agents.chat_tools import ChatDeps  # noqa: E402
 from smarter_dev.bot.agents import chat_tools as ct  # noqa: E402
@@ -365,7 +366,7 @@ def build_agent(system_prompt: str, descriptions: dict[str, Any]) -> Agent:
     model = GoogleModel(
         MODEL_ID,
         provider=GoogleProvider(
-            api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            api_key=require_credential("gemini")
         ),
     )
     return Agent(

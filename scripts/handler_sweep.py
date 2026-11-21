@@ -49,6 +49,9 @@ def _configure_worker_runtime() -> None:
     needs the fire job modules imported, so ``submit()`` can resolve a payload
     to its job type; ``skrift workers run`` gets that from ``workers.imports``.
     """
+    from smarter_dev.shared.skrift_secrets import install
+
+    install()  # app.yaml secrets are opaque names; resolve them first
     from skrift.config import get_settings as get_skrift_settings
     from skrift.workers import configure_workers
 

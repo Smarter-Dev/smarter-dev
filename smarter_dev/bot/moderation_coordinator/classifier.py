@@ -1147,10 +1147,10 @@ def build_jev_model() -> Model:
     from typesafe_sdk import AsyncTypeSafeClient
     from typesafe_sdk._core.retry import RetryPolicy
 
-    from smarter_dev.shared.credentials import get_credential
+    from smarter_dev.shared.credentials import require_credential
 
     client = AsyncTypeSafeClient(
-        api_key=get_credential("typesafe"),
+        api_key=require_credential("typesafe"),
         retry=RetryPolicy(max_retries=0),
         timeout=DEADLINE_SECONDS,
         # Same as build_twopass_model: no brotli from this client.

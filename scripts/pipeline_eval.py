@@ -49,7 +49,6 @@ import asyncio
 import dataclasses
 import json
 import logging
-import os
 import secrets
 import sys
 import time
@@ -69,6 +68,7 @@ REPO = Path(__file__).resolve().parent.parent
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
 # Reuse the production resources-agent authoring prompt so the eval
@@ -111,7 +111,7 @@ def cost_for(model_id: str, input_tokens: int, output_tokens: int) -> float:
 # ---------------------------------------------------------------------------
 
 def _google_model(model_id: str) -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+    api_key = get_credential("gemini") or ""
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
@@ -123,7 +123,7 @@ def _openai_model(model_id: str):
     endpoint rejects the combo. Default to Responses for gpt-5*, keep
     Chat for older families.
     """
-    api_key = os.getenv("OPENAI_API_KEY") or ""
+    api_key = get_credential("openai") or ""
     provider = OpenAIProvider(api_key=api_key)
     if model_id.startswith("gpt-5"):
         return OpenAIResponsesModel(model_id, provider=provider)

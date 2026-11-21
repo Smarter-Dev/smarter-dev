@@ -58,11 +58,6 @@ spec:
                                 secretKeyRef:
                                     name: smarter-dev-secrets
                                     key: redis-url
-                          - name: POLAR_ACCESS_TOKEN
-                            valueFrom:
-                                secretKeyRef:
-                                    name: smarter-dev-secrets
-                                    key: polar-access-token
                           - name: SIKL1V
                             valueFrom:
                               secretKeyRef:
@@ -72,33 +67,18 @@ spec:
                           # Keep in sync with the web deployment's POLAR_SERVER.
                           - name: POLAR_SERVER
                             value: "production"
-                          - name: DISCORD_BOT_TOKEN
-                            valueFrom:
-                                secretKeyRef:
-                                    name: smarter-dev-secrets
-                                    key: discord-bot-token
                           - name: FHI1OT
                             valueFrom:
                               secretKeyRef:
                                 name: smarter-dev-secrets
                                 key: fhi1ot
                                 optional: false
-                          - name: BOT_API_KEY
-                            valueFrom:
-                                secretKeyRef:
-                                    name: smarter-dev-secrets
-                                    key: bot-api-key
                           - name: FB3OSY
                             valueFrom:
                               secretKeyRef:
                                 name: smarter-dev-secrets
                                 key: fb3osy
                                 optional: false
-                          - name: RESEND_API_KEY
-                            valueFrom:
-                                secretKeyRef:
-                                    name: smarter-dev-secrets
-                                    key: resend-api-key
                           - name: QMH07U
                             valueFrom:
                               secretKeyRef:

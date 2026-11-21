@@ -44,6 +44,11 @@ WORKER_TABLES = [
 ACCOUNT_TABLES = [User.__table__, OAuthAccount.__table__]
 
 
+# Plain credential names are read only when ENVIRONMENT is development or test
+# (smarter_dev/shared/credentials.py); tests that exercise the production path
+# monkeypatch it to "production".
+os.environ["ENVIRONMENT"] = "testing"
+
 # Test configuration
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 TEST_REDIS_URL = "redis://localhost:6379/15"  # Use a different DB for tests

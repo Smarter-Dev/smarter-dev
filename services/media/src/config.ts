@@ -1,6 +1,6 @@
 /** Environment parsing. Every failure here stops the process before it listens. */
 
-import { decodeValue } from "./credentials.js";
+import { PREFIX, decodeValue } from "./credentials.js";
 
 export interface MediaConfig {
   apiKey: string;
@@ -26,6 +26,11 @@ function readInteger(environment: NodeJS.ProcessEnv, name: string, fallback: num
   return parsed;
 }
 
+// Plain values are accepted only on a developer machine or in tests, the same
+// rule as smarter_dev/shared/credentials.py. Unset or anything else (production)
+// means a valid v1 value in HVTH7T or nothing.
+const DEV_ENVIRONMENTS = new Set(["development", "test", "testing"]);
+
 function readApiKey(environment: NodeJS.ProcessEnv): string {
   const encoded = (environment.HVTH7T ?? "").trim();
   if (encoded) {
@@ -34,14 +39,18 @@ function readApiKey(environment: NodeJS.ProcessEnv): string {
       if (value) {
         return value;
       }
-      console.warn("credential: HVTH7T decodes to an empty value; using legacy names");
+      console.warn("credential: HVTH7T decodes to an empty value");
     } catch {
-      console.error("credential: HVTH7T is not a valid v1 value; using legacy names");
+      console.error("credential: HVTH7T is not a valid v1 value");
     }
   }
-  // --- PHASE 1 LEGACY FALLBACK: delete this block in phase 2 ---
-  return (environment.MEDIA_API_KEY ?? "").trim();
-  // --- END PHASE 1 LEGACY FALLBACK ---
+  if (DEV_ENVIRONMENTS.has((environment.ENVIRONMENT ?? "").trim().toLowerCase())) {
+    if (encoded && !encoded.startsWith(PREFIX)) {
+      return encoded;
+    }
+    return (environment.MEDIA_API_KEY ?? "").trim();
+  }
+  return "";
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): MediaConfig {

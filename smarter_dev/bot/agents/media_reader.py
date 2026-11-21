@@ -37,7 +37,7 @@ from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_model_for_id
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import require_credential
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +66,7 @@ def _build_model() -> Model:
 
 
 def _build_audio_model() -> GoogleModel:
-    api_key = get_credential("gemini") or ""
+    api_key = require_credential("gemini")
     model_id = os.getenv(AUDIO_MODEL_ENV_VAR, DEFAULT_AUDIO_MODEL)
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 

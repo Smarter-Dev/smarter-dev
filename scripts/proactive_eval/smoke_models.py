@@ -17,6 +17,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.bot.proactive.models import build_watcher_runner
 from smarter_dev.bot.proactive.models import typesafe_key_present
 
@@ -28,17 +29,13 @@ DEFAULT_MODELS = ("typesafe:jev-latest", "z-ai/glm-5.3-flash")
 
 def _glm_key_present() -> bool:
     proxy_ready = bool(os.getenv("LITELLM_ENDPOINT") and os.getenv("LITELLM_API_KEY"))
-    openrouter_ready = bool(
-        os.getenv("OPENROUTER_API_KEY")
-        or os.getenv("OPEN_ROUTER_API_KEY")
-        or os.getenv("OPEN_ROUTER")
-    )
+    openrouter_ready = bool(get_credential("openrouter"))
     return proxy_ready or openrouter_ready
 
 
 def _check_credentials(model_id: str) -> None:
     if model_id.startswith("typesafe:") and not typesafe_key_present():
-        raise SystemExit("TYPESAFE_API_KEY or JEV_API_KEY is not set")
+        raise SystemExit("the TypeSafe key (DAWTIY) is not set")
     if model_id == "z-ai/glm-5.3-flash" and not _glm_key_present():
         raise SystemExit(
             "GLM needs LITELLM_ENDPOINT plus LITELLM_API_KEY, or an "

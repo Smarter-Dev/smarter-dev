@@ -319,11 +319,10 @@ def test_manifest_secret_scope_and_workflow_order():
             template = doc.get("spec", {}).get("template", {}).get("spec", {})
             for container in template.get("containers", []):
                 for env in container.get("env", []):
-                    if env["name"] == "SITE_IDENTITY_FENCE_KEY":
-                        assert env["valueFrom"]["secretKeyRef"] == {
-                            "name": "smarter-dev-secrets",
-                            "key": "site-identity-fence-key",
-                        }
+                    if env["name"] == "JSGALT":
+                        ref = dict(env["valueFrom"]["secretKeyRef"])
+                        assert ref.pop("optional") is False
+                        assert ref == {"name": "smarter-dev-secrets", "key": "jsgalt"}
                         keyed.append(path.name)
     assert sorted(keyed) == ["deploy-worker.yaml", "deploy.yaml", "migrate-job.yaml"]
     workflow = yaml.safe_load((ROOT / ".github/workflows/deploy.yaml").read_text())

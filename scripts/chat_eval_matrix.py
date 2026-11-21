@@ -42,6 +42,7 @@ from chat_eval import _StubBot, _build_call, _parse_scenario  # noqa: E402
 import eval_prices  # noqa: E402
 from genai_prices import Usage, calc_price  # noqa: E402
 
+from smarter_dev.shared.credentials import require_credential
 from smarter_dev.bot.agents.chat_agent import SYSTEM_PROMPT  # noqa: E402
 from smarter_dev.bot.agents.chat_models import AgentReturn  # noqa: E402
 from smarter_dev.bot.agents.chat_tools import ChatDeps  # noqa: E402
@@ -74,7 +75,7 @@ def build_agent(provider: str, model_id: str) -> Agent:
         model = GoogleModel(
             model_id,
             provider=GoogleProvider(
-                api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+                api_key=require_credential("gemini")
             ),
         )
         settings = GoogleModelSettings(
@@ -82,7 +83,7 @@ def build_agent(provider: str, model_id: str) -> Agent:
         )
     elif provider == "openai":
         model = OpenAIResponsesModel(
-            model_id, provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY"))
+            model_id, provider=OpenAIProvider(api_key=require_credential("openai"))
         )
         settings = OpenAIResponsesModelSettings(openai_reasoning_effort="medium")
     else:

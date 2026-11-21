@@ -36,7 +36,7 @@ from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.shared.config import get_settings
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import require_credential
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
@@ -76,20 +76,18 @@ ANTHROPIC_NO_MESSAGE_CACHE = AnthropicModelSettings(anthropic_cache_messages=Fal
 
 def anthropic_api_key() -> str:
     """The direct Claude API key (opaque name first, then legacy names)."""
-    return (
-        get_credential("anthropic") or ""
-    )
+    return require_credential("anthropic")
 
 
 def build_model_for(model: CatalogModel) -> Model:
     """Return a configured Pydantic AI ``Model`` for ``model``."""
     if model.provider is ModelProvider.GOOGLE:
-        api_key = get_credential("gemini") or ""
+        api_key = require_credential("gemini")
         return GoogleModel(model.model_id, provider=GoogleProvider(api_key=api_key))
     if model.provider is ModelProvider.OPENAI:
         return OpenAIResponsesModel(
             model.model_id,
-            provider=OpenAIProvider(api_key=get_credential("openai") or ""),
+            provider=OpenAIProvider(api_key=require_credential("openai")),
         )
     if model.provider is ModelProvider.ANTHROPIC:
         provider = AnthropicProvider(api_key=anthropic_api_key())
@@ -108,8 +106,7 @@ def build_model_for(model: CatalogModel) -> Model:
             settings=ANTHROPIC_CACHE_SETTINGS,
         )
     if model.provider is ModelProvider.OPENROUTER:
-        api_key = get_credential("openrouter")
-        provider = OpenRouterProvider(api_key=api_key or "")
+        provider = OpenRouterProvider(api_key=require_credential("openrouter"))
         if not model.supports_forced_tool_choice:
             # e.g. Claude Sonnet 5.5: its endpoints list tool_choice "required"
             # as unsupported, so offer the output tool on "auto". Only this

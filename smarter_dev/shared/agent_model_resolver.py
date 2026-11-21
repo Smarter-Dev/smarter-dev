@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import require_credential
 
 
 def resolve_model_name(model_id: str) -> Any:
@@ -20,21 +20,21 @@ def resolve_model_name(model_id: str) -> Any:
         from pydantic_ai.providers.anthropic import AnthropicProvider
 
         return AnthropicModel(
-            name, provider=AnthropicProvider(api_key=get_credential("anthropic"))
+            name, provider=AnthropicProvider(api_key=require_credential("anthropic"))
         )
     if prefix == "openai-responses":
         from pydantic_ai.models.openai import OpenAIResponsesModel
         from pydantic_ai.providers.openai import OpenAIProvider
 
         return OpenAIResponsesModel(
-            name, provider=OpenAIProvider(api_key=get_credential("openai"))
+            name, provider=OpenAIProvider(api_key=require_credential("openai"))
         )
     if prefix == "google-gla":
         from pydantic_ai.models.google import GoogleModel
         from pydantic_ai.providers.google import GoogleProvider
 
         return GoogleModel(
-            name, provider=GoogleProvider(api_key=get_credential("gemini"))
+            name, provider=GoogleProvider(api_key=require_credential("gemini"))
         )
     raise ValueError(f"No model resolver for {model_id!r}")
 

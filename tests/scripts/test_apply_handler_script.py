@@ -338,4 +338,4 @@ def test_a_missing_key_stops_before_any_request(script_file, monkeypatch, capsys
     )
 
     assert code == 2
-    assert "BOT_API_KEY" in capsys.readouterr().err
+    assert "FB3OSY" in capsys.readouterr().err

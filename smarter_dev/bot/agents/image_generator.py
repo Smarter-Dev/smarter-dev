@@ -13,7 +13,7 @@ import os
 
 from google import genai
 from google.genai import types
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import require_credential
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ _client: genai.Client | None = None
 def _get_client() -> genai.Client:
     global _client
     if _client is None:
-        api_key = get_credential("gemini") or ""
+        api_key = require_credential("gemini")
         _client = genai.Client(api_key=api_key)
     return _client
 

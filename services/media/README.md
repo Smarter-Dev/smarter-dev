@@ -8,18 +8,18 @@ bot image used to do in-process:
 3. **Image cards** — the fourteen 960×540 Discord embed cards.
 
 There is no Ingress and no anonymous access: every route except `/health`
-requires `Authorization: Bearer $MEDIA_API_KEY`.
+requires `Authorization: Bearer <the HVTH7T value>`.
 
 ## Local development
 
 ```sh
 cd services/media
 npm install
-MEDIA_API_KEY=dev-media-key-not-secret npm run dev
+ENVIRONMENT=development HVTH7T=dev-media-key-not-secret npm run dev
 ```
 
 `npm run dev` runs `src/main.ts` through `tsx` with watch mode. The process
-refuses to start if `MEDIA_API_KEY` is missing or shorter than 16 characters, if
+refuses to start if `HVTH7T` is missing or shorter than 16 characters, if
 `ffmpeg` is not on `PATH`, or if any font or background asset is missing.
 
 | Script | What it does |
@@ -34,7 +34,8 @@ refuses to start if `MEDIA_API_KEY` is missing or shorter than 16 characters, if
 
 | Name | Default | Meaning |
 |---|---|---|
-| `MEDIA_API_KEY` | — | **Required.** Shared bearer token, minimum 16 characters. |
+| `HVTH7T` | — | **Required.** Shared bearer token, minimum 16 characters, stored as a `v1.`-encoded value (`python -m smarter_dev.shared.credentials encode`). With `ENVIRONMENT=development` (or `test`) a plain value, or the plain name `MEDIA_API_KEY`, also works; in any other environment only a valid `v1.` value does. |
+| `ENVIRONMENT` | — | Only `development`, `test` and `testing` allow the plain forms above; unset means production rules. |
 | `MEDIA_PORT` | `8080` | Listen port. |
 | `MEDIA_LOG_LEVEL` | `info` | pino level. |
 | `MEDIA_LATEX_TIMEOUT_MS` | `5000` | Deadline for one `/v1/latex` render. |
@@ -154,7 +155,7 @@ If a fixture looks wrong, fix the exporter and regenerate.
 ```
 src/
   main.ts          entrypoint: loadConfig -> deps -> buildServer -> listen
-  config.ts        env parsing; throws on a missing or short MEDIA_API_KEY
+  config.ts        env parsing; throws on a missing or short HVTH7T
   server.ts        buildServer(config, deps) -> FastifyInstance (no listen)
   dependencies.ts  the seam tests stub
   auth.ts          bearer-token onRequest hook

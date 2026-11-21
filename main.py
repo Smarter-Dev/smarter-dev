@@ -11,8 +11,12 @@ smarter_dev.web.api_native, registered in the app yamls.
 import logging
 
 from smarter_dev.shared.observability import configure_observability
+from smarter_dev.shared.skrift_secrets import install as install_skrift_secrets
 from smarter_dev.web.exception_handlers import install_exception_handlers
 
+# Skrift fills app.yaml `$VAR` secrets from os.environ; this resolves the
+# credential ones through get_credential() before it loads its settings.
+install_skrift_secrets()
 configure_observability("smarter-dev-web")
 install_exception_handlers()
 

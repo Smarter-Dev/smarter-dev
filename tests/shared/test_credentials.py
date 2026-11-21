@@ -54,46 +54,85 @@ def test_decode_rejects_non_base64url_body(body: str) -> None:
         decode_value("v1." + body)
 
 
+def _clear(monkeypatch: pytest.MonkeyPatch, logical: str, environment: str) -> None:
+    opaque, legacy = REGISTRY[logical]
+    for name in ((opaque,) if opaque else ()) + legacy:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("ENVIRONMENT", environment)
+    credentials._logged.discard(logical)
+
+
 def test_values_are_stripped(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear(monkeypatch, "media_api_key")
+    _clear(monkeypatch, "media_api_key", "production")
     monkeypatch.setenv("HVTH7T", encode_value("opaque-value\n"))
     assert get_credential("media_api_key") == "opaque-value"
-    monkeypatch.delenv("HVTH7T")
-    credentials._logged.discard("media_api_key")
+    _clear(monkeypatch, "media_api_key", "development")
     monkeypatch.setenv("MEDIA_API_KEY", "  legacy-value \n")
     assert get_credential("media_api_key") == "legacy-value"
 
 
-def test_blank_opaque_warns_and_falls_back(
+@pytest.mark.parametrize("environment", ["production", "staging", "prod", ""])
+def test_legacy_names_and_plain_values_are_ignored_outside_dev(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    """Every credential with an opaque name, not just one."""
+    for logical, (opaque, legacy) in REGISTRY.items():
+        _clear(monkeypatch, logical, environment)
+        for name in legacy:
+            monkeypatch.setenv(name, "legacy-value")
+        assert get_credential(logical) is None, logical
+        if opaque:
+            monkeypatch.setenv(opaque, "plain-value-without-prefix")
+            assert get_credential(logical) is None, logical
+            monkeypatch.setenv(opaque, encode_value("opaque-value"))
+            assert get_credential(logical) == "opaque-value", logical
+        for name in legacy:
+            monkeypatch.delenv(name)
+
+
+def test_unset_environment_is_not_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch, "jina", "production")
+    monkeypatch.delenv("ENVIRONMENT")
+    monkeypatch.setenv("JINA_API_KEY", "legacy")
+    assert get_credential("jina") is None
+
+
+@pytest.mark.parametrize("environment", ["development", "test", "testing", "Development "])
+def test_dev_accepts_legacy_names_and_plain_opaque_values(
+    monkeypatch: pytest.MonkeyPatch, environment: str
+) -> None:
+    _clear(monkeypatch, "jina", environment)
+    monkeypatch.setenv("JINA_API_KEY", "legacy")
+    assert get_credential("jina") == "legacy"
+    monkeypatch.setenv("IDNDWL", "plain-in-opaque-name")
+    assert get_credential("jina") == "plain-in-opaque-name"
+
+
+def test_blank_opaque_is_ignored_in_production_and_falls_back_in_dev(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _clear(monkeypatch, "media_api_key")
+    _clear(monkeypatch, "media_api_key", "production")
     monkeypatch.setenv("HVTH7T", encode_value("  \n"))
     monkeypatch.setenv("MEDIA_API_KEY", "legacy-value")
     with caplog.at_level(logging.WARNING, logger=credentials.logger.name):
-        assert get_credential("media_api_key") == "legacy-value"
+        assert get_credential("media_api_key") is None
     assert any(
         r.levelno == logging.WARNING and "HVTH7T" in r.getMessage()
         for r in caplog.records
     )
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    assert get_credential("media_api_key") == "legacy-value"
 
 
-def _clear(monkeypatch: pytest.MonkeyPatch, logical: str) -> None:
-    opaque, legacy = REGISTRY[logical]
-    for name in ((opaque,) if opaque else ()) + legacy:
-        monkeypatch.delenv(name, raising=False)
-    credentials._logged.discard(logical)
-
-
-def test_opaque_wins_over_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear(monkeypatch, "media_api_key")
+def test_opaque_wins_over_legacy_in_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch, "media_api_key", "development")
     monkeypatch.setenv("MEDIA_API_KEY", "legacy-value")
     monkeypatch.setenv("HVTH7T", encode_value("opaque-value"))
     assert get_credential("media_api_key") == "opaque-value"
 
 
-def test_legacy_fallback_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear(monkeypatch, "gemini")
+def test_dev_legacy_names_in_lookup_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    _clear(monkeypatch, "gemini", "development")
     monkeypatch.setenv("GOOGLE_API_KEY", "second")
     assert get_credential("gemini") == "second"
     monkeypatch.setenv("GEMINI_API_KEY", "first")
@@ -101,21 +140,38 @@ def test_legacy_fallback_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_missing_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear(monkeypatch, "jina")
+    _clear(monkeypatch, "jina", "production")
     assert get_credential("jina") is None
 
 
-def test_invalid_opaque_falls_back_to_legacy(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear(monkeypatch, "jina")
-    monkeypatch.setenv("IDNDWL", "not-encoded")
+def test_invalid_v1_opaque_is_none_in_production_and_legacy_in_dev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _clear(monkeypatch, "jina", "production")
+    monkeypatch.setenv("IDNDWL", "v1.!!!")
     monkeypatch.setenv("JINA_API_KEY", "legacy")
+    assert get_credential("jina") is None
+    monkeypatch.setenv("ENVIRONMENT", "development")
     assert get_credential("jina") == "legacy"
+
+
+def test_settings_drop_plain_env_values_outside_dev(monkeypatch: pytest.MonkeyPatch) -> None:
+    from smarter_dev.shared.config import Settings
+
+    _clear(monkeypatch, "media_api_key", "production")
+    monkeypatch.setenv("MEDIA_API_KEY", "legacy-value")
+    assert Settings(_env_file=None).media_api_key == ""
+    monkeypatch.setenv("HVTH7T", encode_value("opaque-value"))
+    assert Settings(_env_file=None).media_api_key == "opaque-value"
+    _clear(monkeypatch, "media_api_key", "development")
+    monkeypatch.setenv("MEDIA_API_KEY", "legacy-value")
+    assert Settings(_env_file=None).media_api_key == "legacy-value"
 
 
 def test_source_logged_once_and_never_the_value(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    _clear(monkeypatch, "youtube")
+    _clear(monkeypatch, "youtube", "production")
     monkeypatch.setenv("WFZ62P", encode_value("super-secret-value"))
     with caplog.at_level(logging.INFO, logger=credentials.logger.name):
         get_credential("youtube")
@@ -127,7 +183,7 @@ def test_source_logged_once_and_never_the_value(
 
 
 def test_no_writeback_to_environ(monkeypatch: pytest.MonkeyPatch) -> None:
-    _clear(monkeypatch, "typesafe")
+    _clear(monkeypatch, "typesafe", "development")
     monkeypatch.setenv("JEV_API_KEY", "legacy-test-key")
     assert get_credential("typesafe") == "legacy-test-key"
     import os
@@ -163,20 +219,19 @@ def test_cli_encode_and_decode_check() -> None:
     assert bad.returncode == 1
 
 
-def test_legacy_env_names_only_read_through_the_registry() -> None:
-    names = {n for _, legacy in REGISTRY.values() for n in legacy}
-    # "OPEN_ROUTER" is a prefix of other words; match whole quoted literals only.
-    pattern = re.compile(
-        r"""["'](""" + "|".join(sorted(names, key=len, reverse=True)) + r""")["']"""
+def _legacy_names() -> list[str]:
+    return sorted(
+        {n for _, legacy in REGISTRY.values() for n in legacy}, key=len, reverse=True
     )
-    # Local dev/eval scripts and the manifest checker take plain names by design.
-    exempt = {
-        "scripts/pipeline_eval.py", "scripts/announce.py",
-        "scripts/apply_handler_script.py", "scripts/chat_eval_matrix.py",
-        "scripts/code_mode_eval.py", "scripts/identity_rollout_control.py",
-        "scripts/image_palette_samples.py", "scripts/prompt_opt_eval.py",
-        "scripts/local_harness/config.py", "scripts/proactive_eval/smoke_models.py",
-    }
+
+
+def test_legacy_env_names_only_read_through_the_registry() -> None:
+    """No non-test Python names a legacy credential env var, anywhere."""
+    # "OPEN_ROUTER" is a prefix of other words; match whole quoted literals only.
+    pattern = re.compile(r"""["'](""" + "|".join(_legacy_names()) + r""")["']""")
+    # The local harness *writes* dummy dev values into the env of the child
+    # processes it launches (ENVIRONMENT=development); it reads nothing.
+    exempt = {"scripts/local_harness/config.py"}
     offenders: list[str] = []
     for root in ("smarter_dev", "scripts"):
         for path in (REPO / root).rglob("*.py"):
@@ -189,6 +244,39 @@ def test_legacy_env_names_only_read_through_the_registry() -> None:
                 line = text.count("\n", 0, match.start()) + 1
                 offenders.append(f"{path.relative_to(REPO)}:{line} {match.group(1)}")
     assert not offenders, "read credentials via get_credential():\n" + "\n".join(offenders)
+
+
+def test_manifests_and_app_yaml_use_no_legacy_credential_names() -> None:
+    """k8s env entries and Skrift ``$VAR`` references name opaque vars only."""
+    names = "|".join(_legacy_names())
+    pattern = re.compile(r"(?:name:\s*|\$)(" + names + r")\b")
+    offenders: list[str] = []
+    files = [*(REPO / "k8s").glob("*.yaml"), *REPO.glob("app*.yaml")]
+    for path in files:
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            for match in pattern.finditer(line):
+                offenders.append(f"{path.relative_to(REPO)}:{number} {match.group(1)}")
+    assert not offenders, "\n".join(offenders)
+
+
+def test_manifests_do_not_mount_legacy_secret_keys() -> None:
+    legacy_keys = {n.lower().replace("_", "-") for n in _legacy_names()}
+    pattern = re.compile(r"^\s*key:\s*(\S+)\s*$")
+    offenders = [
+        f"{path.relative_to(REPO)}:{number} {match.group(1)}"
+        for path in (REPO / "k8s").glob("*.yaml")
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+        if (match := pattern.match(line)) and match.group(1) in legacy_keys
+    ]
+    assert not offenders, "\n".join(offenders)
+
+
+def test_media_service_reads_only_the_opaque_name_outside_dev() -> None:
+    source = (REPO / "services/media/src/config.ts").read_text(encoding="utf-8")
+    assert "PHASE 1" not in source
+    assert source.count("MEDIA_API_KEY") == 1  # the development-only branch
 
 
 def _non_test_sources():
@@ -289,3 +377,73 @@ def test_usage_meter_wraps_a_model_name_with_the_explicit_key(
     monkeypatch.setenv("KMSVP8", encode_value("sk-ant-test-key"))
     wrapped = UsageMeter().wrap("anthropic:claude-haiku-5-5")
     assert wrapped.wrapped.client.api_key == "sk-ant-test-key"
+
+
+def test_every_settings_field_named_like_a_legacy_name_is_registry_backed() -> None:
+    """A pydantic-settings field ``foo_key`` reads plain ``FOO_KEY`` and ``.env``.
+
+    Any field whose upper-cased name is a legacy credential name (or an opaque
+    one) must be in ``CREDENTIAL_FIELDS`` so prod drops the plain value.
+    """
+    from smarter_dev.shared.config import CREDENTIAL_FIELDS
+    from smarter_dev.shared.config import Settings
+
+    names = set(_legacy_names()) | {o for o, _ in REGISTRY.values() if o}
+    fields = {f for f in Settings.model_fields if f.upper() in names}
+    assert fields <= set(CREDENTIAL_FIELDS), sorted(
+        fields - set(CREDENTIAL_FIELDS)
+    )
+    assert set(CREDENTIAL_FIELDS.values()) <= set(REGISTRY)
+
+
+def test_settings_ignore_plain_env_and_dotenv_for_every_credential_field(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from smarter_dev.shared.config import CREDENTIAL_FIELDS
+    from smarter_dev.shared.config import Settings
+
+    for logical, (opaque, legacy) in REGISTRY.items():
+        _clear(monkeypatch, logical, "production")
+    env_file = tmp_path / ".env"
+    lines = []
+    for field in CREDENTIAL_FIELDS:
+        monkeypatch.setenv(field.upper(), "plain-env-value-" + "x" * 40)
+        lines.append(f"{field.upper()}=plain-dotenv-value-" + "x" * 40)
+    env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    for source in (None, env_file):
+        settings = Settings(_env_file=source)
+        for field in CREDENTIAL_FIELDS:
+            assert "plain" not in str(getattr(settings, field)), field
+
+
+def test_model_and_client_builders_raise_on_a_missing_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty key would make the SDK read the plain env var itself."""
+    from smarter_dev.shared import agent_model_resolver
+    from smarter_dev.shared.credentials import MissingCredentialError
+    from smarter_dev.shared.credentials import require_credential
+
+    for logical in REGISTRY:
+        _clear(monkeypatch, logical, "production")
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
+        monkeypatch.setenv(name, "plain-env-value-" + "x" * 40)
+    with pytest.raises(MissingCredentialError):
+        require_credential("openai")
+    for model_id in ("anthropic:x", "openai-responses:x", "google-gla:x"):
+        with pytest.raises(MissingCredentialError):
+            agent_model_resolver.resolve_model_name(model_id)
+
+
+def test_no_builder_passes_an_empty_default_api_key() -> None:
+    """``api_key=get_credential(...)`` or ``... or ""`` lets SDKs read the env."""
+    pattern = re.compile(r"""[(,]\s*api_key=get_credential\(""")
+    offenders = [
+        f"{path.relative_to(REPO)}:{text.count(chr(10), 0, m.start()) + 1}"
+        for root in ("smarter_dev", "scripts")
+        for path in (REPO / root).rglob("*.py")
+        if path.name != "credentials.py"
+        for text in [path.read_text(encoding="utf-8")]
+        for m in pattern.finditer(text)
+    ]
+    assert not offenders, "use require_credential() for SDK keys:\n" + "\n".join(offenders)
