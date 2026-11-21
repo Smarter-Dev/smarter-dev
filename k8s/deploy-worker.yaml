@@ -43,7 +43,7 @@ spec:
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
                 # Drain root jobs only. Chat roots may await child jobs, so a separate
                 # deployment drains chat-subagents without queue starvation.
-                command: ["/app/.venv/bin/python", "-m", "scripts.identity_worker_gate", "/app/.venv/bin/skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
+                command: ["/app/.venv/bin/python", "-m", "scripts.identity_worker_gate", "/app/.venv/bin/python", "-m", "smarter_dev.shared.skrift_secrets", "workers", "run", "--queue", "agents", "--concurrency", "8"]
                 # During the first transition, Ready means key verified, but the
                 # consumer stays held until the operator verifies all writers.
                 readinessProbe:
@@ -60,11 +60,6 @@ spec:
                 env:
                   # Stable, independently managed deletion-fence key; never rotate
                   # with API/session keys. Pin before rolling these writers.
-                  - name: SITE_IDENTITY_FENCE_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: site-identity-fence-key
                   - name: JSGALT
                     valueFrom:
                       secretKeyRef:
@@ -81,33 +76,18 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: redis-url
-                  - name: API_SECRET_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: api-secret-key
                   - name: QT9YEP
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: qt9yep
                         optional: false
-                  - name: WEB_SESSION_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: web-session-secret
                   - name: URH8MJ
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: urh8mj
                         optional: false
-                  - name: SECRET_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: secret-key
                   - name: AOR1KG
                     valueFrom:
                       secretKeyRef:
@@ -117,22 +97,12 @@ spec:
                   # Object storage (DigitalOcean Spaces) — app.yaml's
                   # storage.stores.default.s3 block interpolates these at
                   # config-load time, so the process won't boot without them.
-                  - name: SPACES_ACCESS_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: spaces-access-key
                   - name: RY7CUN
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: ry7cun
                         optional: false
-                  - name: SPACES_SECRET_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: spaces-secret-key
                   - name: IJ2XAT
                     valueFrom:
                       secretKeyRef:
@@ -146,11 +116,6 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-client-id
-                  - name: DISCORD_CLIENT_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: discord-client-secret
                   - name: SYJN54
                     valueFrom:
                       secretKeyRef:
@@ -162,21 +127,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-application-id
-                  - name: DISCORD_APPLICATION_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: discord-client-secret
                   - name: DISCORD_REDIRECT_URI
                     valueFrom:
                       configMapKeyRef:
                         name: smarter-dev-config
                         key: DISCORD_REDIRECT_URI
-                  - name: DISCORD_BOT_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: discord-bot-token
                   - name: FHI1OT
                     valueFrom:
                       secretKeyRef:
@@ -188,11 +143,6 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: github-client-id
-                  - name: GITHUB_CLIENT_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: github-client-secret
                   - name: RLOJVC
                     valueFrom:
                       secretKeyRef:
@@ -204,11 +154,6 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: google-client-id
-                  - name: GOOGLE_CLIENT_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: google-client-secret
                   - name: ZVHJYO
                     valueFrom:
                       secretKeyRef:
@@ -216,72 +161,40 @@ spec:
                         key: zvhjyo
                         optional: false
                   # LLM providers used by the agents executed here.
-                  - name: GEMINI_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: gemini-api-key
                   - name: IN8OID
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: in8oid
                         optional: false
-                  - name: OPENAI_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: openai-api-key
                   - name: IRBCKR
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: irbckr
                         optional: false
-                  - name: ANTHROPIC_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: anthropic-api-key
                   - name: KMSVP8
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: kmsvp8
                         optional: false
-                  - name: OPENROUTER_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: openrouter-api-key
-                        optional: true
                   - name: RCGW3A
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: rcgw3a
                         optional: false
-                  - name: LOGFIRE_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: logfire-token
-                        optional: true
                   - name: PB9FQN
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: pb9fqn
-                        optional: false
+                        optional: true
                   - name: LOGFIRE_SERVICE_NAME
                     value: "smarter-dev-agent-worker"
                   - name: LOGFIRE_SERVICE_VERSION
                     value: "<IMAGE_VERSION>"
-                  - name: POLAR_ACCESS_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: polar-access-token
                   - name: SIKL1V
                     valueFrom:
                       secretKeyRef:
@@ -291,22 +204,12 @@ spec:
                   - name: POLAR_SERVER
                     value: "production"
                   # Research/blogging agent tool credentials.
-                  - name: JINA_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: jina-api-key
                   - name: IDNDWL
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: idndwl
                         optional: false
-                  - name: BRAVE_SEARCH_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: brave-search-api-key
                   - name: AO6HUE
                     valueFrom:
                       secretKeyRef:
@@ -314,33 +217,18 @@ spec:
                         key: ao6hue
                         optional: false
                   # Jev ranks the dashboard's web search results.
-                  - name: TYPESAFE_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: typesafe-api-key
                   - name: DAWTIY
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: dawtiy
                         optional: false
-                  - name: YOUTUBE_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: youtube-api-key
                   - name: WFZ62P
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: wfz62p
                         optional: false
-                  - name: RESEND_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: resend-api-key
                   - name: QMH07U
                     valueFrom:
                       secretKeyRef:

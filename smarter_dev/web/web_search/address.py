@@ -123,10 +123,10 @@ def build_client():
     from typesafe_sdk import AsyncTypeSafeClient
 
     # gzip only: httpx2 can't decode TypeSafe's brotli responses.
-    from smarter_dev.shared.credentials import get_credential
+    from smarter_dev.shared.credentials import require_credential
 
     return AsyncTypeSafeClient(
-        api_key=get_credential("typesafe"),
+        api_key=require_credential("typesafe"),
         model=ADDRESS_MODEL,
         timeout=TIMEOUT_SECONDS,
         http_client=httpx2.AsyncClient(

@@ -43,11 +43,6 @@ spec:
                   name: site-identity-rollout
                   key: phase
             # Trusted post-migration pin uses the SAME key as every deletion writer.
-            - name: SITE_IDENTITY_FENCE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: site-identity-fence-key
             - name: JSGALT
               valueFrom:
                 secretKeyRef:
@@ -66,33 +61,18 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: redis-url
-            - name: API_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: api-secret-key
             - name: QT9YEP
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: qt9yep
                   optional: false
-            - name: WEB_SESSION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: web-session-secret
             - name: URH8MJ
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: urh8mj
                   optional: false
-            - name: SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: secret-key
             - name: AOR1KG
               valueFrom:
                 secretKeyRef:
@@ -105,11 +85,6 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: discord-application-id
-            - name: DISCORD_APPLICATION_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: discord-client-secret
             - name: SYJN54
               valueFrom:
                 secretKeyRef:
@@ -121,11 +96,6 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: github-client-id
-            - name: GITHUB_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: github-client-secret
             - name: RLOJVC
               valueFrom:
                 secretKeyRef:
@@ -137,33 +107,18 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: google-client-id
-            - name: GOOGLE_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: google-client-secret
             - name: ZVHJYO
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: zvhjyo
                   optional: false
-            - name: SPACES_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: spaces-access-key
             - name: RY7CUN
               valueFrom:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: ry7cun
                   optional: false
-            - name: SPACES_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: smarter-dev-secrets
-                  key: spaces-secret-key
             - name: IJ2XAT
               valueFrom:
                 secretKeyRef:

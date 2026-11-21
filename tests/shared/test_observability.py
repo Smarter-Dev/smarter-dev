@@ -13,6 +13,7 @@ import pytest
 import yaml
 
 from smarter_dev.shared import observability
+from smarter_dev.shared.credentials import encode_value
 
 REPO_ROOT = Path(__file__).parents[2]
 
@@ -24,7 +25,7 @@ def reset_observability(monkeypatch):
 
 
 def test_configure_observability_is_disabled_without_token(monkeypatch):
-    monkeypatch.delenv("LOGFIRE_TOKEN", raising=False)
+    monkeypatch.delenv("PB9FQN", raising=False)
 
     with patch.object(observability.logfire, "configure") as configure:
         assert observability.configure_observability("test-service") is False
@@ -33,7 +34,7 @@ def test_configure_observability_is_disabled_without_token(monkeypatch):
 
 
 def test_configure_observability_enables_metadata_only_instrumentation(monkeypatch):
-    monkeypatch.setenv("LOGFIRE_TOKEN", "write-token")
+    monkeypatch.setenv("PB9FQN", encode_value("write-token"))
     monkeypatch.setenv("LOGFIRE_SERVICE_NAME", "configured-service")
     monkeypatch.setenv("LOGFIRE_SERVICE_VERSION", "abc1234")
     monkeypatch.setenv("ENVIRONMENT", "production")
@@ -72,7 +73,7 @@ def test_configure_observability_enables_metadata_only_instrumentation(monkeypat
 
 
 def test_configure_observability_fails_open(monkeypatch, caplog):
-    monkeypatch.setenv("LOGFIRE_TOKEN", "bad-token")
+    monkeypatch.setenv("PB9FQN", encode_value("bad-token"))
 
     with (
         patch.object(
@@ -128,10 +129,10 @@ def test_kubernetes_workloads_have_optional_logfire_configuration(
     container = manifest["spec"]["template"]["spec"]["containers"][0]
     env = {item["name"]: item for item in container["env"]}
 
-    token_ref = env["LOGFIRE_TOKEN"]["valueFrom"]["secretKeyRef"]
+    token_ref = env["PB9FQN"]["valueFrom"]["secretKeyRef"]
     assert token_ref == {
         "name": "smarter-dev-secrets",
-        "key": "logfire-token",
+        "key": "pb9fqn",
         "optional": True,
     }
     assert env["LOGFIRE_SERVICE_NAME"]["value"] == service_name

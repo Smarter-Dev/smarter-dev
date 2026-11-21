@@ -52,9 +52,9 @@ add `deploy-media.yaml` to the `<IMAGE_VERSION>` sed loop.
   bot, web and media deployments. Its value is stored encoded (`v1.…`, see
   `smarter_dev/shared/credentials.py`; the media service decodes it in
   `services/media/src/credentials.ts`). The secret key is the lowercase of the
-  env var name; both spellings are load-bearing. Until phase 2 the legacy
-  `MEDIA_API_KEY` env var / `media-api-key` secret key stay wired and are the
-  fallback when `HVTH7T` is unset.
+  env var name; both spellings are load-bearing. No manifest wires the legacy
+  `MEDIA_API_KEY` / `media-api-key` any more, and neither the media service nor
+  Python reads that name outside development.
 - The media Service is ClusterIP with no Ingress. The bearer token is defence
   in depth, not the only control.
 
@@ -64,9 +64,11 @@ The bot refuses to start without a reachable media service. Locally either:
 
 - `podman compose up media` — builds `services/media` and serves it on host
   port 8083; `.env` needs `MEDIA_SERVICE_URL=http://localhost:8083` and
-  `MEDIA_API_KEY=dev-media-key-not-secret` (see `.env.example`). Bot and web
+  `HVTH7T=dev-media-key-not-secret` and `ENVIRONMENT=development` (see
+  `.env.example`; plain values in the opaque name are accepted only in
+  development/test). Bot and web
   containers in compose are already wired to `http://media:8080`.
-- or `cd services/media && npm install && MEDIA_API_KEY=dev-media-key-not-secret npm run dev`
+- or `cd services/media && npm install && ENVIRONMENT=development HVTH7T=dev-media-key-not-secret npm run dev`
   (port 8080, needs local `ffmpeg` on PATH) — then point `MEDIA_SERVICE_URL`
   at `http://localhost:8080`.
 
@@ -74,8 +76,8 @@ The bot refuses to start without a reachable media service. Locally either:
 
 ### Rollout runbook
 
-1. **Before the first deploy**, add `hvth7t` (the encoded value) and, until
-   phase 2, `media-api-key` to the live `smarter-dev-secrets`. Generate with
+1. **Before the first deploy**, add `hvth7t` (the encoded value) to the
+   live `smarter-dev-secrets` (no `media-api-key` entry is needed). Generate with
    `openssl rand -hex 32`, prefixed `mk_`, then encode with
    `python -m smarter_dev.shared.credentials encode`. Without it the media pods fail with
    `CreateContainerConfigError` and the rollout hangs.

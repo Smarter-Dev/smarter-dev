@@ -22,7 +22,7 @@ from pydantic_ai import RunContext
 from smarter_dev.shared.request_usage import response_request_tokens
 from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.shared.usage_meter import run_through
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import get_credential, require_credential
 
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
 QUERY_MODEL = os.getenv("WEB_SEARCH_QUERY_MODEL", "claude-haiku-5-5")
@@ -129,7 +129,7 @@ def model_for(name: str):
     host = os.getenv("LITE_LLM_PROXY_HOST", "").rstrip("/")
     if get_credential("openai") or not host:
         return OpenAIResponsesModel(
-            name, provider=OpenAIProvider(api_key=get_credential("openai"))
+            name, provider=OpenAIProvider(api_key=require_credential("openai"))
         )
     if not host.startswith("http"):
         host = f"https://{host}"

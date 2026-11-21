@@ -42,6 +42,7 @@ from pathlib import Path
 
 import httpx
 
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.web.handler_lint import lint_script
 
 
@@ -131,9 +132,9 @@ async def apply_plan(client: httpx.AsyncClient, guild_id: str, the_plan: Plan) -
 
 
 async def run(args: argparse.Namespace) -> int:
-    key = os.environ.get("BOT_API_KEY", "")
+    key = get_credential("bot_api_key") or ""
     if not key:
-        print("BOT_API_KEY is not set", file=sys.stderr)
+        print("bot API key (FB3OSY) is not set", file=sys.stderr)
         return 2
     script = Path(args.file).read_text(encoding="utf-8")
     async with httpx.AsyncClient(

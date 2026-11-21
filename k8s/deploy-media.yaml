@@ -47,11 +47,6 @@ spec:
                     value: "8080"
                   - name: MEDIA_LOG_LEVEL
                     value: "info"
-                  - name: MEDIA_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: media-api-key
                   - name: HVTH7T
                     valueFrom:
                       secretKeyRef:

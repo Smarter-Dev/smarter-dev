@@ -58,11 +58,6 @@ spec:
             secretKeyRef:
               name: smarter-dev-secrets
               key: redis-url
-        - name: API_SECRET_KEY
-          valueFrom:
-            secretKeyRef:
-              name: smarter-dev-secrets
-              key: api-secret-key
         - name: QT9YEP
           valueFrom:
             secretKeyRef:

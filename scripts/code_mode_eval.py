@@ -49,6 +49,7 @@ from pydantic_ai import Agent, RunContext  # noqa: E402
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings  # noqa: E402
 from pydantic_ai.providers.google import GoogleProvider  # noqa: E402
 
+from smarter_dev.shared.credentials import require_credential
 from smarter_dev.bot.utils import web_fetch  # noqa: E402
 from smarter_dev.shared.code_sandbox import run_sandboxed  # noqa: E402
 from smarter_dev.web.scan.tools import brave_search  # noqa: E402
@@ -250,7 +251,7 @@ def build_agent(model_id: str) -> Agent[CodeModeDeps, str]:
     model = GoogleModel(
         model_id,
         provider=GoogleProvider(
-            api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+            api_key=require_credential("gemini")
         ),
     )
     settings = GoogleModelSettings(google_thinking_config={"thinking_level": "MEDIUM"})

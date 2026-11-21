@@ -11,6 +11,7 @@ from pydantic_settings import SettingsConfigDict
 
 from smarter_dev.shared.billing_urls import billing_url_origin
 from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import plain_names_allowed
 
 # ``Settings`` reads ``.env`` into *itself*, but plenty of code reads provider
 # credentials straight off the environment instead — ``model_router.build_model_for``
@@ -25,6 +26,30 @@ from smarter_dev.shared.credentials import get_credential
 # ``override=False`` (the default) keeps real environment variables authoritative,
 # so a deployed process is never shadowed by a stray ``.env``.
 load_dotenv()
+
+
+# Settings field -> credential registry name. get_credential() is the only
+# source: in development and tests it also accepts the plain names, so a
+# local ``.env`` keeps working; anywhere else a plain env value that
+# pydantic-settings read into the field is dropped for the field default.
+CREDENTIAL_FIELDS = {
+    "discord_bot_token": "discord_bot_token",
+    "api_secret_key": "api_secret_key",
+    "bot_api_key": "bot_api_key",
+    "media_api_key": "media_api_key",
+    "web_session_secret": "web_session_secret",
+    "discord_client_secret": "discord_client_secret",
+    "resend_api_key": "resend",
+    "site_identity_fence_key": "site_identity_fence_key",
+    "polar_access_token": "polar_access_token",
+    "polar_webhook_secret": "polar_webhook_secret",
+}
+
+# Their defaults are public placeholder strings. Outside dev a missing value
+# becomes "" (not the default) and the code that signs with it refuses to run
+# (``require_nonblank``). Raising while building Settings would crash the
+# workloads that never mount these secrets (bot, cron jobs).
+REQUIRED_OUTSIDE_DEV = frozenset({"api_secret_key", "web_session_secret"})
 
 
 class Settings(BaseSettings):
@@ -338,28 +363,17 @@ class Settings(BaseSettings):
         description="Enable verbose error messages (disable in production)",
     )
 
-    # Settings field -> credential registry name. The opaque (encoded) env var
-    # wins over the plain field value; absent, the plain field is kept so
-    # local ``.env`` files and tests keep working.
-    _CREDENTIAL_FIELDS = {
-        "discord_bot_token": "discord_bot_token",
-        "api_secret_key": "api_secret_key",
-        "bot_api_key": "bot_api_key",
-        "media_api_key": "media_api_key",
-        "web_session_secret": "web_session_secret",
-        "discord_client_secret": "discord_client_secret",
-        "resend_api_key": "resend",
-        "site_identity_fence_key": "site_identity_fence_key",
-        "polar_access_token": "polar_access_token",
-        "polar_webhook_secret": "polar_webhook_secret",
-    }
-
     @model_validator(mode="after")
     def _apply_credentials(self) -> Settings:
-        for field, logical in self._CREDENTIAL_FIELDS.items():
+        for field, logical in CREDENTIAL_FIELDS.items():
             value = get_credential(logical)
             if value is not None:
                 setattr(self, field, value)
+            elif not plain_names_allowed():
+                default = type(self).model_fields[field].get_default()
+                # These two defaults are public placeholder strings; outside dev
+                # they must not stand in for a missing secret.
+                setattr(self, field, "" if field in REQUIRED_OUTSIDE_DEV else default)
         return self
 
     @field_validator("environment")
@@ -451,3 +465,4 @@ def get_settings() -> Settings:
 def override_settings(**kwargs) -> Settings:
     """Create a settings instance with overrides (useful for testing)."""
     return Settings(**kwargs)
+

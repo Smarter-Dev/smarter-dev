@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import os
 import sys
 from pathlib import Path
 
@@ -61,11 +60,13 @@ async def generate(brief: str) -> str:
 
 
 async def post(channel_id: str, content: str) -> str:
+    from smarter_dev.shared.credentials import get_credential
     from smarter_dev.web.handler_emitter import DiscordEmitter
 
-    token = os.getenv("DISCORD_BOT_TOKEN") or dotenv.get_key(".env", "DISCORD_BOT_TOKEN")
+    dotenv.load_dotenv()
+    token = get_credential("discord_bot_token")
     if not token:
-        raise SystemExit("DISCORD_BOT_TOKEN not set (env or .env)")
+        raise SystemExit("Discord bot token not set (FHI1OT in env or .env)")
     emitter = DiscordEmitter(bot_token=token)
     return await emitter.create_message(channel_id, content)
 

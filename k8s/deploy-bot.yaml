@@ -89,11 +89,6 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: redis-url
-                  - name: DISCORD_BOT_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: discord-bot-token
                   - name: FHI1OT
                     valueFrom:
                       secretKeyRef:
@@ -105,115 +100,64 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-application-id
-                  - name: API_SECRET_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: api-secret-key
                   - name: QT9YEP
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: qt9yep
                         optional: false
-                  - name: BOT_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: bot-api-key
                   - name: FB3OSY
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: fb3osy
                         optional: false
-                  - name: GEMINI_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: gemini-api-key
                   - name: IN8OID
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: in8oid
                         optional: false
-                  - name: OPENAI_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: openai-api-key
                   - name: IRBCKR
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: irbckr
                         optional: false
-                  - name: OPENROUTER_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: openrouter-api-key
                   - name: RCGW3A
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: rcgw3a
                         optional: false
-                  - name: TYPESAFE_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: typesafe-api-key
                   - name: DAWTIY
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: dawtiy
                         optional: false
-                  - name: LOGFIRE_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: logfire-token
-                        optional: true
                   - name: PB9FQN
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: pb9fqn
-                        optional: false
+                        optional: true
                   - name: LOGFIRE_SERVICE_NAME
                     value: "smarter-dev-bot"
                   - name: LOGFIRE_SERVICE_VERSION
                     value: "<IMAGE_VERSION>"
-                  - name: ANTHROPIC_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: anthropic-api-key
                   - name: KMSVP8
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: kmsvp8
                         optional: false
-                  - name: JINA_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: jina-api-key
                   - name: IDNDWL
                     valueFrom:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: idndwl
                         optional: false
-                  - name: BRAVE_SEARCH_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: brave-search-api-key
                   - name: AO6HUE
                     valueFrom:
                       secretKeyRef:
@@ -225,11 +169,6 @@ spec:
                   # ConfigMap via envFrom above. The secret key is kebab-case,
                   # the env var is screaming snake — both spellings are
                   # load-bearing.
-                  - name: MEDIA_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: media-api-key
                   - name: HVTH7T
                     valueFrom:
                       secretKeyRef:

@@ -21,7 +21,9 @@ EXPECTED_COMMANDS = {
         "/app/.venv/bin/python",
         "-m",
         "scripts.identity_worker_gate",
-        "/app/.venv/bin/skrift",
+        "/app/.venv/bin/python",
+        "-m",
+        "smarter_dev.shared.skrift_secrets",
         "workers",
         "run",
         "--queue",
@@ -160,11 +162,15 @@ def writer_evidence(image, version):
             key_refs = [
                 env
                 for env in container.get("env", [])
-                if env["name"] == "SITE_IDENTITY_FENCE_KEY"
+                if env["name"] == "JSGALT"
             ]
-            if len(key_refs) != 1 or key_refs[0].get("valueFrom", {}).get(
-                "secretKeyRef"
-            ) != {"name": "smarter-dev-secrets", "key": "site-identity-fence-key"}:
+            ref = (
+                dict(key_refs[0].get("valueFrom", {}).get("secretKeyRef") or {})
+                if len(key_refs) == 1
+                else {}
+            )
+            ref.pop("optional", None)  # the manifest sets optional: false
+            if ref != {"name": "smarter-dev-secrets", "key": "jsgalt"}:
                 raise RuntimeError("Writer key source mismatch")
             states = pod.get("status", {}).get("containerStatuses", [])
             if (

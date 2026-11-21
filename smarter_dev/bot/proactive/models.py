@@ -15,7 +15,7 @@ from pydantic_ai.providers.typesafe import TypeSafeProvider
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import build_model_for
-from smarter_dev.shared.credentials import get_credential
+from smarter_dev.shared.credentials import get_credential, require_credential
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 
@@ -67,7 +67,7 @@ def build_twopass_model(model_id: str) -> Model:
         return TypeSafeModel(
             model_id.removeprefix("typesafe:"),
             provider=TypeSafeProvider(
-                api_key=get_credential("typesafe"), http_client=http_client
+                api_key=require_credential("typesafe"), http_client=http_client
             ),
         )
     if model_id.startswith("claude-"):

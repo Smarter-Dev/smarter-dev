@@ -37,6 +37,8 @@ _STEP_SCRIPTS: dict[str, str] = {
     "skrift-main": textwrap.dedent(
         """
         from pathlib import Path
+        from smarter_dev.shared.skrift_secrets import install
+        install()  # Skrift's env.py loads app.yaml; its secrets are opaque
         from alembic.config import Config
         from alembic import command
         skrift_pkg = Path(__import__('skrift').__file__).parent

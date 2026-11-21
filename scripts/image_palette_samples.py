@@ -29,6 +29,7 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
+from smarter_dev.shared.credentials import get_credential
 from smarter_dev.bot.agents.image_generator import (
     DEFAULT_MODEL,
     MODEL_ENV_VAR,
@@ -165,8 +166,8 @@ def build_html(results: list[dict], model: str) -> str:
 
 
 async def main() -> int:
-    if not any(os.getenv(k) for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY")):
-        print("No GEMINI_API_KEY / GOOGLE_API_KEY — cannot run.")
+    if not get_credential("gemini"):
+        print("No Gemini API key (IN8OID) — cannot run.")
         return 1
     model = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
     os.makedirs(OUT_DIR, exist_ok=True)
