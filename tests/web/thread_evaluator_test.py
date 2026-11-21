@@ -367,7 +367,7 @@ def _valid_settings_input(**overrides) -> SettingsInput:
 class TestSettings:
     def test_the_evaluator_default_is_the_catalog_key_not_a_wire_id(self):
         """Two DeepSeek wire ids are still priced; only the key is unambiguous."""
-        assert DEFAULT_THREAD_EVALUATOR == "deepseek-v4"
+        assert DEFAULT_THREAD_EVALUATOR == "claude-haiku-5-5"
         model = get_model(DEFAULT_THREAD_EVALUATOR)
         assert model is not None
         assert price_rates_for_model(model) is not None
@@ -377,7 +377,7 @@ class TestSettings:
     async def test_a_fresh_install_is_seeded_with_the_defaults(self, db_session):
         settings = await ensure_settings(db_session)
 
-        assert settings.thread_evaluator_model_key == "deepseek-v4"
+        assert settings.thread_evaluator_model_key == "claude-haiku-5-5"
         assert settings.thread_evaluator_fallback_model_key is None
         assert settings.thread_idle_minutes == 15
 
@@ -431,7 +431,7 @@ class TestSettings:
     def test_the_evaluator_is_not_held_to_the_vision_rule(self):
         """A text classifier needs no vision; only the summarizer pair does."""
         parsed = validate_settings_input(
-            _valid_settings_input(thread_evaluator_model_key=DEFAULT_THREAD_EVALUATOR)
+            _valid_settings_input(thread_evaluator_model_key="deepseek-v4")
         )
 
         assert get_model(parsed.thread_evaluator_model_key).supports_vision is False

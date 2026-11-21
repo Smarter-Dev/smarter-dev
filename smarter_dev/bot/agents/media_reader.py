@@ -44,8 +44,9 @@ logger = logging.getLogger(__name__)
 # Images: a catalog wire id (or any Claude id), routed by the model router.
 DEFAULT_MODEL = "claude-haiku-5-5"
 MODEL_ENV_VAR = "MEDIA_READER_MODEL"
-# Audio: a Gemini wire id.
-DEFAULT_AUDIO_MODEL = "gemini-3.8-flash"
+# Audio: a Gemini wire id (Claude takes no audio). 3.5 Flash Lite takes audio
+# at $0.30/M, the cheapest suitable catalog model (3.8 Flash before #489).
+DEFAULT_AUDIO_MODEL = "gemini-3.5-flash-lite"
 AUDIO_MODEL_ENV_VAR = "MEDIA_READER_AUDIO_MODEL"
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "media_reader.md").read_text(

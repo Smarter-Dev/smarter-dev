@@ -5,12 +5,12 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: the Author (member tier Claude Haiku 5.5; admin tier GPT-6.1 Sol at
+Pipeline: the Author (member tier Claude Haiku 5.5; admin tier Claude Opus 5.5 at
 high reasoning) sees the existing named handlers and returns a structured plan
 — edit one of them or create a new, named one — or marks the request
 infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
 blobs / dynamic execution; the Judge (member tier Claude Haiku 5.5; admin tier
-GPT-6.1 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
+Claude Opus 5.5, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.
 
@@ -40,6 +40,7 @@ from pydantic_ai import Agent
 from pydantic_ai import AgentRetries
 from pydantic_ai import RunContext
 from pydantic_ai.models import Model
+from pydantic_ai.models.anthropic import AnthropicModelSettings
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.google import GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
@@ -49,6 +50,7 @@ from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import direct_claude_model
 from smarter_dev.shared.model_router import agent_retries_for
@@ -580,7 +582,7 @@ def _build_configured_model(model_id: str) -> Model:
 
     These models are configured by wire id. A catalog id routes through the
     shared model router (Claude Haiku 5.5, the member author and judge default,
-    is served by Anthropic; GPT-6.1 Sol, the admin default, by OpenAI), as does
+    is served by Anthropic, as is Claude Opus 5.5, the admin default), as does
     any other Claude id; anything else is assumed to be a Gemini id.
     """
     catalog_model = _handler_catalog_model(model_id)
@@ -611,6 +613,19 @@ def _handler_model_settings(
         settings = model_settings_for(
             catalog_model, reasoning_level, cache_messages=cache_messages
         )
+        if catalog_model.provider is ModelProvider.ANTHROPIC and not (
+            settings and "anthropic_effort" in settings
+        ):
+            # A Claude id the catalog does not list (Opus 5.5, the admin
+            # default) has no reasoning ladder, so model_settings_for returns
+            # None, or only the cache flag; send adaptive thinking at the
+            # requested effort ourselves rather than the Gemini dialect, which
+            # Anthropic would not read.
+            return AnthropicModelSettings(
+                anthropic_thinking={"type": "adaptive"},
+                anthropic_effort=reasoning_level.value,
+                anthropic_cache_messages=cache_messages,
+            )
         if settings is not None:
             return settings
     return _HANDLER_THINKING

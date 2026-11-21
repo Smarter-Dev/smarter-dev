@@ -4395,8 +4395,8 @@ class ChatSettings(Base):
     thread_evaluator_model_key: Mapped[str] = mapped_column(
         SelectedModelKey(),
         nullable=False,
-        default="deepseek-v4",
-        server_default=text("'deepseek-v4'"),
+        default="claude-haiku-5-5",
+        server_default=text("'claude-haiku-5-5'"),
     )
     thread_evaluator_fallback_model_key: Mapped[str | None] = mapped_column(
         SelectedModelKey(), nullable=True

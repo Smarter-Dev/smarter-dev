@@ -32,13 +32,15 @@ from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_router import agent_retries_for
 from smarter_dev.web.guild_rules import GuildRule
 from smarter_dev.web.guild_rules import format_rules_for_prompt
 
 logger = logging.getLogger(__name__)
 
-# 3.8 Flash since 2026-09-24, when 3.5 Flash Lite left the catalog.
-RULE_MATCHER_MODEL_KEY = "gemini-3-8-flash"
+# Claude Haiku 5.5 since 2026-11-21 (#489): internal work runs on the Claude
+# API credits; 3.8 Flash before it.
+RULE_MATCHER_MODEL_KEY = "claude-haiku-5-5"
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "rule_matcher.md").read_text(
     encoding="utf-8"
@@ -118,6 +120,8 @@ def get_rule_matcher_agent() -> Agent[None, RuleCitation]:
             build_model_for(catalog_model),
             output_type=RuleCitation,
             system_prompt=SYSTEM_PROMPT,
+            # Haiku's output tool is not forced: allow a retry on plain text.
+            retries=agent_retries_for(catalog_model),
             # One request: nothing reads a message breakpoint back.
             model_settings=model_settings_for(
                 catalog_model, ReasoningLevel.LOW, cache_messages=False

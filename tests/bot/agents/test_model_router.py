@@ -20,7 +20,7 @@ from smarter_dev.shared.model_router import model_settings_for
 
 # Qwen3.5 397B (OpenRouter) stands in for the open-weight reasoning-knob case.
 _OPEN_REASONING_MODEL = get_model("qwen3-5-397b")
-_GOOGLE_MODEL = get_model("gemini-3-8-flash")
+_GOOGLE_MODEL = get_model("gemini-4-hydrogen")
 _OPENAI_MODEL = get_model("gpt-6-1-sol")
 # A forced-tool-choice Claude entry, so the Anthropic branch's flag handling is
 # covered on both sides; the catalog's own Claude models (Sonnet and Haiku 5.5)
@@ -62,10 +62,10 @@ _OPENROUTER_MODEL = get_model("qwen3-8-2-4t")
 _OPENROUTER_REASONING_MODEL = get_model("grok-4-7")
 
 
-def test_gemini_4_argon_never_sends_minimal_thinking():
-    # Argon answers thinking_level MINIMAL with a 400, so a stored "minimal"
+def test_gemini_4_never_sends_minimal_thinking():
+    # Gemini 4 answers thinking_level MINIMAL with a 400, so a stored "minimal"
     # pick goes out as LOW.
-    argon = get_model("gemini-4-argon")
+    argon = get_model("gemini-4-carbon")
     settings = model_settings_for(argon, ReasoningLevel.MINIMAL)
     assert settings["google_thinking_config"] == {"thinking_level": "LOW"}
     settings = model_settings_for(argon, None)
@@ -540,7 +540,7 @@ def test_model_settings_applies_selected_reasoning_level():
 
 def test_model_settings_clamps_unsupported_reasoning_level():
     # Gemini caps at HIGH; requesting MAX clamps down to HIGH.
-    google_settings = model_settings_for(_GOOGLE_MODEL, ReasoningLevel.MAX)
+    google_settings = model_settings_for(get_model("gemini-4-carbon"), ReasoningLevel.MAX)
     assert google_settings["google_thinking_config"] == {"thinking_level": "HIGH"}
     # A model with no reasoning knob ignores any requested level.
     assert model_settings_for(_NO_REASONING_MODEL, ReasoningLevel.HIGH) is None

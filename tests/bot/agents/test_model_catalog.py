@@ -72,7 +72,7 @@ def test_resolve_reasoning_level_keeps_supported_choice():
 
 
 def test_resolve_reasoning_level_clamps_unsupported_to_nearest():
-    gemini = get_model("gemini-3-8-flash")  # caps at HIGH
+    gemini = get_model("gemini-4-carbon")  # caps at HIGH
     assert resolve_reasoning_level(gemini, ReasoningLevel.MAX) is ReasoningLevel.HIGH
     glm = get_model("glm-5-3-flash")  # LOW/MEDIUM/HIGH only
     assert resolve_reasoning_level(glm, ReasoningLevel.NONE) is ReasoningLevel.LOW
@@ -85,78 +85,78 @@ def test_resolve_reasoning_level_none_for_models_without_reasoning():
     assert resolve_reasoning_level(gemma, None) is None
 
 
-def test_gemini_lineup_reflects_current_releases():
-    # 3.6 Flash and 3.7 Flash retired onto 3.8 Flash on 2026-09-24. 3.5 Flash
-    # Lite went with them by mistake — only 3.5 Flash, gone since 2026-07-21,
-    # was meant to — and is back. 3.1 Pro stays — not a Flash.
+def test_gemini_lineup_is_the_gemini_4_models_and_flash_lite():
+    # #489 (2026-11-21): 3.8 Flash, 3.1 Pro and 4 Argon left; 4 Hydrogen, Neon and
+    # Carbon joined; 3.5 Flash Lite stays.
     for retired in (
         "gemini-3-5-flash",
         "gemini-3-1-flash-lite",
         "gemini-3-flash",
         "gemini-3-6-flash",
         "gemini-3-7-flash",
+        "gemini-3-8-flash",
+        "gemini-3-1-pro",
+        "gemini-4-argon",
     ):
         assert get_model(retired) is None, retired
-    flash = [
-        m for m in MODEL_CATALOG if m.family == "Gemini" and "Flash" in m.label
+    gemini = [m.key for m in MODEL_CATALOG if m.family == "Gemini"]
+    assert gemini == [
+        "gemini-4-hydrogen",
+        "gemini-4-neon",
+        "gemini-4-carbon",
+        "gemini-3-5-flash-lite",
     ]
-    assert [m.key for m in flash] == ["gemini-3-8-flash", "gemini-3-5-flash-lite"]
     lite = get_model("gemini-3-5-flash-lite")
     assert lite.model_id == "gemini-3.5-flash-lite"
     assert lite.provider is ModelProvider.GOOGLE
     assert lite.supports_vision is True
-    flash_3_8 = get_model("gemini-3-8-flash")
-    assert flash_3_8.model_id == "gemini-3.8-flash"
-    assert flash_3_8.provider is ModelProvider.GOOGLE
-    assert flash_3_8.supports_vision is True
-    # Verified against the Gemini models API rather than assumed.
-    assert flash_3_8.context_window == 1_048_576
-    assert flash_3_8.max_output_tokens == 65_536
-    assert get_model("gemini-3-1-pro") is not None
 
 
-def test_gemini_4_argon_is_admitted_with_verified_capabilities():
-    # Verified against the Gemini models API and live generateContent calls with
-    # the production key (2026-10-16).
-    model = get_model("gemini-4-argon")
-    assert model is not None
-    assert model.label == "Gemini 4 Argon"
-    assert model.model_id == "gemini-4-argon"
-    assert model.family == "Gemini"
-    assert model.provider is ModelProvider.GOOGLE
-    assert model.supports_vision is True
-    assert model.context_window == 1_048_576
-    # The API's outputTokenLimit, not the 65,536 Google's model page quotes.
-    assert model.max_output_tokens == 32_768
-    assert model.needs_prompted_output is False
-    # Admission only: no retired key is read as Argon.
-    assert "gemini-4-argon" not in RETIRED_SUCCESSORS.values()
+def test_gemini_4_models_carry_the_documented_capabilities():
+    # From https://aistudio.google.com/docs/models/gemini-4-<name>, 2026-11-21.
+    for key, label in (
+        ("gemini-4-hydrogen", "Gemini 4 Hydrogen"),
+        ("gemini-4-neon", "Gemini 4 Neon"),
+        ("gemini-4-carbon", "Gemini 4 Carbon"),
+    ):
+        model = get_model(key)
+        assert model.label == label
+        assert model.model_id == key
+        assert model.family == "Gemini"
+        assert model.provider is ModelProvider.GOOGLE
+        assert model.supports_vision is True
+        assert model.context_window == 1_048_576
+        assert model.max_output_tokens == 65_536
+        assert model.needs_prompted_output is False
+        assert model.default_reasoning is ReasoningLevel.MEDIUM
 
 
-def test_gemini_4_argon_thinks_at_low_medium_high_only():
-    # The API rejects thinkingLevel "minimal" with a 400 for Argon.
-    model = get_model("gemini-4-argon")
-    assert model.reasoning_levels == (
-        ReasoningLevel.LOW,
-        ReasoningLevel.MEDIUM,
-        ReasoningLevel.HIGH,
-    )
-    assert model.default_reasoning is ReasoningLevel.MEDIUM
-    assert ReasoningLevel.MINIMAL in get_model("gemini-3-8-flash").reasoning_levels
+def test_gemini_4_thinking_ladders():
+    # No "minimal" (the API 400s on it for Gemini 4); Hydrogen and Neon add xhigh.
+    low_to_high = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
+    assert get_model("gemini-4-carbon").reasoning_levels == low_to_high
+    for key in ("gemini-4-hydrogen", "gemini-4-neon"):
+        assert get_model(key).reasoning_levels == low_to_high + (ReasoningLevel.XHIGH,)
 
 
-def test_gemini_4_argon_clamps_a_stored_minimal_to_low():
-    model = get_model("gemini-4-argon")
+def test_gemini_4_clamps_a_stored_minimal_to_low():
+    model = get_model("gemini-4-carbon")
     assert resolve_reasoning_level(model, ReasoningLevel.MINIMAL) is ReasoningLevel.LOW
     assert resolve_reasoning_level(model, ReasoningLevel.NONE) is ReasoningLevel.LOW
     assert resolve_reasoning_level(model, ReasoningLevel.MAX) is ReasoningLevel.HIGH
     assert resolve_reasoning_level(model, None) is ReasoningLevel.MEDIUM
+    hydrogen = get_model("gemini-4-hydrogen")
+    assert resolve_reasoning_level(hydrogen, ReasoningLevel.MAX) is ReasoningLevel.XHIGH
 
 
-def test_retired_gemini_flash_keys_read_as_3_8_flash():
-    assert successor_key("gemini-3-6-flash") == "gemini-3-8-flash"
-    assert successor_key("gemini-3-7-flash") == "gemini-3-8-flash"
-    assert successor_key("gemini-3-8-flash") == "gemini-3-8-flash"
+def test_retired_gemini_keys_read_as_their_gemini_4_successors():
+    assert successor_key("gemini-3-6-flash") == "gemini-4-hydrogen"
+    assert successor_key("gemini-3-7-flash") == "gemini-4-hydrogen"
+    assert successor_key("gemini-3-8-flash") == "gemini-4-hydrogen"
+    assert successor_key("gemini-3-1-pro") == "gemini-4-neon"
+    assert successor_key("gemini-4-argon") == "gemini-4-carbon"
+    for key in ("gemini-4-hydrogen", "gemini-4-neon", "gemini-4-carbon"):
+        assert successor_key(key) == key
 
 
 def test_restored_flash_lite_is_live_and_no_longer_read_as_3_8_flash():
@@ -505,7 +505,7 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
 
     # Proprietary models keep native structured output, including Grok, which
     # shares OpenRouter with the open weights.
-    for key in ("grok-4-7", "gpt-6-luna", "gemini-3-1-pro", "gemini-3-8-flash"):
+    for key in ("grok-4-7", "gpt-6-luna", "gemini-4-neon", "gemini-4-hydrogen"):
         assert get_model(key).needs_prompted_output is False, key
 
 

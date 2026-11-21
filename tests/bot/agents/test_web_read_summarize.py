@@ -42,7 +42,7 @@ def test_web_summarizer_prompt_favors_quotes_for_extraction():
     assert "explicitly asks for a summary" in web_summarizer.SYSTEM_PROMPT
 
 
-def test_web_summarizer_uses_haiku_primary_and_low_thinking_gemini_fallback():
+def test_web_summarizer_uses_haiku_primary_and_sonnet_fallback():
     primary = MagicMock()
     fallback = MagicMock()
     with (
@@ -68,9 +68,8 @@ def test_web_summarizer_uses_haiku_primary_and_low_thinking_gemini_fallback():
         "anthropic_cache_messages": False,
     }
     assert fallback_call.args == (fallback,)
-    assert fallback_call.kwargs["model_settings"]["google_thinking_config"] == {
-        "thinking_level": "LOW"
-    }
+    assert web_summarizer.FALLBACK_MODEL_KEY == "claude-sonnet-5-5"
+    assert fallback_call.kwargs["model_settings"]["anthropic_effort"] == "low"
 
 
 @pytest.mark.asyncio
@@ -438,6 +437,6 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",
         "primary_model": "claude-haiku-5-5",
-        "fallback_model": "gemini-3.8-flash",
+        "fallback_model": "claude-sonnet-5-5",
         "error": primary_agent.run.side_effect,
     }
