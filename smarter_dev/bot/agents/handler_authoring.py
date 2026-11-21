@@ -196,6 +196,57 @@ Judge = Callable[[str, str], Awaitable["JudgeVerdict"]]
 Progress = Callable[[str], Awaitable[None]]
 
 
+class HandlerSettings(BaseModel):
+    """Typed trigger settings the author may set.
+
+    A bare ``dict`` field collapses to ``{}`` under Anthropic's strict JSON
+    schema (``additionalProperties: false``), so every key the trigger
+    validators and ``describe_trigger`` read is named here. Dump with
+    :func:`settings_dict` (``exclude_none``) to keep stored rows' shape.
+    """
+
+    interval_seconds: int | None = Field(
+        default=None, description="schedule: recurring period in seconds"
+    )
+    daily_time: str | None = Field(
+        default=None, description="schedule: HH:MM UTC, once daily"
+    )
+    start_at: str | None = Field(
+        default=None,
+        description="schedule: optional ISO-8601 UTC start anchor with explicit offset",
+    )
+    delay_seconds: int | None = Field(
+        default=None, description="timer: seconds after creation to fire once"
+    )
+    fire_at: str | None = Field(
+        default=None, description="timer: ISO-8601 UTC timestamp to fire once"
+    )
+    include_bot_messages: bool | None = Field(
+        default=None,
+        description="message trigger: also fire on bot/webhook messages",
+    )
+
+
+class AdminHandlerSettings(HandlerSettings):
+    """Admin settings: the member keys plus the host-enforced role allowlist."""
+
+    allowed_role_ids: list[str] | None = Field(
+        default=None,
+        description="Host-enforced allowlist of every role-id literal the script "
+        "grants/revokes via add_role/remove_role (empty = no role grantable, so a "
+        "role-mutating script MUST populate it)",
+    )
+
+
+def settings_dict(settings: HandlerSettings | dict | None) -> dict:
+    """A plan's settings as the plain dict stored on a handler row."""
+    if settings is None:
+        return {}
+    if isinstance(settings, dict):
+        return dict(settings)
+    return settings.model_dump(exclude_none=True)
+
+
 class HandlerPlan(BaseModel):
     """The author's structured plan: edit one of the channel's handlers or
     create a new, named one.
@@ -220,7 +271,9 @@ class HandlerPlan(BaseModel):
     trigger_type: str = Field(
         default="message", description="message | reaction | schedule | timer"
     )
-    settings: dict = Field(default_factory=dict, description="Timing for time triggers")
+    settings: HandlerSettings = Field(
+        default_factory=HandlerSettings, description="Timing for time triggers"
+    )
     description: str = Field(
         default="",
         description="One line: what the handler does AFTER this change",
@@ -257,12 +310,10 @@ class AdminHandlerPlan(BaseModel):
     channel_ids: list[str] = Field(
         default_factory=list, description="Channel scope; empty = all channels"
     )
-    settings: dict = Field(
-        default_factory=dict,
+    settings: AdminHandlerSettings = Field(
+        default_factory=AdminHandlerSettings,
         description="Timing for time triggers; for role-mutating handlers also "
-        "'allowed_role_ids': the host-enforced allowlist of every role-id literal "
-        "the script grants/revokes via add_role/remove_role (empty = no role "
-        "grantable, so a role-mutating script MUST populate it)",
+        "allowed_role_ids",
     )
     description: str = Field(
         default="",
@@ -800,7 +851,7 @@ async def run_creation_pipeline(
         plan.target_handler_id,
         plan.name,
         plan.trigger_type,
-        plan.settings,
+        settings_dict(plan.settings),
         plan.script,
     )
 
@@ -815,7 +866,7 @@ async def run_creation_pipeline(
         target_handler_id=plan.target_handler_id,
         name=plan.name,
         trigger_type=plan.trigger_type,
-        settings=plan.settings,
+        settings=settings_dict(plan.settings),
         existing_handlers=existing_handlers,
     )
     if error is not None:
@@ -1041,7 +1092,7 @@ async def _draft_admin_plan(
         plan.name,
         plan.trigger_type,
         plan.channel_ids,
-        plan.settings,
+        settings_dict(plan.settings),
         plan.script,
     )
     return plan
@@ -1067,7 +1118,7 @@ def _build_admin_revision_request(
             f"- name: {plan.name}\n"
             f"- trigger: {plan.trigger_type}\n"
             f"- channel_ids: {json.dumps(plan.channel_ids)}\n"
-            f"- settings: {json.dumps(plan.settings, sort_keys=True)}\n"
+            f"- settings: {json.dumps(settings_dict(plan.settings), sort_keys=True)}\n"
             "- script:\n---\n" + plan.script + "\n---",
             f"Why it was rejected:\n{feedback}",
         ]
@@ -1109,7 +1160,7 @@ async def _validate_admin_draft(
         target_handler_id=plan.target_handler_id,
         name=plan.name,
         trigger_type=plan.trigger_type,
-        settings=plan.settings,
+        settings=settings_dict(plan.settings),
         existing_handlers=existing_handlers,
         allowed_trigger_types=ADMIN_HANDLER_TRIGGER_TYPES,
     )
