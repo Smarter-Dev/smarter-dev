@@ -655,6 +655,26 @@ class TestTurnUsageCostRows:
         assert row.catalog_model_key == "kimi-k3"
         assert row.model_id == "kimi-k3"
 
+    async def test_a_do_era_qwen_turn_keeps_its_digitalocean_attribution(
+        self, client: AsyncClient, session
+    ):
+        # Qwen3.5 397B moved from DigitalOcean inference to OpenRouter (#484);
+        # a turn still reporting DO's bare wire id must not fall to "unknown".
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            request_id="req-usage",
+            chat_model_name="qwen3.5-397b-a17b",
+            chat_tokens_input=10,
+            chat_tokens_output=5,
+        )
+
+        row = await _stored_usage_cost_row(session, "primary")
+        assert row.provider_key == "digitalocean"
+        assert row.catalog_model_key == "qwen3-5-397b"
+
     async def test_voice_model_files_a_voice_row(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
 

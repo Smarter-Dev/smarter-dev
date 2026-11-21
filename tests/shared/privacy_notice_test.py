@@ -327,7 +327,7 @@ def test_what_is_collected_automatically(notice):
 
 @pytest.mark.parametrize(
     "processor",
-    ["Google", "OpenAI", "Anthropic", "OpenRouter", "OpenCode Zen", "TypeSafe", "Brave", "Jina", "DigitalOcean", "Polar", "Resend", "Pydantic Logfire", "Discord stores everything posted there"],
+    ["Google", "OpenAI", "Anthropic", "OpenRouter", "TypeSafe", "Brave", "Jina", "DigitalOcean", "Polar", "Resend", "Pydantic Logfire", "Discord stores everything posted there"],
 )
 def test_every_processor_is_named(notice, processor):
     assert processor in _section(notice, "Who else processes your data")

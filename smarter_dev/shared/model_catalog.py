@@ -30,10 +30,8 @@ class ModelProvider(enum.Enum):
 
     GOOGLE = "google"
     OPENAI = "openai"
-    DIGITALOCEAN = "digitalocean"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
-    OPENCODE_ZEN = "opencode_zen"
 
 
 class ReasoningLevel(enum.Enum):
@@ -208,15 +206,9 @@ class CatalogModel:
         The property belongs to the *model*, not the endpoint serving it: the
         open-weight families are uneven on tool-choice and json_schema output
         wherever they are hosted, and prompted JSON is the one mode all of them
-        handle. Digital Ocean and Zen serve nothing else, so everything there
-        qualifies; OpenRouter mixes open weights in with Grok, which does
+        handle. OpenRouter mixes open weights in with Grok, which does
         structured output natively and must not be downgraded.
         """
-        if self.provider in (
-            ModelProvider.DIGITALOCEAN,
-            ModelProvider.OPENCODE_ZEN,
-        ):
-            return True
         if self.provider is ModelProvider.OPENROUTER:
             return self.family in OPEN_WEIGHT_FAMILIES
         return False
@@ -348,12 +340,20 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
             max_price_output_mtok=0.40,
         ),
     ),
+    # Qwen3.5 397B moved from DigitalOcean inference to OpenRouter when DO
+    # inference was dropped as a provider (#484). The key is unchanged, so
+    # saved selections keep working with no migration. OpenRouter lists it at
+    # $0.45/$3.00; the ceiling keeps every fallback endpoint at or below that.
     CatalogModel(
         key="qwen3-5-397b",
         label="Qwen3.5 397B",
         family="Qwen",
-        provider=ModelProvider.DIGITALOCEAN,
-        model_id="qwen3.5-397b-a17b",
+        provider=ModelProvider.OPENROUTER,
+        model_id="qwen/qwen3.5-397b-a17b",
+        openrouter_routing=OpenRouterRouting(
+            max_price_input_mtok=0.45,
+            max_price_output_mtok=3.00,
+        ),
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),

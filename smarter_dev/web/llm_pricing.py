@@ -611,6 +611,13 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         input_mtok=Decimal("0.325"),
         output_mtok=Decimal("1.95"),
     ),
+    # Qwen3.5 397B moved here from DigitalOcean inference (#484); OpenRouter's
+    # listed rate (2026-11-20), including its published cache-read price.
+    "qwen/qwen3.5-397b-a17b": types.ModelPrice(
+        input_mtok=Decimal("0.45"),
+        output_mtok=Decimal("3.00"),
+        cache_read_mtok=Decimal("0.22"),
+    ),
     # GLM-5.2: fp8 pool. Sampling never reached sail-research's $0.50/$3.15 —
     # gmicloud and novita split every request at ~$0.742/$2.332, so that is what
     # this bills at. Against Z.AI's own $1.40/$4.40 for the same fp8 build.
@@ -986,8 +993,7 @@ def price_rates_for_model(model) -> ModelPriceRates | None:
     provider = getattr(getattr(model, "provider", None), "value", None)
     provider_prefix = {
         "google": "google-gla", "openai": "openai", "anthropic": "anthropic",
-        "digitalocean": "digitalocean", "openrouter": "openrouter",
-        "opencode_zen": "opencode_zen",
+        "openrouter": "openrouter",
     }.get(provider)
     wire_id = getattr(model, "model_id", str(model))
     model_name = f"{provider_prefix}:{wire_id}" if provider_prefix else wire_id

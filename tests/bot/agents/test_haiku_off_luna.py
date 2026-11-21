@@ -81,7 +81,7 @@ def test_skrift_names_and_settings_match_the_router():
                 key="x",
                 label="x",
                 family="x",
-                provider=ModelProvider.DIGITALOCEAN,
+                provider=ModelProvider.OPENROUTER,
                 model_id="x",
             )
         )

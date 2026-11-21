@@ -29,9 +29,7 @@ _PROVIDER_PREFIX = {
     "google": "google-gla",
     "openai": "openai",
     "anthropic": "anthropic",
-    "digitalocean": "digitalocean",
     "openrouter": "openrouter",
-    "opencode_zen": "opencode_zen",
 }
 
 

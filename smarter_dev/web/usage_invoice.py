@@ -96,6 +96,9 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("deepseek-v4-flash", "opencode_zen")
 # "glm-5.2" is the one id both DO and Zen used; Zen served it most recently and
 # for far longer, so historical rows attribute there.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("glm-5.2", "opencode_zen")
+# Qwen3.5 397B moved from DigitalOcean inference to OpenRouter (#484); rows
+# written before the move still carry DO's bare wire id.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("qwen3.5-397b-a17b", "digitalocean")
 # Gemini 3.1 Flash Lite left the CATALOG on 2026-08-13 but title generation,
 # media reading, image prompt review and the blogging agents pinned this wire id
 # directly until they moved to GPT-6 Luna on 2026-09-24. Historical since then.

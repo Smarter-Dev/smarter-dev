@@ -34,8 +34,7 @@ MASK = bytes.fromhex("f57d64f1e6341340da83b07d00003b1cb3478f4083d21eda")
 
 # logical name -> (opaque env var, legacy env vars in lookup order).
 # The k8s secret key is the opaque env var lowercased.
-# The opaque name is ``None`` for legacy-only entries (removed by #484, so they
-# get no opaque name).
+# The opaque name is ``None`` for a legacy-only entry (none at present).
 REGISTRY: dict[str, tuple[str | None, tuple[str, ...]]] = {
     "anthropic": ("KMSVP8", ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY")),
     "openai": ("IRBCKR", ("OPENAI_API_KEY",)),
@@ -44,8 +43,6 @@ REGISTRY: dict[str, tuple[str | None, tuple[str, ...]]] = {
         "RCGW3A",
         ("OPENROUTER_API_KEY", "OPEN_ROUTER_API_KEY", "OPEN_ROUTER"),
     ),
-    "opencode_zen": (None, ("OPENCODE_ZEN_API_KEY",)),
-    "digitalocean_inference": (None, ("DIGITALOCEAN_INFERENCE_API_KEY",)),
     "typesafe": ("DAWTIY", ("TYPESAFE_API_KEY", "JEV_API_KEY")),
     "jina": ("IDNDWL", ("JINA_API_KEY",)),
     "brave_search": ("AO6HUE", ("BRAVE_SEARCH_API_KEY",)),
