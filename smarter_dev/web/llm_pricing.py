@@ -390,6 +390,63 @@ _patch_provider(
     ahead_of_library=True,
 )
 
+# GPT-6.2 Sol — joined 2026-11-21 (#494). Same rates as 6.1 Sol.
+# >272K input bills 2x input/cache and 1.5x output, carried by
+# _LONG_CONTEXT_TIERS.
+# https://developers.openai.com/api/docs/models/gpt-6.2-sol
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-6.2-sol",
+        match=types.ClauseStartsWith(starts_with="gpt-6.2-sol"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("10.00"),
+            cache_read_mtok=Decimal("0.10"),
+            cache_write_mtok=Decimal("2.50"),
+        ),
+    ),
+    ahead_of_library=True,
+)
+
+# GPT-6.2 Astra — joined 2026-11-21 (#494). 30-minute cache writes; 12-hour writes are $20.
+# >272K input bills 2x input/cache and 1.5x output, carried by
+# _LONG_CONTEXT_TIERS.
+# https://developers.openai.com/api/docs/models/gpt-6.2-astra
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-6.2-astra",
+        match=types.ClauseStartsWith(starts_with="gpt-6.2-astra"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("8.00"),
+            output_mtok=Decimal("40.00"),
+            cache_read_mtok=Decimal("0.40"),
+            cache_write_mtok=Decimal("10.00"),
+        ),
+    ),
+    ahead_of_library=True,
+)
+
+# GPT-6.1 Terra — joined 2026-11-21 (#494). 30-minute cache writes; 12-hour writes are $2.50.
+# >272K input bills 2x input/cache and 1.5x output, carried by
+# _LONG_CONTEXT_TIERS.
+# https://developers.openai.com/api/docs/models/gpt-6.1-terra
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-6.1-terra",
+        match=types.ClauseStartsWith(starts_with="gpt-6.1-terra"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("1.00"),
+            output_mtok=Decimal("5.00"),
+            cache_read_mtok=Decimal("0.05"),
+            cache_write_mtok=Decimal("1.25"),
+        ),
+    ),
+    ahead_of_library=True,
+)
+
 # GPT-6 Luna — served by OpenAI directly, the
 # server-default chat model since 2026-09-24. Same cache ratios and same
 # >272K-input long-context multiplier as GPT-6 Sol, carried by
@@ -860,6 +917,9 @@ _LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
     "gpt-6-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
     "gpt-6.1-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
     "gpt-6-luna": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
+    "gpt-6.2-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
+    "gpt-6.2-astra": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
+    "gpt-6.1-terra": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
     # OpenRouter's xAI endpoints: an override from min_prompt_tokens 200000
     # doubles prompt, cache read and completion ($3.20/$0.80/$9.60). Read from
     # GET /api/v1/models/x-ai/grok-4.7/endpoints on 2026-09-24.

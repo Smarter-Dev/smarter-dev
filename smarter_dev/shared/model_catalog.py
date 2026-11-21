@@ -286,6 +286,19 @@ _OPENAI_61_SOL = (
     ReasoningLevel.XHIGH,
     ReasoningLevel.MAX,
 )
+# GPT-6.2 Astra and Sol reject "none" (OpenAI's reasoning guide, 2026-11-21).
+# The rest of the ladder is UNVERIFIED by a live probe: the production key
+# could not call either model when they were added (#494), so this assumes
+# the 6.1 Sol shape. Probe every value once the key is admitted and correct
+# this tuple if "minimal" or "max" answers 400. A stored "none"/"minimal" pick
+# clamps to "low" through resolve_reasoning_level.
+_OPENAI_62 = (
+    ReasoningLevel.LOW,
+    ReasoningLevel.MEDIUM,
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH,
+    ReasoningLevel.MAX,
+)
 _GEMINI_THINKING = (
     ReasoningLevel.MINIMAL,
     ReasoningLevel.LOW,
@@ -608,6 +621,53 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="gpt-6.1-sol",
         supports_vision=True,
         reasoning_levels=_OPENAI_61_SOL,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # GPT-6.2 Sol, GPT-6.2 Astra and GPT-6.1 Terra joined on 2026-11-21 (#494),
+    # at Zech's request, beside 6.1 Sol and 6 Luna (nothing retired: 6 Luna is
+    # still the newest Luna in OpenAI's model index). Facts are from
+    # developers.openai.com/api/docs/models/<id>.md, NOT from a live call: the
+    # production key's project is not yet admitted to these ids, so each is
+    # admitted ``enabled=false`` (see the admission migration) until the key
+    # can call them and their reasoning values are probed. All three: 1.05M
+    # context (922K max input), 128K output, text+image input, tools through
+    # the Responses API only, >272K input billed at 2x input/cache and 1.5x
+    # output (carried by _LONG_CONTEXT_TIERS). Budgets stay at the catalog
+    # defaults, like 6.1 Sol's.
+    # 6.2 Sol: $2/$10 per M, cached input $0.10. Rejects reasoning "none".
+    CatalogModel(
+        key="gpt-6-2-sol",
+        label="GPT-6.2 Sol",
+        family="GPT",
+        provider=ModelProvider.OPENAI,
+        model_id="gpt-6.2-sol",
+        supports_vision=True,
+        reasoning_levels=_OPENAI_62,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # 6.2 Astra: OpenAI's flagship, $8/$40 per M, cached input $0.40. Rejects
+    # reasoning "none". Four times Sol's price, so a "high" cost tier.
+    CatalogModel(
+        key="gpt-6-2-astra",
+        label="GPT-6.2 Astra",
+        family="GPT",
+        provider=ModelProvider.OPENAI,
+        model_id="gpt-6.2-astra",
+        supports_vision=True,
+        reasoning_levels=_OPENAI_62,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # 6.1 Terra: the newest Terra (the index lists no 6.2 Terra; 5.6 Terra is
+    # retired). $1/$5 per M, cached input $0.05. Docs list effort none, low,
+    # medium (default), high, xhigh, max: the same ladder as 6 Luna.
+    CatalogModel(
+        key="gpt-6-1-terra",
+        label="GPT-6.1 Terra",
+        family="GPT",
+        provider=ModelProvider.OPENAI,
+        model_id="gpt-6.1-terra",
+        supports_vision=True,
+        reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # The whole Claude family left on 2026-09-03: nobody on the server talked
