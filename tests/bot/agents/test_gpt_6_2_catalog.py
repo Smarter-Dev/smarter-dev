@@ -87,4 +87,5 @@ def test_admission_migration_covers_exactly_the_new_keys_disabled():
     assert {k for k, _ in mod._ADDED} == set(_WIRE)
     for key, _ in mod._ADDED:
         assert get_model(key) is not None
+    assert "SELECT :key, true, :tier" in _MIGRATION.read_text()
     assert all(t in ("low", "medium", "high", "ultra") for _, t in mod._ADDED)

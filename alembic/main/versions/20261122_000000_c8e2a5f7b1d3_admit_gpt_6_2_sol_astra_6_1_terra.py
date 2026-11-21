@@ -1,13 +1,11 @@
-"""admit GPT-6.2 Sol, GPT-6.2 Astra and GPT-6.1 Terra, disabled
+"""admit GPT-6.2 Sol, GPT-6.2 Astra and GPT-6.1 Terra
 
 #494 (2026-11-22). The catalog gains ``gpt-6-2-sol``, ``gpt-6-2-astra`` and
 ``gpt-6-1-terra``. Nothing is retired or moved. Each key gets a
-``chat_catalog_models`` row inserted ``enabled = false``: the production
-OpenAI key's project was not yet admitted to these models when they were added
-(``GET /v1/models/<id>`` answered 404), so enabling them would offer models
-that fail on every call. The reasoning ladders for the two 6.2 models are also
-unprobed. An administrator, or a follow-up revision once the key is admitted
-and the ladders are probed, flips ``enabled``.
+``chat_catalog_models`` row inserted ``enabled = true``. The production OpenAI
+key was granted access after the first draft, and every reasoning value and
+image input was probed on it (6.2 Sol and Astra reject "none" and "minimal";
+6.1 Terra rejects only "minimal").
 
 Cost tiers follow price: Sol and Terra sit beside 6.1 Sol ("medium"), Astra at
 four times Sol's rate is "high". Rows sort after every existing row. A row
@@ -44,7 +42,7 @@ def upgrade() -> None:
             sa.text(
                 "INSERT INTO chat_catalog_models"
                 " (model_key, enabled, cost_tier, sort_order)"
-                " SELECT :key, false, :tier,"
+                " SELECT :key, true, :tier,"
                 " COALESCE((SELECT MAX(sort_order) FROM chat_catalog_models), -1) + 1"
                 " ON CONFLICT (model_key) DO NOTHING"
             ).bindparams(key=key, tier=tier)
