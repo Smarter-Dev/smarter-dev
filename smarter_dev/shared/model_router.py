@@ -109,10 +109,13 @@ def build_model_for(model: CatalogModel) -> Model:
         api_key = require_credential("gemini")
         return GoogleModel(model.model_id, provider=GoogleProvider(api_key=api_key))
     if model.provider is ModelProvider.OPENAI:
+        extra = {}
+        if (profile := openai_profile_for(model.model_id)) is not None:
+            extra["profile"] = profile
         return OpenAIResponsesModel(
             model.model_id,
             provider=OpenAIProvider(api_key=require_credential("openai")),
-            profile=openai_profile_for(model.model_id),
+            **extra,
         )
     if model.provider is ModelProvider.ANTHROPIC:
         provider = AnthropicProvider(api_key=anthropic_api_key())
