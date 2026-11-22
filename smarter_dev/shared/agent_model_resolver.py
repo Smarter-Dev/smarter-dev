@@ -26,8 +26,15 @@ def resolve_model_name(model_id: str) -> Any:
         from pydantic_ai.models.openai import OpenAIResponsesModel
         from pydantic_ai.providers.openai import OpenAIProvider
 
+        from smarter_dev.shared.model_router import openai_profile_for
+
+        extra = {}
+        if (profile := openai_profile_for(name)) is not None:
+            extra["profile"] = profile
         return OpenAIResponsesModel(
-            name, provider=OpenAIProvider(api_key=require_credential("openai"))
+            name,
+            provider=OpenAIProvider(api_key=require_credential("openai")),
+            **extra,
         )
     if prefix == "google-gla":
         from pydantic_ai.models.google import GoogleModel

@@ -27,6 +27,7 @@ from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from pydantic_ai.profiles import ModelProfile
+from pydantic_ai.profiles.openai import openai_model_profile
 from pydantic_ai.profiles import merge_profile
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -79,15 +80,42 @@ def anthropic_api_key() -> str:
     return require_credential("anthropic")
 
 
+# pydantic-ai-slim 2.57.0 does not know the GPT-6.2 ids or 6.1 Terra, so
+# openai_model_profile gives them a "no reasoning" profile
+# (openai_supports_reasoning=False). The effort setting still reaches OpenAI,
+# but a multi-step tool loop then omits include=["reasoning.encrypted_content"]
+# and reasoning.context="all_turns", and the history carries a
+# "<think></think>" message instead of the earlier reasoning and function-call
+# items (#494). Borrow the profile of the sibling it behaves like. An explicit
+# map by wire id, not a prefix guess; delete it once pydantic-ai-slim is 2.70
+# or later, where all three ids are known.
+_OPENAI_PROFILE_BORROWED_FROM: dict[str, str] = {
+    "gpt-6.2-sol": "gpt-6.1-sol",
+    "gpt-6.2-astra": "gpt-6.1-sol",
+    "gpt-6.1-terra": "gpt-6-luna",
+}
+
+
+def openai_profile_for(wire_id: str) -> ModelProfile | None:
+    """The profile to hand ``OpenAIResponsesModel`` for ``wire_id``, or
+    ``None`` to keep pydantic-ai's own."""
+    donor = _OPENAI_PROFILE_BORROWED_FROM.get(wire_id)
+    return openai_model_profile(donor) if donor else None
+
+
 def build_model_for(model: CatalogModel) -> Model:
     """Return a configured Pydantic AI ``Model`` for ``model``."""
     if model.provider is ModelProvider.GOOGLE:
         api_key = require_credential("gemini")
         return GoogleModel(model.model_id, provider=GoogleProvider(api_key=api_key))
     if model.provider is ModelProvider.OPENAI:
+        extra = {}
+        if (profile := openai_profile_for(model.model_id)) is not None:
+            extra["profile"] = profile
         return OpenAIResponsesModel(
             model.model_id,
             provider=OpenAIProvider(api_key=require_credential("openai")),
+            **extra,
         )
     if model.provider is ModelProvider.ANTHROPIC:
         provider = AnthropicProvider(api_key=anthropic_api_key())

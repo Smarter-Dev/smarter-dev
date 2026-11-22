@@ -806,6 +806,38 @@ class TestOpenAIPricing:
             Decimal("0.544")
         )
 
+    def test_gpt_6_2_and_terra_rates(self):
+        # 6.2 Sol $2/$10, 6.2 Astra $8/$40, 6.1 Terra $1/$5 (#494).
+        assert calc_cost(1_000_000, 1_000_000, "gpt-6.2-sol") == Decimal("12.00")
+        assert calc_cost(1_000_000, 1_000_000, "gpt-6.2-astra") == Decimal("48.00")
+        assert calc_cost(1_000_000, 1_000_000, "gpt-6.1-terra") == Decimal("6.00")
+
+    def test_gpt_6_2_astra_cached_input_and_cache_write(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-6.2-astra",
+        )
+        # 100k fresh @ $8 + 800k read @ $0.40 + 100k write @ $10.
+        assert cost == Decimal("2.12")
+
+    def test_gpt_6_2_long_context_tier_per_request(self):
+        # >272K prompt: 2x input, 1.5x output for the whole request.
+        assert calc_cost(300_000, 10_000, "openai:gpt-6.2-sol", per_request=True) == (
+            Decimal("1.35")
+        )
+        assert calc_cost(300_000, 10_000, "openai:gpt-6.2-astra", per_request=True) == (
+            Decimal("5.40")
+        )
+        assert calc_cost(300_000, 10_000, "openai:gpt-6.1-terra", per_request=True) == (
+            Decimal("0.675")
+        )
+        assert calc_cost(272_000, 0, "openai:gpt-6.2-astra", per_request=True) == (
+            Decimal("2.176")
+        )
+
 
 class TestAnthropicPricing:
     def test_opus_5_rates(self):

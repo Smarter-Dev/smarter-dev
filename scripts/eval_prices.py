@@ -67,6 +67,12 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         "gpt-6-sol": ("GPT 6 Sol", "2", "10", "0.2", "2.5"),
         # GPT-6.1 Sol — $2.00 in / $10.00 out / $0.10 cached-read / $2.50 cache-write.
         "gpt-6.1-sol": ("GPT 6.1 Sol", "2", "10", "0.1", "2.5"),
+        # GPT-6.2 Sol — $2.00 in / $10.00 out / $0.10 cached-read / $2.50 cache-write.
+        "gpt-6.2-sol": ("GPT 6.2 Sol", "2", "10", "0.1", "2.5"),
+        # GPT-6.2 Astra — $8.00 in / $40.00 out / $0.40 cached-read / $10.00 cache-write.
+        "gpt-6.2-astra": ("GPT 6.2 Astra", "8", "40", "0.4", "10"),
+        # GPT-6.1 Terra — $1.00 in / $5.00 out / $0.05 cached-read / $1.25 cache-write.
+        "gpt-6.1-terra": ("GPT 6.1 Terra", "1", "5", "0.05", "1.25"),
     },
     "openrouter": {
         # DeepSeek V4 Flash on the deepseek-origin route the bot pins (see
