@@ -642,7 +642,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # 6.2 Astra: OpenAI's flagship, $8/$40 per M, cached input $0.40. Rejects
-    # reasoning "none". Four times Sol's price, so a "high" cost tier.
+    # reasoning "none" and "minimal". Four times Sol's price, so a "high" cost tier.
     CatalogModel(
         key="gpt-6-2-astra",
         label="GPT-6.2 Astra",

@@ -1,6 +1,6 @@
 """admit GPT-6.2 Sol, GPT-6.2 Astra and GPT-6.1 Terra
 
-#494 (2026-11-22). The catalog gains ``gpt-6-2-sol``, ``gpt-6-2-astra`` and
+#494 (2026-11-21). The catalog gains ``gpt-6-2-sol``, ``gpt-6-2-astra`` and
 ``gpt-6-1-terra``. Nothing is retired or moved. Each key gets a
 ``chat_catalog_models`` row inserted ``enabled = true``. The production OpenAI
 key was granted access after the first draft, and every reasoning value and
@@ -14,7 +14,7 @@ rerun.
 
 Revision ID: c8e2a5f7b1d3
 Revises: b4e7a2c9d1f6
-Create Date: 2026-11-22 00:00:00.000000
+Create Date: 2026-11-21 23:59:00.000000
 
 """
 from typing import Sequence, Union
