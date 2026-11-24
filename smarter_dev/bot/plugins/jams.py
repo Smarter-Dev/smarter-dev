@@ -104,9 +104,9 @@ async def jam_group(ctx: lightbulb.Context) -> None:
 
 
 @jam_group.child
-@lightbulb.command("join", "Join the code jam and get pinged with jam news")
+@lightbulb.command("subscribe", "Get pinged with code jam news")
 @lightbulb.implements(lightbulb.SlashSubCommand)
-async def join_command(ctx: lightbulb.Context) -> None:
+async def subscribe_command(ctx: lightbulb.Context) -> None:
     await _answer(
         ctx,
         lambda api: jams.join_jam(
@@ -116,9 +116,9 @@ async def join_command(ctx: lightbulb.Context) -> None:
 
 
 @jam_group.child
-@lightbulb.command("leave", "Leave the code jam and stop the jam pings")
+@lightbulb.command("unsubscribe", "Stop the code jam news pings")
 @lightbulb.implements(lightbulb.SlashSubCommand)
-async def leave_command(ctx: lightbulb.Context) -> None:
+async def unsubscribe_command(ctx: lightbulb.Context) -> None:
     await _answer(
         ctx,
         lambda api: jams.leave_jam(

@@ -454,6 +454,8 @@ async def test_join_gives_the_role():
     rest.add_role_to_member.assert_awaited_once()
     assert rest.add_role_to_member.await_args.args == (GUILD, 1, ROLE)
     assert "Holiday Chatbot Jam" in reply
+    assert "pinged" in reply
+    assert "`/jam unsubscribe`" in reply
 
 
 async def test_join_needs_a_jam_and_a_role():
@@ -936,8 +938,8 @@ def test_the_jam_command_has_its_four_subcommands():
     group = jams_plugin.jam_group
     assert group.name == "jam"
     assert {child.name for child in group.subcommands} == {
-        "join",
-        "leave",
+        "subscribe",
+        "unsubscribe",
         "team",
         "invite",
     }
@@ -946,7 +948,7 @@ def test_the_jam_command_has_its_four_subcommands():
 async def test_a_command_defers_then_answers_only_the_caller(wired):
     ctx = make_ctx(wired)
 
-    await jams_plugin.join_command.callback(ctx)
+    await jams_plugin.subscribe_command.callback(ctx)
 
     first, second = ctx.respond.await_args_list
     assert first.args == (hikari.ResponseType.DEFERRED_MESSAGE_CREATE,)
@@ -970,7 +972,7 @@ async def test_a_command_that_breaks_still_answers(wired):
     ctx = make_ctx(wired)
     wired.rest.remove_role_from_member.side_effect = RuntimeError("boom")
 
-    await jams_plugin.leave_command.callback(ctx)
+    await jams_plugin.unsubscribe_command.callback(ctx)
 
     assert "went wrong" in ctx.respond.await_args.args[0]
 
@@ -1013,7 +1015,7 @@ async def test_commands_say_try_again_without_the_bot_api(wired):
     wired.bot.d.clear()
     ctx = make_ctx(wired)
 
-    await jams_plugin.join_command.callback(ctx)
+    await jams_plugin.subscribe_command.callback(ctx)
 
     assert ctx.respond.await_args.args == (jams.UNAVAILABLE,)
 

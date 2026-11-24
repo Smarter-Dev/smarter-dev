@@ -4,7 +4,7 @@ Four jobs, all driven by what an administrator set up on the jam admin pages:
 
 - post scheduled jam messages when they fall due;
 - tag a new post in the showcase forum with the jam's tag and its year;
-- give and take the Jammer role (``/jam join``, ``/jam leave``);
+- give and take the Jammer role (``/jam subscribe``, ``/jam unsubscribe``);
 - make a private team thread and add teammates up to the jam's team size
   (``/jam team``, ``/jam invite``).
 
@@ -310,7 +310,11 @@ async def tag_showcase_post(
 
 
 async def join_jam(api: JamApi, rest: Any, guild_id: int, user_id: int) -> str:
-    """Give the member the Jammer role."""
+    """Give the member the Jammer role, which is what jam news pings.
+
+    The command is ``/jam subscribe``: the role only brings pings, and taking
+    part in a jam does not need it.
+    """
     info = await api.guild_jam(str(guild_id))
     if info is None:
         return UNAVAILABLE
@@ -320,19 +324,19 @@ async def join_jam(api: JamApi, rest: Any, guild_id: int, user_id: int) -> str:
         return NO_JAM
     try:
         await rest.add_role_to_member(
-            guild_id, user_id, int(info.role_id), reason="Joined the code jam"
+            guild_id, user_id, int(info.role_id), reason="Subscribed to code jam news"
         )
     except hikari.HTTPError as error:
         logger.warning("could not give the jam role in %s: %r", guild_id, error)
         return "I could not give you the role. Please tell a moderator."
     return (
-        f"You're in **{info.jam.name}**. You have the <@&{info.role_id}> role "
-        "and will be pinged with jam news. Use `/jam leave` to stop."
+        f"You will be pinged with **{info.jam.name}** news. You have the "
+        f"<@&{info.role_id}> role. Use `/jam unsubscribe` to stop."
     )
 
 
 async def leave_jam(api: JamApi, rest: Any, guild_id: int, user_id: int) -> str:
-    """Take the Jammer role away. Works between jams too."""
+    """Take the Jammer role away (``/jam unsubscribe``). Works between jams too."""
     info = await api.guild_jam(str(guild_id))
     if info is None:
         return UNAVAILABLE
@@ -340,7 +344,10 @@ async def leave_jam(api: JamApi, rest: Any, guild_id: int, user_id: int) -> str:
         return NOT_SET_UP
     try:
         await rest.remove_role_from_member(
-            guild_id, user_id, int(info.role_id), reason="Left the code jam"
+            guild_id,
+            user_id,
+            int(info.role_id),
+            reason="Unsubscribed from code jam news",
         )
     except hikari.HTTPError as error:
         logger.warning("could not remove the jam role in %s: %r", guild_id, error)
