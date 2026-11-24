@@ -269,16 +269,15 @@ async def test_a_managed_same_named_role_is_refused():
 
 async def test_one_failed_channel_keeps_the_rest_and_can_be_finished():
     discord, setup, jam = FakeDiscord(), _empty_setup(), make_jam()
-    discord.fail["create_guild_channel:jam-chat"] = discord_error(403)
+    discord.fail["create_guild_channel:jam-news"] = discord_error(403)
 
     report = await run_jam_setup(discord, setup, jam)
 
     assert report.errors == [
-        "#jam-chat: the bot needs the Manage Channels and Create Private Threads "
-        "permissions"
+        "#jam-news: the bot does not have the Manage Channels permission"
     ]
-    assert setup.chat_channel_id is None
-    assert setup.news_channel_id and setup.showcase_channel_id and setup.role_id
+    assert setup.news_channel_id is None
+    assert setup.chat_channel_id and setup.showcase_channel_id and setup.role_id
     assert not jam.missing_tags
 
     discord.fail.clear()
@@ -286,7 +285,7 @@ async def test_one_failed_channel_keeps_the_rest_and_can_be_finished():
     report = await run_jam_setup(discord, setup, jam)
 
     assert report.ok
-    assert report.created == ["#jam-chat"]
+    assert report.created == ["#jam-news"]
     assert len(discord.calls) == 1
 
 
