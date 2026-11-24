@@ -16,6 +16,7 @@ from litestar.testing import create_test_client
 from skrift.auth.guards import APIKeyOnly
 
 from smarter_dev.web.api_native import jams as jams_module
+from smarter_dev.web.api_native.jams import GuildJamController
 from smarter_dev.web.api_native.jams import JamMessageController
 from smarter_dev.web.jams import store
 from tests.web.jam_helpers import GUILD
@@ -30,7 +31,7 @@ def client(db_session) -> Iterator[TestClient]:
     jams_module.BOT_API_GUARDS.clear()
     try:
         with create_test_client(
-            route_handlers=[JamMessageController],
+            route_handlers=[JamMessageController, GuildJamController],
             plugins=[PydanticPlugin()],
             dependencies={
                 "db_session": Provide(lambda: db_session, sync_to_thread=False)
@@ -61,6 +62,7 @@ def test_every_route_carries_the_bot_api_guards():
         "mark_jam_message_failed",
     ):
         assert getattr(JamMessageController, name).guards is guards
+    assert GuildJamController.get_guild_jam.guards is guards
 
 
 async def test_claim_hands_each_message_out_once(client, db_session):
@@ -136,3 +138,65 @@ def test_a_malformed_id_is_rejected(client):
         400,
         422,
     )
+
+
+# -- what the bot reads about a guild's jam ------------------------------------
+
+
+def test_guild_jam_is_empty_before_anything_is_set_up(client):
+    response = client.get(f"/api/guilds/{GUILD}/jam")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "channels": {"news": None, "chat": None, "teams": None, "showcase": None},
+        "role_id": None,
+        "jam": None,
+    }
+
+
+async def test_guild_jam_gives_channels_role_and_the_open_jam(client, db_session):
+    now = datetime.now(UTC)
+    jam = make_jam(
+        starts_at=now - timedelta(days=1),
+        submissions_close_at=now + timedelta(days=30),
+        showcase_tag_id="31",
+        year_tag_id="32",
+    )
+    db_session.add_all([jam, make_setup()])
+    await db_session.commit()
+
+    body = client.get(f"/api/guilds/{GUILD}/jam").json()
+
+    assert body["channels"] == {
+        "news": "11",
+        "chat": "12",
+        "teams": "13",
+        "showcase": "14",
+    }
+    assert body["role_id"] == "20"
+    assert body["jam"]["id"] == str(jam.id)
+    assert body["jam"]["name"] == "Holiday Chatbot Jam"
+    assert body["jam"]["max_team_size"] == 4
+    assert body["jam"]["showcase_tag_id"] == "31"
+    assert body["jam"]["year_tag_id"] == "32"
+    # Times carry their offset, so the bot compares them with aware times.
+    closes = datetime.fromisoformat(body["jam"]["submissions_close_at"])
+    assert closes.utcoffset() == timedelta(0)
+    assert abs(closes - (now + timedelta(days=30))) < timedelta(seconds=1)
+    assert datetime.fromisoformat(body["jam"]["starts_at"]).utcoffset() == timedelta(0)
+
+
+async def test_guild_jam_keeps_the_channels_between_jams(client, db_session):
+    now = datetime.now(UTC)
+    over = make_jam(
+        starts_at=now - timedelta(days=40),
+        submissions_close_at=now - timedelta(days=1),
+    )
+    db_session.add_all([over, make_setup()])
+    await db_session.commit()
+
+    body = client.get(f"/api/guilds/{GUILD}/jam").json()
+
+    assert body["jam"] is None
+    assert body["role_id"] == "20"
+    assert body["channels"]["teams"] == "13"

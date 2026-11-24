@@ -1399,6 +1399,10 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.privacy_notice")
         logger.info("✓ Loaded privacy notice plugin")
 
+        logger.info("Loading jams plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.jams")
+        logger.info("✓ Loaded jams plugin")
+
         logger.info("✓ All plugins loaded successfully")
     except Exception as e:
         logger.error(f"Failed to load plugins: {e}")
