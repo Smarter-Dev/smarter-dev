@@ -22,6 +22,7 @@ POLL_SECONDS = 30.0
 
 _task: asyncio.Task | None = None
 _api: jams.JamApi | None = None
+_limits = jams.TeamLimits()
 
 
 def _jam_api() -> jams.JamApi | None:
@@ -88,7 +89,7 @@ async def _answer(ctx: lightbulb.Context, work) -> None:
     )
     api = _jam_api()
     try:
-        text = jams.NOT_SET_UP if api is None else await work(api)
+        text = jams.UNAVAILABLE if api is None else await work(api)
     except Exception as error:  # noqa: BLE001 - the caller always gets an answer
         logger.exception("jam command failed: %r", error)
         text = "Something went wrong. Please try again."
@@ -134,7 +135,12 @@ async def team_command(ctx: lightbulb.Context) -> None:
     await _answer(
         ctx,
         lambda api: jams.create_team(
-            api, ctx.bot.rest, int(ctx.guild_id), int(ctx.user.id), ctx.options.name
+            api,
+            ctx.bot.rest,
+            _limits,
+            int(ctx.guild_id),
+            int(ctx.user.id),
+            ctx.options.name,
         ),
     )
 
@@ -145,15 +151,23 @@ async def team_command(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def invite_command(ctx: lightbulb.Context) -> None:
     me = ctx.bot.get_me()
+    if me is None:
+        # Without the bot's own id its threads cannot be told from others.
+        await ctx.respond(
+            "I am still starting up. Please try again in a minute.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return
     target = ctx.options.user
     await _answer(
         ctx,
         lambda api: jams.invite_to_team(
             api,
             ctx.bot.rest,
+            _limits,
             guild_id=int(ctx.guild_id),
             channel_id=int(ctx.channel_id),
-            bot_user_id=int(me.id) if me else 0,
+            bot_user_id=int(me.id),
             target_id=int(target.id),
             target_is_bot=bool(target.is_bot),
         ),
