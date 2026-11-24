@@ -89,8 +89,8 @@ async def test_a_refused_teams_channel_names_the_thread_permissions():
     report = await run_jam_setup(discord, setup)
 
     assert report.errors == [
-        "#jam-teams: the bot does not have the Manage Channels, Create Public "
-        "Threads or Create Private Threads permission"
+        "#jam-teams: the bot needs the Manage Channels, Create Public Threads "
+        "and Create Private Threads permissions"
     ]
     assert setup.teams_channel_id is None
     assert setup.showcase_channel_id is not None

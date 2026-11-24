@@ -113,6 +113,8 @@ def _why(exc: Exception, permission: str) -> str:
     """
     status = getattr(exc, "status_code", None)
     if status == 403:
+        if " and " in permission:
+            return f"the bot needs the {permission} permissions"
         return f"the bot does not have the {permission} permission"
     if status == 429:
         return "Discord is rate limiting the bot; try again in a minute"
@@ -267,7 +269,7 @@ async def _ensure_channel(
             )
         elif key == "teams":
             # Discord refuses an overwrite for a permission the bot lacks.
-            needs = "Manage Channels, Create Public Threads or Create Private Threads"
+            needs = "Manage Channels, Create Public Threads and Create Private Threads"
             payload["permission_overwrites"] = await _bot_only_thread_overwrites(
                 client, setup.guild_id
             )
