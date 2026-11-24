@@ -53,7 +53,6 @@ def upgrade() -> None:
         sa.Column("category_id", sa.String(length=22), nullable=True),
         sa.Column("news_channel_id", sa.String(length=22), nullable=True),
         sa.Column("chat_channel_id", sa.String(length=22), nullable=True),
-        sa.Column("teams_channel_id", sa.String(length=22), nullable=True),
         sa.Column("showcase_channel_id", sa.String(length=22), nullable=True),
         sa.Column("role_id", sa.String(length=22), nullable=True),
         *_timestamps(),
@@ -110,7 +109,7 @@ def upgrade() -> None:
             name=op.f("ck_jam_messages_status"),
         ),
         sa.CheckConstraint(
-            "channel_key IN ('news', 'chat', 'teams')",
+            "channel_key IN ('news', 'chat')",
             name=op.f("ck_jam_messages_channel_key"),
         ),
     )

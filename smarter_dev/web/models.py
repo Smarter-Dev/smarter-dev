@@ -6548,13 +6548,12 @@ class ChatBotPurgeRequest(Base):
 JAM_CHANNEL_COLUMNS: dict[str, str] = {
     "news": "news_channel_id",
     "chat": "chat_channel_id",
-    "teams": "teams_channel_id",
     "showcase": "showcase_channel_id",
 }
 
 # Channels a scheduled jam message can go to. The showcase is a forum, which
 # takes posts rather than plain messages.
-JAM_MESSAGE_CHANNEL_KEYS: tuple[str, ...] = ("news", "chat", "teams")
+JAM_MESSAGE_CHANNEL_KEYS: tuple[str, ...] = ("news", "chat")
 
 JAM_MESSAGE_STATUSES: tuple[str, ...] = ("pending", "sending", "sent", "failed")
 
@@ -6573,7 +6572,6 @@ class JamDiscordSetup(Base):
     category_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     news_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     chat_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
-    teams_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     showcase_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     role_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
 
@@ -6673,7 +6671,7 @@ class JamMessage(Base):
             name="status",
         ),
         CheckConstraint(
-            "channel_key IN ('news', 'chat', 'teams')",
+            "channel_key IN ('news', 'chat')",
             name="channel_key",
         ),
     )

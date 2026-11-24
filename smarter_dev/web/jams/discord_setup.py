@@ -1,6 +1,6 @@
 """Create the Discord pieces jams need.
 
-A guild's jams share one category, four channels and one role
+A guild's jams share one category, three channels and one role
 (:class:`JamDiscordSetup`). Each jam adds two tags to the showcase forum: its
 own and the year it starts in. :func:`run_jam_setup` brings Discord in line
 with both, makes whatever is missing and records each id.
@@ -39,21 +39,17 @@ _TEXT, _CATEGORY, _NEWS, _FORUM = 0, 4, 5, 15
 _CHANNEL_TYPES: dict[str, int] = {
     "news": _TEXT,
     "chat": _TEXT,
-    "teams": _TEXT,
     "showcase": _FORUM,
 }
 _TOPICS: dict[str, str] = {
     "news": "Code jam announcements.",
-    "chat": "Talk about the current code jam.",
-    "teams": "Find teammates for the current code jam.",
+    "chat": "Talk about the current code jam and find teammates.",
     "showcase": "Post your code jam entry here. One post per entry.",
 }
 
 _VIEW_CHANNEL = 1 << 10
 _SEND_MESSAGES = 1 << 11
-_CREATE_PUBLIC_THREADS = 1 << 35
 _CREATE_PRIVATE_THREADS = 1 << 36
-_CREATE_THREADS = _CREATE_PUBLIC_THREADS | _CREATE_PRIVATE_THREADS
 _ROLE_OVERWRITE, _MEMBER_OVERWRITE = 0, 1
 
 _AUDIT_REASON = "Code jam setup from the admin panel"
@@ -267,10 +263,10 @@ async def _ensure_channel(
             payload["permission_overwrites"] = await _read_only_overwrites(
                 client, setup.guild_id
             )
-        elif key == "teams":
+        elif key == "chat":
             # Discord refuses an overwrite for a permission the bot lacks.
-            needs = "Manage Channels, Create Public Threads and Create Private Threads"
-            payload["permission_overwrites"] = await _bot_only_thread_overwrites(
+            needs = "Manage Channels and Create Private Threads"
+            payload["permission_overwrites"] = await _team_thread_overwrites(
                 client, setup.guild_id
             )
         channel = await client.create_guild_channel(
@@ -307,15 +303,17 @@ async def _read_only_overwrites(client: JamDiscordClient, guild_id: str) -> list
     ]
 
 
-async def _bot_only_thread_overwrites(
+async def _team_thread_overwrites(
     client: JamDiscordClient, guild_id: str
 ) -> list[dict]:
-    """Overwrites for a channel where only the bot opens threads.
+    """Overwrites for the chat channel, where only the bot opens private threads.
 
-    Team threads are made by ``/jam team``, which enforces the team rules. A
-    thread a member opens by hand would skip them, whatever the server's
-    @everyone role allows. Members still talk in the channel and in the
-    threads they are added to. The @everyone role's id is the guild's id.
+    A team is a private thread under the chat channel, made by ``/jam team``,
+    which enforces the team rules. A private thread a member opens by hand
+    would skip them, whatever the server's @everyone role allows. Members
+    still talk in the channel, open public threads as the server allows, and
+    talk in the team threads they are added to. The @everyone role's id is
+    the guild's id.
     """
     bot_user_id = await client.get_bot_user_id()
     return [
@@ -323,12 +321,12 @@ async def _bot_only_thread_overwrites(
             "id": guild_id,
             "type": _ROLE_OVERWRITE,
             "allow": "0",
-            "deny": str(_CREATE_THREADS),
+            "deny": str(_CREATE_PRIVATE_THREADS),
         },
         {
             "id": bot_user_id,
             "type": _MEMBER_OVERWRITE,
-            "allow": str(_CREATE_THREADS),
+            "allow": str(_CREATE_PRIVATE_THREADS),
             "deny": "0",
         },
     ]

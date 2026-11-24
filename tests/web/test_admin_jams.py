@@ -409,7 +409,7 @@ async def test_create_saves_the_jam_and_sets_up_discord(db_session):
     )
     setup = await store.get_setup(db_session, GUILD)
     assert setup.missing_parts == [] and jam.missing_tags == []
-    assert len(discord.created("create_guild_channel")) == 5
+    assert len(discord.created("create_guild_channel")) == 4
     flashes.success.assert_called_once()
     flashes.error.assert_not_called()
     assert "created" in flashes.success.call_args.args[1]
@@ -417,7 +417,7 @@ async def test_create_saves_the_jam_and_sets_up_discord(db_session):
 
 async def test_create_keeps_the_jam_when_discord_setup_fails(db_session):
     discord = _Guild()
-    discord.fail["create_guild_channel:jam-teams"] = discord_error(403)
+    discord.fail["create_guild_channel:jam-chat"] = discord_error(403)
 
     response, flashes, _, _ = await _call(
         "jam_create", db_session, form=_VALID_JAM, discord=discord
@@ -426,12 +426,12 @@ async def test_create_keeps_the_jam_when_discord_setup_fails(db_session):
     (jam,) = await _all_jams(db_session)
     assert _redirected(response, f"{_JAMS_URL}/{jam.id}")
     setup = await store.get_setup(db_session, GUILD)
-    assert setup.missing_parts == ["teams"]
+    assert setup.missing_parts == ["chat"]
     assert setup.news_channel_id is not None
     message = flashes.error.call_args.args[1]
     assert (
-        "#jam-teams: the bot needs the Manage Channels, Create Public Threads "
-        "and Create Private Threads permissions."
+        "#jam-chat: the bot needs the Manage Channels and Create Private Threads "
+        "permissions."
     ) in message
     assert ".." not in message
 
@@ -514,8 +514,8 @@ async def test_detail_before_any_setup_marks_everything_missing(db_session):
     response, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
 
     assert all(part["id"] is None for part in response.context["discord_parts"])
-    assert len(response.context["discord_parts"]) == 8
-    assert html.count("Missing") == 8
+    assert len(response.context["discord_parts"]) == 7
+    assert html.count("Missing") == 7
 
 
 async def test_detail_marks_a_stuck_message(db_session):
@@ -986,10 +986,10 @@ async def test_two_setup_runs_at_once_create_everything_once(db_session, test_en
         "jam_setup", db_session, test_engine, discord, jam_id=jam.id
     )
 
-    assert len(discord.created("create_guild_channel")) == 5
+    assert len(discord.created("create_guild_channel")) == 4
     assert len(discord.created("create_guild_role")) == 1
     names = [channel.name for channel in discord.channels]
-    assert len(names) == len(set(names)) == 5
+    assert len(names) == len(set(names)) == 4
     setup = await store.get_setup(db_session, GUILD)
     tags = [tag["name"] for tag in discord.tags[setup.showcase_channel_id]]
     assert sorted(tags) == ["2026", "Holiday Jam"]
@@ -1004,7 +1004,7 @@ async def test_a_double_clicked_create_makes_one_jam(db_session, test_engine):
 
     assert len(await _all_jams(db_session)) == 1
     assert sorted(response.status_code for response in responses)[-1] == 400
-    assert len(discord.created("create_guild_channel")) == 5
+    assert len(discord.created("create_guild_channel")) == 4
     assert len(discord.created("create_guild_role")) == 1
 
 

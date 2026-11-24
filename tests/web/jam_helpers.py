@@ -38,7 +38,6 @@ def make_setup(**overrides) -> JamDiscordSetup:
         "category_id": "10",
         "news_channel_id": "11",
         "chat_channel_id": "12",
-        "teams_channel_id": "13",
         "showcase_channel_id": "14",
         "role_id": "20",
     }

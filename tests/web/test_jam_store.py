@@ -144,11 +144,11 @@ async def test_claim_returns_a_due_message_once(db_session):
 
 
 async def test_claim_leaves_the_role_out_unless_the_message_pings(db_session):
-    await _seed(db_session, channel_key="teams")
+    await _seed(db_session, channel_key="chat")
 
     (outgoing,) = await store.claim_due_messages(db_session, _DUE)
 
-    assert outgoing.channel_id == "13"
+    assert outgoing.channel_id == "12"
     assert outgoing.role_id is None
 
 

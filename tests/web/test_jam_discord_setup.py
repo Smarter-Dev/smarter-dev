@@ -35,7 +35,7 @@ async def test_fresh_guild_gets_everything():
     assert not jam.missing_tags
     by_name = {channel.name: channel for channel in discord.channels}
     assert by_name[CATEGORY_NAME].type == _CATEGORY
-    for name in ("jam-news", "jam-chat", "jam-teams"):
+    for name in ("jam-news", "jam-chat"):
         assert by_name[name].type == _TEXT
         assert by_name[name].parent_id == setup.category_id
     assert by_name["jam-showcase"].type == _FORUM
@@ -47,7 +47,7 @@ async def test_fresh_guild_gets_everything():
     ]
     assert jam.showcase_tag_id == tags[0]["id"]
     assert jam.year_tag_id == tags[1]["id"]
-    assert len(report.created) == 8
+    assert len(report.created) == 7
     assert report.adopted == []
 
 
@@ -63,11 +63,12 @@ async def test_only_the_news_channel_is_read_only():
         {"id": GUILD, "type": 0, "allow": "0", "deny": str(1 << 11)},
         {"id": BOT_USER, "type": 1, "allow": str(1 << 10 | 1 << 11), "deny": "0"},
     ]
-    for name in ("jam-chat", "jam-showcase"):
-        assert "permission_overwrites" not in payloads[name]
+    assert "permission_overwrites" not in payloads["jam-showcase"]
+    chat_denies = int(payloads["jam-chat"]["permission_overwrites"][0]["deny"])
+    assert not chat_denies & (1 << 11)
 
 
-async def test_only_the_bot_opens_threads_in_the_teams_channel():
+async def test_only_the_bot_opens_private_threads_in_the_chat_channel():
     discord, setup = FakeDiscord(), _empty_setup()
 
     await run_jam_setup(discord, setup)
@@ -75,24 +76,24 @@ async def test_only_the_bot_opens_threads_in_the_teams_channel():
     payloads = {
         call[1]["name"]: call[1] for call in discord.created("create_guild_channel")
     }
-    threads = str(1 << 35 | 1 << 36)
-    assert payloads["jam-teams"]["permission_overwrites"] == [
+    threads = str(1 << 36)
+    assert payloads["jam-chat"]["permission_overwrites"] == [
         {"id": GUILD, "type": 0, "allow": "0", "deny": threads},
         {"id": BOT_USER, "type": 1, "allow": threads, "deny": "0"},
     ]
 
 
-async def test_a_refused_teams_channel_names_the_thread_permissions():
+async def test_a_refused_chat_channel_names_the_thread_permission():
     discord, setup = FakeDiscord(), _empty_setup()
-    discord.fail["create_guild_channel:jam-teams"] = discord_error(403)
+    discord.fail["create_guild_channel:jam-chat"] = discord_error(403)
 
     report = await run_jam_setup(discord, setup)
 
     assert report.errors == [
-        "#jam-teams: the bot needs the Manage Channels, Create Public Threads "
-        "and Create Private Threads permissions"
+        "#jam-chat: the bot needs the Manage Channels and Create Private Threads "
+        "permissions"
     ]
-    assert setup.teams_channel_id is None
+    assert setup.chat_channel_id is None
     assert setup.showcase_channel_id is not None
 
 
@@ -131,7 +132,7 @@ async def test_existing_pieces_are_adopted_not_duplicated():
     assert setup.role_id == role
     assert sorted(report.adopted) == ["#jam-chat", "@Jammer role", "Code Jams category"]
     assert discord.created("create_guild_role") == []
-    assert len(discord.created("create_guild_channel")) == 3
+    assert len(discord.created("create_guild_channel")) == 2
 
 
 async def test_same_named_channel_outside_the_category_is_not_adopted():
@@ -233,13 +234,13 @@ async def test_a_showcase_forum_chosen_by_the_admin_is_kept():
 async def test_a_stored_channel_that_was_deleted_is_made_again():
     discord, setup = FakeDiscord(), _empty_setup()
     await run_jam_setup(discord, setup)
-    gone = setup.teams_channel_id
+    gone = setup.chat_channel_id
     discord.channels = [c for c in discord.channels if c.id != gone]
 
     report = await run_jam_setup(discord, setup)
 
-    assert report.created == ["#jam-teams"]
-    assert setup.teams_channel_id != gone
+    assert report.created == ["#jam-chat"]
+    assert setup.chat_channel_id != gone
 
 
 async def test_a_same_named_role_with_permissions_is_refused():
@@ -273,10 +274,11 @@ async def test_one_failed_channel_keeps_the_rest_and_can_be_finished():
     report = await run_jam_setup(discord, setup, jam)
 
     assert report.errors == [
-        "#jam-chat: the bot does not have the Manage Channels permission"
+        "#jam-chat: the bot needs the Manage Channels and Create Private Threads "
+        "permissions"
     ]
     assert setup.chat_channel_id is None
-    assert setup.news_channel_id and setup.teams_channel_id and setup.role_id
+    assert setup.news_channel_id and setup.showcase_channel_id and setup.role_id
     assert not jam.missing_tags
 
     discord.fail.clear()
