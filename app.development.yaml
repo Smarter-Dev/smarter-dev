@@ -53,6 +53,7 @@ controllers:
   - smarter_dev.web.api_native.quests:QuestController
   - smarter_dev.web.api_native.messages:ScheduledMessageController
   - smarter_dev.web.api_native.messages:RepeatingMessageController
+  - smarter_dev.web.api_native.jams:JamMessageController
   - smarter_dev.web.api_native.forum:ForumAgentController
   - smarter_dev.web.api_native.forum:ForumNotificationController
   - smarter_dev.web.api_native.chat_conversations:ChatConversationController
@@ -120,6 +121,7 @@ controllers:
   - smarter_dev.web.bot_admin.campaigns:CampaignsAdminController
   - smarter_dev.web.bot_admin.scheduled_messages:ScheduledMessagesAdminController
   - smarter_dev.web.bot_admin.repeating_messages:RepeatingMessagesAdminController
+  - smarter_dev.web.bot_admin.jams:JamsAdminController
   - smarter_dev.web.bot_admin.guild_configs:GuildConfigsAdminController
   - smarter_dev.web.bot_admin.moderation_policy:ModerationPolicyAdminController
   - smarter_dev.web.bot_admin.help_conversations:HelpConversationsAdminController

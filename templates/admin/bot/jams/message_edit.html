@@ -1,0 +1,44 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Edit Message - {{ jam.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+{% set jam_url = "/admin/bot/guilds/" ~ guild.id ~ "/jams/" ~ jam.id %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Edit Message</h1>
+            <p><a href="{{ jam_url }}">&larr; {{ jam.name }}</a></p>
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% if message.status == "failed" %}
+        <div class="sk-flash sk-flash-error">{{ message.error }} Saving queues it again for the send time below.</div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Scheduled Message</div>
+            <div class="sk-panel-body">
+                <form method="post" action="{{ jam_url }}/messages/{{ message.id }}/edit">
+{{ csrf_field() }}
+                    {% set form = form_data %}
+                    {% include "admin/bot/jams/_message_fields.html" %}
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Save Message</button>
+                        <a href="{{ jam_url }}" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

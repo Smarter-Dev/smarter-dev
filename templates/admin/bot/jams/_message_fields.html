@@ -1,0 +1,19 @@
+<label for="channel_key">Channel</label>
+<select id="channel_key" name="channel_key" required>
+    {% for key, channel in message_channels %}
+    <option value="{{ key }}" {% if form.channel_key == key %}selected{% endif %}>#{{ channel }}</option>
+    {% endfor %}
+</select>
+
+<label for="content">Message</label>
+<textarea id="content" name="content" rows="6" maxlength="{{ message_content_max }}" required>{{ form.content or '' }}</textarea>
+<small class="sk-text-muted">Posted exactly as written. Discord markdown works.</small>
+
+<label for="send_at">Send time (UTC)</label>
+<input type="datetime-local" id="send_at" name="send_at" value="{{ form.send_at or '' }}" required>
+<small class="sk-text-muted">The bot checks for due messages about once a minute.</small>
+
+<label style="display:block; margin-top:0.75rem;">
+    <input type="checkbox" name="mention_role" value="1" {% if form.mention_role %}checked{% endif %}>
+    Ping @{{ role_name }}
+</label>
