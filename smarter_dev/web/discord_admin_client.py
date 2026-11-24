@@ -104,6 +104,8 @@ class DiscordRole:
     position: int
     managed: bool
     mentionable: bool
+    # The role's permission bit set; 0 means it grants nothing of its own.
+    permissions: int = 0
 
     @property
     def color_hex(self) -> str:
@@ -119,6 +121,8 @@ class DiscordChannel:
     name: str
     type: int
     position: int
+    # The category the channel sits under, when it has one.
+    parent_id: str | None = None
 
     @property
     def supports_announcements(self) -> bool:
@@ -127,7 +131,11 @@ class DiscordChannel:
 
 
 class DiscordAdminClient(DiscordBotClient):
-    """Bot-token reads used by the admin guild pages."""
+    """Bot-token calls used by the admin guild pages.
+
+    Mostly reads. The few writes (creating a channel or a role) are things an
+    administrator asked for by submitting an admin form.
+    """
 
     user_agent: ClassVar[str] = "SmarterDev-Admin/1.0"
     error_type: ClassVar[type[DiscordAdminError]] = DiscordAdminError
@@ -183,6 +191,7 @@ class DiscordAdminClient(DiscordBotClient):
                 position=role["position"],
                 managed=role["managed"],
                 mentionable=role["mentionable"],
+                permissions=int(role.get("permissions", 0)),
             )
             for role in response.json()
         ]
@@ -198,11 +207,85 @@ class DiscordAdminClient(DiscordBotClient):
                 name=channel["name"],
                 type=channel["type"],
                 position=channel.get("position", 0),
+                parent_id=channel.get("parent_id"),
             )
             for channel in response.json()
         ]
         channels.sort(key=lambda channel: (channel.position, channel.name.lower()))
         return channels
+
+    async def get_bot_user_id(self) -> str:
+        """The bot's own user id."""
+        return (await self._request("GET", "/users/@me")).json()["id"]
+
+    async def create_guild_channel(
+        self, guild_id: str, payload: dict, *, reason: str
+    ) -> DiscordChannel:
+        """Create a channel or category; ``payload`` is Discord's request body.
+
+        Needs the Manage Channels permission. ``reason`` is recorded in the
+        guild's audit log.
+        """
+        response = await self._request(
+            "POST",
+            f"/guilds/{guild_id}/channels",
+            json=payload,
+            headers={"X-Audit-Log-Reason": reason},
+        )
+        channel = response.json()
+        return DiscordChannel(
+            id=channel["id"],
+            name=channel["name"],
+            type=channel["type"],
+            position=channel.get("position", 0),
+            parent_id=channel.get("parent_id"),
+        )
+
+    async def create_guild_role(
+        self, guild_id: str, name: str, *, reason: str
+    ) -> DiscordRole:
+        """Create a role with no permissions of its own.
+
+        Needs the Manage Roles permission. The role is not mentionable by
+        members, so only the bot can ping it.
+        """
+        response = await self._request(
+            "POST",
+            f"/guilds/{guild_id}/roles",
+            json={"name": name, "permissions": "0", "mentionable": False},
+            headers={"X-Audit-Log-Reason": reason},
+        )
+        role = response.json()
+        return DiscordRole(
+            id=role["id"],
+            name=role["name"],
+            color=role.get("color", 0),
+            position=role.get("position", 0),
+            managed=role.get("managed", False),
+            mentionable=role.get("mentionable", False),
+        )
+
+    async def get_forum_tags(self, channel_id: str) -> list[dict]:
+        """A forum channel's tags, as Discord's tag objects."""
+        channel = (await self._request("GET", f"/channels/{channel_id}")).json()
+        return list(channel.get("available_tags") or [])
+
+    async def set_forum_tags(
+        self, channel_id: str, tags: list[dict], *, reason: str
+    ) -> list[dict]:
+        """Replace a forum channel's tag list and return the stored tags.
+
+        Discord takes the whole list: a tag sent with its ``id`` is kept, one
+        sent without is created, and one left out is deleted. Needs the Manage
+        Channels permission.
+        """
+        response = await self._request(
+            "PATCH",
+            f"/channels/{channel_id}",
+            json={"available_tags": tags},
+            headers={"X-Audit-Log-Reason": reason},
+        )
+        return list(response.json().get("available_tags") or [])
 
     async def get_channel_guild_id(self, channel_id: str) -> str | None:
         """The guild a channel or thread belongs to, as the bot sees it.

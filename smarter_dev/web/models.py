@@ -6541,3 +6541,165 @@ class ChatBotPurgeRequest(Base):
     closed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+
+# The shared jam channels: the key, and the ``JamDiscordSetup`` column that
+# stores the created channel's id.
+JAM_CHANNEL_COLUMNS: dict[str, str] = {
+    "news": "news_channel_id",
+    "chat": "chat_channel_id",
+    "teams": "teams_channel_id",
+    "showcase": "showcase_channel_id",
+}
+
+# Channels a scheduled jam message can go to. The showcase is a forum, which
+# takes posts rather than plain messages.
+JAM_MESSAGE_CHANNEL_KEYS: tuple[str, ...] = ("news", "chat", "teams")
+
+JAM_MESSAGE_STATUSES: tuple[str, ...] = ("pending", "sending", "sent", "failed")
+
+
+class JamDiscordSetup(Base):
+    """The Discord category, channels and role a guild's jams share.
+
+    One row per guild. Jams reuse the same channels, so these ids belong to
+    the guild rather than to any one jam. Every id is nullable so a
+    half-finished setup is a state the row can hold and the admin can finish.
+    """
+
+    __tablename__ = "jam_discord_setups"
+
+    guild_id: Mapped[str] = mapped_column(String(22), primary_key=True)
+    category_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+    news_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+    chat_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+    teams_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+    showcase_channel_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+    role_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+
+    def channel_id_for(self, key: str) -> str | None:
+        """The stored Discord id of one of the shared channels, by key."""
+        return getattr(self, JAM_CHANNEL_COLUMNS[key])
+
+    @property
+    def missing_parts(self) -> list[str]:
+        """Which shared Discord pieces have not been created yet."""
+        missing = [] if self.category_id else ["category"]
+        missing += [key for key in JAM_CHANNEL_COLUMNS if not self.channel_id_for(key)]
+        if not self.role_id:
+            missing.append("role")
+        return missing
+
+
+class Jam(Base):
+    """A code jam hosted in a Discord guild.
+
+    A guild's jams share one set of channels (:class:`JamDiscordSetup`) and
+    never overlap in time. What is a jam's own in Discord is two tags on the
+    showcase forum: one for the jam and one for the year it starts in.
+    """
+
+    __tablename__ = "jams"
+    __table_args__ = (
+        Index("ix_jams_guild_id_starts_at", "guild_id", "starts_at"),
+        CheckConstraint("max_team_size >= 1", name="max_team_size_positive"),
+        CheckConstraint("submissions_close_at > starts_at", name="closes_after_start"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(22), nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    # The jam's tag on the showcase forum; Discord caps a tag name at 20.
+    tag_name: Mapped[str] = mapped_column(String(20), nullable=False)
+    max_team_size: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    submissions_close_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    voting_ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    winners_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    showcase_tag_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+    year_tag_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
+
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    messages: Mapped[list["JamMessage"]] = relationship(
+        back_populates="jam", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+    @property
+    def ends_at(self) -> datetime:
+        """When the jam is over: its last scheduled date."""
+        return self.winners_at or self.voting_ends_at or self.submissions_close_at
+
+    @property
+    def year_tag_name(self) -> str:
+        """The year tag for the jam's entries: the year it starts in."""
+        return str(self.starts_at.year)
+
+    @property
+    def missing_tags(self) -> list[str]:
+        """Which of the jam's showcase tags have not been created yet."""
+        missing = [] if self.showcase_tag_id else [self.tag_name]
+        if not self.year_tag_id:
+            missing.append(self.year_tag_name)
+        return missing
+
+
+class JamMessage(Base):
+    """A one-off message scheduled into one of a jam's channels.
+
+    The bot claims a due message (``pending`` -> ``sending``) before it posts,
+    so a message is sent at most once. A send the bot reports as failed, or a
+    claim it never reports on, stays visible to the admin, who can retry it.
+    """
+
+    __tablename__ = "jam_messages"
+    __table_args__ = (
+        Index("ix_jam_messages_jam_id", "jam_id"),
+        Index("ix_jam_messages_due", "status", "send_at"),
+        CheckConstraint(
+            "status IN ('pending', 'sending', 'sent', 'failed')",
+            name="status",
+        ),
+        CheckConstraint(
+            "channel_key IN ('news', 'chat', 'teams')",
+            name="channel_key",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    jam_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("jams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # Which of the shared jam channels, by key; resolved to an id when it is
+    # sent, so a message can be scheduled before setup has finished.
+    channel_key: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    mention_role: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    send_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    claimed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_by: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    jam: Mapped["Jam"] = relationship(back_populates="messages")

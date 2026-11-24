@@ -1,0 +1,155 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ jam.name }} - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+{% set jam_url = "/admin/bot/guilds/" ~ guild.id ~ "/jams/" ~ jam.id %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{{ jam.name }}</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}/jams">&larr; Code Jams</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Details</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <tbody>
+                        <tr><th>Starts</th><td>{{ jam.starts_at.strftime("%Y-%m-%d %H:%M") }} UTC</td></tr>
+                        <tr><th>Submissions close</th><td>{{ jam.submissions_close_at.strftime("%Y-%m-%d %H:%M") }} UTC</td></tr>
+                        <tr><th>Voting ends</th><td>{% if jam.voting_ends_at %}{{ jam.voting_ends_at.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}<span class="sk-text-muted">Not set</span>{% endif %}</td></tr>
+                        <tr><th>Winners</th><td>{% if jam.winners_at %}{{ jam.winners_at.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}<span class="sk-text-muted">Not set</span>{% endif %}</td></tr>
+                        <tr><th>Showcase tags</th><td>{{ jam.tag_name }}, {{ jam.year_tag_name }}</td></tr>
+                        <tr><th>Largest team</th><td>{{ jam.max_team_size }}</td></tr>
+                    </tbody>
+                </table>
+                <div style="margin-top:1rem;">
+                    <a href="{{ jam_url }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
+                    <form method="post" action="{{ jam_url }}/delete" style="display:inline;" onsubmit="return confirm('Delete this jam and its scheduled messages? Nothing is removed from Discord.')">
+                        <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Discord</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <tbody>
+                        {% for part in discord_parts %}
+                        <tr>
+                            <th>{{ part.label }}</th>
+                            <td>
+                                {% if part.id %}<span class="sk-pill sk-pill-published">Ready</span> <code>{{ part.id }}</code>{% else %}<span class="sk-pill sk-pill-draft">Missing</span>{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <form method="post" action="{{ jam_url }}/setup" style="margin-top:1rem;">
+                    {% if not setup_finished %}
+                    <button type="submit" class="sk-btn">Finish setup</button>
+                    <small class="sk-text-muted">Creates only what is missing. Anything that already exists under the same name is reused.</small>
+                    {% else %}
+                    <button type="submit" class="sk-btn-outline sk-btn-small">Check setup</button>
+                    <small class="sk-text-muted">Recreates anything that was deleted in Discord.</small>
+                    {% endif %}
+                </form>
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Scheduled Messages ({{ messages|length }})</div>
+            <div class="sk-panel-body">
+                {% if messages %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Send time</th>
+                            <th>Channel</th>
+                            <th>Message</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for message in messages %}
+                        {% set stuck = message.id in stuck_ids %}
+                        <tr>
+                            <td style="white-space:nowrap;">{{ message.send_at.strftime("%Y-%m-%d %H:%M") }} UTC</td>
+                            <td>#{{ channel_names[message.channel_key] }}{% if message.mention_role %}<div class="sk-text-muted" style="font-size:0.85rem;">pings @{{ role_name }}</div>{% endif %}</td>
+                            <td><div title="{{ message.content }}">{{ message.content[:80] }}{% if message.content|length > 80 %}...{% endif %}</div></td>
+                            <td>
+                                {% if message.status == "sent" %}
+                                <span class="sk-pill sk-pill-published">Sent</span>
+                                {% if message.sent_at %}<div class="sk-text-muted" style="font-size:0.85rem;">{{ message.sent_at.strftime("%Y-%m-%d %H:%M") }} UTC</div>{% endif %}
+                                {% elif message.status == "failed" %}
+                                <span class="sk-pill sk-pill-draft">Failed</span>
+                                <div class="sk-text-muted" style="font-size:0.85rem;">{{ message.error }}</div>
+                                {% elif stuck %}
+                                <span class="sk-pill sk-pill-draft">Stuck</span>
+                                <div class="sk-text-muted" style="font-size:0.85rem;">The bot took this message and never reported back. Check the channel before retrying: it may have been posted.</div>
+                                {% elif message.status == "sending" %}
+                                <span class="sk-pill sk-pill-draft">Sending</span>
+                                {% else %}
+                                <span class="sk-pill sk-pill-draft">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td style="white-space:nowrap;">
+                                {% if message.status in ("pending", "failed") %}
+                                <a href="{{ jam_url }}/messages/{{ message.id }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
+                                {% endif %}
+                                {% if message.status == "failed" or stuck %}
+                                <form method="post" action="{{ jam_url }}/messages/{{ message.id }}/retry" style="display:inline;">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">Send now</button>
+                                </form>
+                                {% endif %}
+                                <form method="post" action="{{ jam_url }}/messages/{{ message.id }}/delete" style="display:inline;" onsubmit="return confirm('Delete this message?')">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No messages scheduled.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Schedule a Message</div>
+            <div class="sk-panel-body">
+                <form method="post" action="{{ jam_url }}/messages/create">
+                    {% set form = message_form %}
+                    {% include "admin/bot/jams/_message_fields.html" %}
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">Schedule Message</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

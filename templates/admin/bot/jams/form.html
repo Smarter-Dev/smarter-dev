@@ -1,0 +1,72 @@
+{% extends "admin/base.html" %}
+
+{% block title %}{{ "Edit" if jam else "Create" }} Jam - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+{% set base = "/admin/bot/guilds/" ~ guild.id ~ "/jams" %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>{{ "Edit Jam" if jam else "Create Jam" }}</h1>
+            {% if jam %}
+            <p><a href="{{ base }}/{{ jam.id }}">&larr; {{ jam.name }}</a></p>
+            {% else %}
+            <p><a href="{{ base }}">&larr; Code Jams</a></p>
+            {% endif %}
+        </hgroup>
+
+        {% if errors %}
+        <div class="sk-flash sk-flash-error">
+            <strong>Please correct the following errors:</strong>
+            <ul style="margin:0.5rem 0 0 1rem;">
+                {% for error in errors %}<li>{{ error }}</li>{% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">{{ "Jam" if jam else "New Jam" }}</div>
+            <div class="sk-panel-body">
+                <form method="post" action="{{ base }}/{{ jam.id ~ '/edit' if jam else 'create' }}">
+                    <label for="name">Name</label>
+                    <input type="text" id="name" name="name" maxlength="100" value="{{ form_data.name or '' }}" required>
+
+                    <label for="tag_name">Showcase tag</label>
+                    <input type="text" id="tag_name" name="tag_name" maxlength="20" value="{{ form_data.tag_name or '' }}" required>
+                    <small class="sk-text-muted">
+                        The forum tag the bot puts on every entry, next to the tag for the year the jam starts.
+                        A tag that already exists under this name is reused, so a yearly jam can keep one tag.
+                    </small>
+
+                    <label for="max_team_size">Largest team</label>
+                    <input type="number" id="max_team_size" name="max_team_size" min="1" max="20" value="{{ form_data.max_team_size or '4' }}" required>
+
+                    <label for="starts_at">Start time (UTC)</label>
+                    <input type="datetime-local" id="starts_at" name="starts_at" value="{{ form_data.starts_at or '' }}" required>
+
+                    <label for="submissions_close_at">Submission deadline (UTC)</label>
+                    <input type="datetime-local" id="submissions_close_at" name="submissions_close_at" value="{{ form_data.submissions_close_at or '' }}" required>
+
+                    <label for="voting_ends_at">Voting end (UTC, optional)</label>
+                    <input type="datetime-local" id="voting_ends_at" name="voting_ends_at" value="{{ form_data.voting_ends_at or '' }}">
+
+                    <label for="winners_at">Winners date (UTC, optional)</label>
+                    <input type="datetime-local" id="winners_at" name="winners_at" value="{{ form_data.winners_at or '' }}">
+
+                    {% if jam %}
+                    <p class="sk-text-muted">Saving changes nothing in Discord. If the tag or the start year changes, press Finish setup on the jam afterwards.</p>
+                    {% else %}
+                    <p class="sk-text-muted">Creating the jam also creates whatever is missing in Discord: the jam channels, the role and the two showcase tags. Members can see new channels straight away.</p>
+                    {% endif %}
+
+                    <div style="margin-top:1rem;">
+                        <button type="submit" class="sk-btn">{{ "Save Jam" if jam else "Create Jam" }}</button>
+                        <a href="{{ base ~ '/' ~ jam.id if jam else base }}" class="sk-btn-outline">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
