@@ -78,7 +78,7 @@ async def guild_lock(session: AsyncSession, guild_id: str) -> AsyncIterator[None
         yield
 
 
-def _utc(moment: datetime) -> datetime:
+def as_utc(moment: datetime) -> datetime:
     """Read a stored datetime as UTC (SQLite hands back naive values)."""
     return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
 
@@ -88,7 +88,7 @@ def is_stuck(message: JamMessage, now: datetime | None = None) -> bool:
     if message.status != "sending" or message.claimed_at is None:
         return False
     now = now or datetime.now(UTC)
-    return now - _utc(message.claimed_at) > STUCK_AFTER
+    return now - as_utc(message.claimed_at) > STUCK_AFTER
 
 
 # -- Jams ---------------------------------------------------------------------
@@ -127,9 +127,27 @@ async def overlapping_jam(
     for jam in await list_jams(session, guild_id):
         if jam.id == except_jam_id:
             continue
-        if _utc(jam.starts_at) <= ends_at and starts_at <= _utc(jam.ends_at):
+        if as_utc(jam.starts_at) <= ends_at and starts_at <= as_utc(jam.ends_at):
             return jam
     return None
+
+
+async def current_jam(
+    session: AsyncSession, guild_id: str, now: datetime | None = None
+) -> Jam | None:
+    """The jam the guild's members can take part in now.
+
+    That is the jam still taking submissions, or the next one to start: teams
+    form before a jam opens. ``None`` once submissions have closed and nothing
+    else is scheduled.
+    """
+    now = now or datetime.now(UTC)
+    open_jams = [
+        jam
+        for jam in await list_jams(session, guild_id)
+        if as_utc(jam.submissions_close_at) >= now
+    ]
+    return min(open_jams, key=lambda jam: as_utc(jam.starts_at), default=None)
 
 
 async def get_setup(session: AsyncSession, guild_id: str) -> JamDiscordSetup | None:
@@ -325,7 +343,7 @@ async def claim_due_messages(
 def _cannot_send(
     message: JamMessage, channel_id: str | None, role_id: str | None, now: datetime
 ) -> str | None:
-    if now - _utc(message.send_at) > MAX_SEND_DELAY:
+    if now - as_utc(message.send_at) > MAX_SEND_DELAY:
         return "Not sent: it was more than 6 hours past its send time."
     if not channel_id:
         return (

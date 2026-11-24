@@ -85,6 +85,7 @@ controllers:
   - smarter_dev.web.api_native.quests:QuestController
   - smarter_dev.web.api_native.messages:ScheduledMessageController
   - smarter_dev.web.api_native.messages:RepeatingMessageController
+  - smarter_dev.web.api_native.jams:GuildJamController
   - smarter_dev.web.api_native.jams:JamMessageController
   - smarter_dev.web.api_native.forum:ForumAgentController
   - smarter_dev.web.api_native.forum:ForumNotificationController

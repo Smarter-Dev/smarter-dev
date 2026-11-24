@@ -432,3 +432,50 @@ async def test_the_lock_admits_one_holder_per_guild_at_a_time():
 
     assert order.index("a out") < order.index("b in")
     assert order.index("c in") < order.index("a out")
+
+
+# -- the current jam -----------------------------------------------------------
+
+
+async def test_current_jam_is_the_one_still_taking_submissions(db_session):
+    over = make_jam(
+        name="Last year",
+        starts_at=START - timedelta(days=365),
+        submissions_close_at=START - timedelta(days=330),
+    )
+    running = make_jam()
+    later = make_jam(
+        name="Next year",
+        starts_at=START + timedelta(days=365),
+        submissions_close_at=START + timedelta(days=400),
+    )
+    db_session.add_all([over, later, running])
+    await db_session.commit()
+
+    during = await store.current_jam(db_session, GUILD, START + timedelta(days=5))
+    last_moment = await store.current_jam(db_session, GUILD, START + timedelta(days=33))
+    between = await store.current_jam(db_session, GUILD, START + timedelta(days=40))
+
+    assert during.id == running.id
+    assert last_moment.id == running.id
+    assert between.id == later.id
+
+
+async def test_current_jam_is_the_next_one_before_it_starts(db_session):
+    jam = make_jam()
+    db_session.add(jam)
+    await db_session.commit()
+
+    assert (
+        await store.current_jam(db_session, GUILD, START - timedelta(days=7))
+    ).id == jam.id
+
+
+async def test_no_current_jam_after_the_last_one_or_in_another_guild(db_session):
+    db_session.add(make_jam())
+    await db_session.commit()
+
+    assert (
+        await store.current_jam(db_session, GUILD, START + timedelta(days=34)) is None
+    )
+    assert await store.current_jam(db_session, _OTHER_GUILD, START) is None

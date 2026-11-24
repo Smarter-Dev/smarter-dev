@@ -1,8 +1,13 @@
-"""Bot API for scheduled jam messages.
+"""Bot API for code jams.
+
+``GET /api/guilds/{guild_id}/jam`` tells the bot which jam is on and where its
+channels are.
+
 
 The bot polls ``POST /api/jam-messages/claim`` and posts what it gets back,
 then reports each message with ``mark-sent`` or ``mark-failed``. Claiming
-before posting is what makes a send at-most-once; see
+before posting means a message is handed out once. It can still land in the
+channel twice when the bot's REST client retries a timeout or a 5xx; see
 :mod:`smarter_dev.web.jams.store`.
 """
 
@@ -12,6 +17,7 @@ from typing import Any
 from uuid import UUID
 
 from litestar import Controller
+from litestar import get
 from litestar import post
 from litestar.exceptions import ValidationException
 from litestar.status_codes import HTTP_200_OK
@@ -25,6 +31,7 @@ from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.jams import store
+from smarter_dev.web.models import JAM_CHANNEL_COLUMNS
 
 # Declared per route, like the other bot API controllers: Skrift's auth guard
 # looks for the ``APIKeyOnly`` marker on the route handler itself.
@@ -94,3 +101,42 @@ class JamMessageController(Controller):
         if not marked:
             raise plain_error(404, "Jam message not found or not claimed")
         return {"success": True}
+
+
+class GuildJamController(Controller):
+    """What the bot needs to know about a guild's jam."""
+
+    path = "/api/guilds/{guild_id:str}/jam"
+    exception_handlers = BOT_API_EXCEPTION_HANDLERS
+
+    @get("/", guards=BOT_API_GUARDS)
+    async def get_guild_jam(
+        self, db_session: AsyncSession, guild_id: str
+    ) -> dict[str, Any]:
+        """The guild's jam channels and the jam members can take part in now.
+
+        ``jam`` is ``None`` between jams, and every id is ``None`` until setup
+        has made that piece.
+        """
+        setup = await store.get_setup(db_session, guild_id)
+        jam = await store.current_jam(db_session, guild_id)
+        return {
+            "channels": {
+                key: setup.channel_id_for(key) if setup else None
+                for key in JAM_CHANNEL_COLUMNS
+            },
+            "role_id": setup.role_id if setup else None,
+            "jam": None
+            if jam is None
+            else {
+                "id": str(jam.id),
+                "name": jam.name,
+                "max_team_size": jam.max_team_size,
+                "starts_at": store.as_utc(jam.starts_at).isoformat(),
+                "submissions_close_at": store.as_utc(
+                    jam.submissions_close_at
+                ).isoformat(),
+                "showcase_tag_id": jam.showcase_tag_id,
+                "year_tag_id": jam.year_tag_id,
+            },
+        }
