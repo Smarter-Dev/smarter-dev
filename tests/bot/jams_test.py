@@ -70,6 +70,8 @@ class FakeApi:
         self.posts: list[tuple[str, dict | None]] = []
         self.fail_get = False
         self.fail_posts: set[str] = set()
+        # Paths whose change is saved but whose reply never arrives.
+        self.lose_replies: set[str] = set()
         # thread id -> {"name", "thread_id", "member_ids"}
         self.teams: dict[str, dict] = {}
         # showcase thread id -> the team's thread id, or "solo:<author>"
@@ -119,6 +121,9 @@ class FakeApi:
         if any(path.endswith(suffix) for suffix in self.fail_posts):
             raise RuntimeError("api down")
         self.posts.append((path, json_data))
+        if any(path.endswith(suffix) for suffix in self.lose_replies):
+            self._jam_post(path[len(JAM_API) + 1 :].split("/"), json_data)
+            raise RuntimeError("timed out")
         if path == "/jam-messages/claim":
             due, self.due = self.due, []
             return SimpleNamespace(json=lambda: {"messages": due})
@@ -756,6 +761,19 @@ async def test_a_thread_that_could_not_be_recorded_is_removed():
     assert "could not make" in reply
     rest.delete_channel.assert_awaited_once_with(THREAD)
     rest.add_thread_member.assert_not_awaited()
+    assert limits.wait_seconds(GUILD, 1) == 0
+
+
+async def test_a_team_saved_by_a_call_that_failed_is_taken_back():
+    """The web API can save the team and the reply still be lost."""
+    fake, rest, limits = FakeApi(), make_rest(), jams.TeamLimits()
+    fake.lose_replies.add("/jam/teams")
+
+    reply = await make_team(fake, rest, limits)
+
+    assert "could not make" in reply
+    assert fake.teams == {}
+    rest.delete_channel.assert_awaited_once_with(THREAD)
     assert limits.wait_seconds(GUILD, 1) == 0
 
 

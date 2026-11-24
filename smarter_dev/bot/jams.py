@@ -685,6 +685,8 @@ async def create_team(
             made = await api.create_team(guild_id, name, int(thread.id), user_id)
         except Exception as error:  # noqa: BLE001 - the thread must not be left over
             logger.warning("could not record jam team %s: %r", thread.id, error)
+            # The web API may have saved the team before the call failed.
+            await _forget_member(api, guild_id, thread.id, user_id)
             await _remove_empty_team(rest, thread.id)
             return failed
         if not made.get("ok"):
@@ -722,7 +724,7 @@ async def _remove_empty_team(rest: Any, thread_id: Any) -> None:
 async def _forget_member(
     api: JamApi, guild_id: int, thread_id: Any, user_id: int
 ) -> None:
-    """Take back a roster row whose member Discord would not add to the thread."""
+    """Take back a roster row for a thread the member is not in."""
     try:
         await api.leave_team(guild_id, thread_id, user_id)
     except Exception as error:  # noqa: BLE001 - reported; the caller already failed

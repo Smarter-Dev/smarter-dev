@@ -137,9 +137,9 @@ async def current_jam(
 ) -> Jam | None:
     """The jam the guild's members can take part in now.
 
-    That is the jam still taking submissions, or the next one to start: teams
-    form before a jam opens. ``None`` once submissions have closed and nothing
-    else is scheduled.
+    That is the jam still taking submissions, or the next one to start, so
+    the bot can say when it opens. ``None`` once submissions have closed and
+    nothing else is scheduled.
     """
     now = now or datetime.now(UTC)
     open_jams = [

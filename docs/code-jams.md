@@ -34,7 +34,8 @@ The bot needs these permissions:
 - Manage Channels and Manage Roles, for setup and for giving the role;
 - Create Private Threads, for team threads;
 - Manage Threads, to put the jam's tags on members' showcase posts (the tags
-  are moderator-only) and to remove a team thread that could not be finished;
+  are moderator-only), to remove a team thread that could not be finished,
+  and to lock a team thread once its last member has left;
 - Mention @everyone, @here and All Roles, to ping the `Jammer` role, which
   members cannot mention themselves.
 
