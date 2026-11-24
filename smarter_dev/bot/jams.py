@@ -166,8 +166,11 @@ async def post_due_messages(api: JamApi, rest: Any) -> int:
     """
     posted = 0
     for message in await api.claim_due_messages():
-        if await _post_message(api, rest, message):
-            posted += 1
+        try:
+            if await _post_message(api, rest, message):
+                posted += 1
+        except Exception:  # noqa: BLE001 - the rest of the batch still goes out
+            logger.exception("jam message could not be handled: %r", message.get("id"))
     return posted
 
 
@@ -215,7 +218,10 @@ class _RetryCounter(logging.Handler):
         self.count = 0
 
     def emit(self, record: logging.LogRecord) -> None:
-        if "retrying" in str(record.msg):
+        # Only the timeout and 5xx retries. A rate-limit (429) retry is
+        # logged as "Backing off and retrying request" and cannot duplicate:
+        # Discord did not act on the request it turned away.
+        if "backing off for" in str(record.msg):
             self.count += 1
 
 
@@ -403,6 +409,18 @@ def clean_team_name(raw: str) -> str | None:
     return name if 0 < len(name) <= TEAM_NAME_MAX else None
 
 
+def _is_team_thread(
+    thread: Any, teams_channel_id: str | None, bot_user_id: int
+) -> bool:
+    """A team is a private thread the bot made in the teams channel."""
+    return bool(
+        teams_channel_id
+        and thread.type == hikari.ChannelType.GUILD_PRIVATE_THREAD
+        and str(thread.parent_id) == teams_channel_id
+        and int(thread.owner_id) == bot_user_id
+    )
+
+
 async def create_team(
     api: JamApi,
     rest: Any,
@@ -410,11 +428,15 @@ async def create_team(
     guild_id: int,
     user_id: int,
     raw_name: str,
+    *,
+    bot_user_id: int,
 ) -> str:
     """Make a private team thread in the teams channel and add its creator.
 
     A member may make one team per :data:`TEAM_COOLDOWN_SECONDS`, and a guild
-    may have :data:`TEAM_THREADS_MAX` team threads open.
+    may have :data:`TEAM_THREADS_MAX` team threads open. Only threads the bot
+    made count towards that: a thread a member opens by hand in the teams
+    channel is not a team, so members cannot use up the cap for everyone.
     """
     info = await api.guild_jam(str(guild_id))
     if info is None:
@@ -443,7 +465,9 @@ async def create_team(
             logger.warning("could not count jam teams in %s: %r", guild_id, error)
             return failed
         open_teams = sum(
-            1 for thread in threads if str(thread.parent_id) == teams_channel_id
+            1
+            for thread in threads
+            if _is_team_thread(thread, teams_channel_id, bot_user_id)
         )
         if open_teams >= TEAM_THREADS_MAX:
             logger.warning("jam team cap reached in %s: %d", guild_id, open_teams)
@@ -524,12 +548,7 @@ async def invite_to_team(
         thread = await rest.fetch_channel(channel_id)
     except hikari.HTTPError:
         return here
-    if (
-        not teams_channel_id
-        or thread.type != hikari.ChannelType.GUILD_PRIVATE_THREAD
-        or str(thread.parent_id) != teams_channel_id
-        or int(thread.owner_id) != bot_user_id
-    ):
+    if not _is_team_thread(thread, teams_channel_id, bot_user_id):
         return here
     if target_is_bot:
         return "A bot cannot join a team."

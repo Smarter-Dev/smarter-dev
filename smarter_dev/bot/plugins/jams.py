@@ -127,11 +127,28 @@ async def leave_command(ctx: lightbulb.Context) -> None:
     )
 
 
+async def _me_or_say_starting(ctx: lightbulb.Context) -> hikari.OwnUser | None:
+    """The bot's own user, or None after telling the member to try again.
+
+    Without the bot's own id its threads cannot be told from others.
+    """
+    me = ctx.bot.get_me()
+    if me is None:
+        await ctx.respond(
+            "I am still starting up. Please try again in a minute.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+    return me
+
+
 @jam_group.child
 @lightbulb.option("name", "Your team's name", max_length=jams.TEAM_NAME_MAX)
 @lightbulb.command("team", "Make a private thread for your jam team")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def team_command(ctx: lightbulb.Context) -> None:
+    me = await _me_or_say_starting(ctx)
+    if me is None:
+        return
     await _answer(
         ctx,
         lambda api: jams.create_team(
@@ -141,6 +158,7 @@ async def team_command(ctx: lightbulb.Context) -> None:
             int(ctx.guild_id),
             int(ctx.user.id),
             ctx.options.name,
+            bot_user_id=int(me.id),
         ),
     )
 
@@ -150,13 +168,8 @@ async def team_command(ctx: lightbulb.Context) -> None:
 @lightbulb.command("invite", "Add a teammate to this team thread")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def invite_command(ctx: lightbulb.Context) -> None:
-    me = ctx.bot.get_me()
+    me = await _me_or_say_starting(ctx)
     if me is None:
-        # Without the bot's own id its threads cannot be told from others.
-        await ctx.respond(
-            "I am still starting up. Please try again in a minute.",
-            flags=hikari.MessageFlag.EPHEMERAL,
-        )
         return
     target = ctx.options.user
     await _answer(

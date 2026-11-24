@@ -6,7 +6,8 @@ channels are.
 
 The bot polls ``POST /api/jam-messages/claim`` and posts what it gets back,
 then reports each message with ``mark-sent`` or ``mark-failed``. Claiming
-before posting is what makes a send at-most-once; see
+before posting means a message is handed out once. It can still land in the
+channel twice when the bot's REST client retries a timeout or a 5xx; see
 :mod:`smarter_dev.web.jams.store`.
 """
 
