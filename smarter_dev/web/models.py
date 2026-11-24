@@ -6658,8 +6658,10 @@ class JamMessage(Base):
     """A one-off message scheduled into one of a jam's channels.
 
     The bot claims a due message (``pending`` -> ``sending``) before it posts,
-    so a message is sent at most once. A send the bot reports as failed, or a
-    claim it never reports on, stays visible to the admin, who can retry it.
+    so a message is handed to the bot once. That is not a promise of one post:
+    the bot's REST client may ask Discord again after a timeout. A send the bot
+    reports as failed, or a claim it never reports on, stays visible to the
+    admin, who can retry it.
     """
 
     __tablename__ = "jam_messages"

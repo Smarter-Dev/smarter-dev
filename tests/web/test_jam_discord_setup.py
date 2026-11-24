@@ -63,8 +63,37 @@ async def test_only_the_news_channel_is_read_only():
         {"id": GUILD, "type": 0, "allow": "0", "deny": str(1 << 11)},
         {"id": BOT_USER, "type": 1, "allow": str(1 << 10 | 1 << 11), "deny": "0"},
     ]
-    for name in ("jam-chat", "jam-teams", "jam-showcase"):
+    for name in ("jam-chat", "jam-showcase"):
         assert "permission_overwrites" not in payloads[name]
+
+
+async def test_only_the_bot_opens_threads_in_the_teams_channel():
+    discord, setup = FakeDiscord(), _empty_setup()
+
+    await run_jam_setup(discord, setup)
+
+    payloads = {
+        call[1]["name"]: call[1] for call in discord.created("create_guild_channel")
+    }
+    threads = str(1 << 35 | 1 << 36)
+    assert payloads["jam-teams"]["permission_overwrites"] == [
+        {"id": GUILD, "type": 0, "allow": "0", "deny": threads},
+        {"id": BOT_USER, "type": 1, "allow": threads, "deny": "0"},
+    ]
+
+
+async def test_a_refused_teams_channel_names_the_thread_permissions():
+    discord, setup = FakeDiscord(), _empty_setup()
+    discord.fail["create_guild_channel:jam-teams"] = discord_error(403)
+
+    report = await run_jam_setup(discord, setup)
+
+    assert report.errors == [
+        "#jam-teams: the bot does not have the Manage Channels, Create Public "
+        "Threads or Create Private Threads permission"
+    ]
+    assert setup.teams_channel_id is None
+    assert setup.showcase_channel_id is not None
 
 
 async def test_second_run_creates_nothing():

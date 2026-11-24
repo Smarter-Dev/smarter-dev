@@ -429,9 +429,10 @@ async def test_create_keeps_the_jam_when_discord_setup_fails(db_session):
     assert setup.missing_parts == ["teams"]
     assert setup.news_channel_id is not None
     message = flashes.error.call_args.args[1]
-    assert "#jam-teams: the bot does not have the Manage Channels permission." in (
-        message
-    )
+    assert (
+        "#jam-teams: the bot does not have the Manage Channels, Create Public "
+        "Threads or Create Private Threads permission."
+    ) in message
     assert ".." not in message
 
 
