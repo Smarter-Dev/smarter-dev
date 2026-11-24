@@ -416,14 +416,12 @@ def clean_team_name(raw: str) -> str | None:
     return name if 0 < len(name) <= TEAM_NAME_MAX else None
 
 
-def _is_team_thread(
-    thread: Any, teams_channel_id: str | None, bot_user_id: int
-) -> bool:
-    """A team is a private thread the bot made in the teams channel."""
+def _is_team_thread(thread: Any, chat_channel_id: str | None, bot_user_id: int) -> bool:
+    """A team is a private thread the bot made in the jam chat channel."""
     return bool(
-        teams_channel_id
+        chat_channel_id
         and thread.type == hikari.ChannelType.GUILD_PRIVATE_THREAD
-        and str(thread.parent_id) == teams_channel_id
+        and str(thread.parent_id) == chat_channel_id
         and int(thread.owner_id) == bot_user_id
     )
 
@@ -438,11 +436,11 @@ async def create_team(
     *,
     bot_user_id: int,
 ) -> str:
-    """Make a private team thread in the teams channel and add its creator.
+    """Make a private team thread in the jam chat channel and add its creator.
 
     A member may make one team per :data:`TEAM_COOLDOWN_SECONDS`, and a guild
     may have :data:`TEAM_THREADS_MAX` team threads open. Only threads the bot
-    made count towards that: a thread a member opens by hand in the teams
+    made count towards that: a thread a member opens by hand in the chat
     channel is not a team, so members cannot use up the cap for everyone.
     """
     info = await api.guild_jam(str(guild_id))
@@ -450,8 +448,8 @@ async def create_team(
         return UNAVAILABLE
     if info.jam is None:
         return NO_JAM
-    teams_channel_id = info.channels.get("teams")
-    if not teams_channel_id:
+    chat_channel_id = info.channels.get("chat")
+    if not chat_channel_id:
         return NOT_SET_UP
     if info.jam.max_team_size < 2:
         return f"**{info.jam.name}** is a solo jam, so there are no teams."
@@ -474,7 +472,7 @@ async def create_team(
         open_teams = sum(
             1
             for thread in threads
-            if _is_team_thread(thread, teams_channel_id, bot_user_id)
+            if _is_team_thread(thread, chat_channel_id, bot_user_id)
         )
         if open_teams >= TEAM_THREADS_MAX:
             logger.warning("jam team cap reached in %s: %d", guild_id, open_teams)
@@ -484,7 +482,7 @@ async def create_team(
             )
         try:
             thread = await rest.create_thread(
-                int(teams_channel_id),
+                int(chat_channel_id),
                 hikari.ChannelType.GUILD_PRIVATE_THREAD,
                 name,
                 auto_archive_duration=_TEAM_THREAD_ARCHIVE,
@@ -541,7 +539,7 @@ async def invite_to_team(
     """Add a member to the team thread the command was used in.
 
     Only a thread the bot made counts as a team: a private thread a member
-    made by hand in the teams channel lets its members add anyone, so its
+    made by hand in the chat channel lets its members add anyone, so its
     size could not be held to the limit.
     """
     info = await api.guild_jam(str(guild_id))
@@ -549,13 +547,13 @@ async def invite_to_team(
         return UNAVAILABLE
     if info.jam is None:
         return NO_JAM
-    teams_channel_id = info.channels.get("teams")
+    chat_channel_id = info.channels.get("chat")
     here = "Use this inside your team's thread. Make one with `/jam team`."
     try:
         thread = await rest.fetch_channel(channel_id)
     except hikari.HTTPError:
         return here
-    if not _is_team_thread(thread, teams_channel_id, bot_user_id):
+    if not _is_team_thread(thread, chat_channel_id, bot_user_id):
         return here
     if target_is_bot:
         return "A bot cannot join a team."

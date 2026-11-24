@@ -25,7 +25,7 @@ from tests.bot.fake_discord import server_error
 GUILD = 644299523686006834
 NOW = datetime(2026, 12, 10, tzinfo=UTC)
 BOT_ID = 1000
-TEAMS = 13
+CHAT = 12
 SHOWCASE = 14
 ROLE = 20
 THREAD = 500
@@ -33,7 +33,7 @@ THREAD = 500
 
 def guild_jam(*, jam: bool = True, **overrides) -> dict:
     body = {
-        "channels": {"news": "11", "chat": "12", "teams": "13", "showcase": "14"},
+        "channels": {"news": "11", "chat": "12", "showcase": "14"},
         "role_id": "20",
         "jam": {
             "id": "j1",
@@ -101,10 +101,10 @@ def make_rest(**members) -> Mock:
 
 
 def team_thread(**overrides) -> SimpleNamespace:
-    """A team thread as `/jam team` makes it: private, in #jam-teams, the bot's."""
+    """A team thread as `/jam team` makes it: private, in #jam-chat, the bot's."""
     values = {
         "type": hikari.ChannelType.GUILD_PRIVATE_THREAD,
-        "parent_id": TEAMS,
+        "parent_id": CHAT,
         "owner_id": BOT_ID,
     }
     values.update(overrides)
@@ -510,7 +510,7 @@ async def test_team_makes_a_private_thread_members_cannot_invite_to():
     )
 
     call = rest.create_thread.await_args
-    assert call.args == (TEAMS, hikari.ChannelType.GUILD_PRIVATE_THREAD, "Tinsel Bots")
+    assert call.args == (CHAT, hikari.ChannelType.GUILD_PRIVATE_THREAD, "Tinsel Bots")
     assert call.kwargs["invitable"] is False
     rest.add_thread_member.assert_awaited_once_with(THREAD, 1)
     welcome = rest.create_message.await_args
@@ -523,11 +523,11 @@ async def test_team_makes_a_private_thread_members_cannot_invite_to():
     ("body", "name", "expected"),
     [
         (guild_jam(jam=False), "Elves", jams.NO_JAM),
-        (guild_jam(channels={"teams": None}), "Elves", jams.NOT_SET_UP),
+        (guild_jam(channels={"chat": None}), "Elves", jams.NOT_SET_UP),
         (guild_jam(), "   ", "1 to 80 characters"),
         (guild_jam(), "x" * 81, "1 to 80 characters"),
     ],
-    ids=["no jam", "no teams channel", "blank name", "long name"],
+    ids=["no jam", "no chat channel", "blank name", "long name"],
 )
 async def test_team_refusals_make_no_thread(body, name, expected):
     rest = make_rest()

@@ -148,7 +148,7 @@ def test_guild_jam_is_empty_before_anything_is_set_up(client):
 
     assert response.status_code == 200
     assert response.json() == {
-        "channels": {"news": None, "chat": None, "teams": None, "showcase": None},
+        "channels": {"news": None, "chat": None, "showcase": None},
         "role_id": None,
         "jam": None,
     }
@@ -170,7 +170,6 @@ async def test_guild_jam_gives_channels_role_and_the_open_jam(client, db_session
     assert body["channels"] == {
         "news": "11",
         "chat": "12",
-        "teams": "13",
         "showcase": "14",
     }
     assert body["role_id"] == "20"
@@ -199,4 +198,4 @@ async def test_guild_jam_keeps_the_channels_between_jams(client, db_session):
 
     assert body["jam"] is None
     assert body["role_id"] == "20"
-    assert body["channels"]["teams"] == "13"
+    assert body["channels"]["chat"] == "12"
