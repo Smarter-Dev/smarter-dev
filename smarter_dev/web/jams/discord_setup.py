@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Protocol
 
+import httpx
+
 from smarter_dev.web.discord_admin_client import DiscordAdminError
 from smarter_dev.web.discord_admin_client import DiscordChannel
 from smarter_dev.web.discord_admin_client import DiscordRole
@@ -33,7 +35,7 @@ CHANNEL_NAMES: dict[str, str] = {key: f"jam-{key}" for key in JAM_CHANNEL_COLUMN
 # Discord allows a forum this many tags.
 FORUM_TAG_LIMIT = 20
 
-_TEXT, _CATEGORY, _FORUM = 0, 4, 15
+_TEXT, _CATEGORY, _NEWS, _FORUM = 0, 4, 5, 15
 _CHANNEL_TYPES: dict[str, int] = {
     "news": _TEXT,
     "chat": _TEXT,
@@ -52,6 +54,10 @@ _SEND_MESSAGES = 1 << 11
 _ROLE_OVERWRITE, _MEMBER_OVERWRITE = 0, 1
 
 _AUDIT_REASON = "Code jam setup from the admin panel"
+
+# What a Discord call can raise: a refusal from Discord, or no answer at all
+# (the client lets network failures through as httpx errors).
+DISCORD_ERRORS = (DiscordAdminError, httpx.HTTPError)
 
 
 class JamDiscordClient(Protocol):
@@ -85,19 +91,31 @@ class JamSetupReport:
         return not self.errors
 
 
-def _why(exc: DiscordAdminError, permission: str) -> str:
+def _is_kind(channel: DiscordChannel, key: str) -> bool:
+    """Whether a channel can serve as the jam channel ``key``.
+
+    An administrator may turn #jam-news into an Announcement channel; it is
+    still the news channel.
+    """
+    if key == "news":
+        return channel.type in (_TEXT, _NEWS)
+    return channel.type == _CHANNEL_TYPES[key]
+
+
+def _why(exc: Exception, permission: str) -> str:
     """A plain reason for a failed Discord call.
 
     The exception text quotes the request and Discord's raw body, which is
     noise on an admin page; the status is what tells the admin what to fix.
     """
-    if exc.status_code == 403:
+    status = getattr(exc, "status_code", None)
+    if status == 403:
         return f"the bot does not have the {permission} permission"
-    if exc.status_code == 429:
+    if status == 429:
         return "Discord is rate limiting the bot; try again in a minute"
-    if exc.status_code is None:
+    if status is None:
         return "Discord could not be reached"
-    return f"Discord refused the request (HTTP {exc.status_code})"
+    return f"Discord refused the request (HTTP {status})"
 
 
 async def run_jam_setup(
@@ -111,7 +129,7 @@ async def run_jam_setup(
     try:
         channels = await client.get_guild_channels(setup.guild_id)
         roles = await client.get_guild_roles(setup.guild_id)
-    except DiscordAdminError as exc:
+    except DISCORD_ERRORS as exc:
         report.errors.append(
             "Could not read the server's channels and roles: "
             + _why(exc, "View Channels")
@@ -158,7 +176,7 @@ async def _ensure_role(
         role = await client.create_guild_role(
             setup.guild_id, ROLE_NAME, reason=_AUDIT_REASON
         )
-    except DiscordAdminError as exc:
+    except DISCORD_ERRORS as exc:
         report.errors.append(f"{label}: {_why(exc, 'Manage Roles')}")
         return
     setup.role_id = role.id
@@ -190,7 +208,7 @@ async def _ensure_category(
             {"name": CATEGORY_NAME, "type": _CATEGORY},
             reason=_AUDIT_REASON,
         )
-    except DiscordAdminError as exc:
+    except DISCORD_ERRORS as exc:
         report.errors.append(
             f"{label}: {_why(exc, 'Manage Channels')}. "
             "No channels were created because they belong in it"
@@ -215,14 +233,14 @@ async def _ensure_channel(
     kind = _CHANNEL_TYPES[key]
     # A stored channel is kept wherever it lives, so an admin can point the
     # showcase at a forum the server already has.
-    if stored and any(c.id == stored and c.type == kind for c in channels):
+    if stored and any(c.id == stored and _is_kind(c, key) for c in channels):
         return
     existing = next(
         (
             channel
             for channel in channels
             if channel.name == name
-            and channel.type == kind
+            and _is_kind(channel, key)
             and channel.parent_id == setup.category_id
         ),
         None,
@@ -246,7 +264,7 @@ async def _ensure_channel(
         channel = await client.create_guild_channel(
             setup.guild_id, payload, reason=_AUDIT_REASON
         )
-    except DiscordAdminError as exc:
+    except DISCORD_ERRORS as exc:
         report.errors.append(f"{label}: {_why(exc, 'Manage Channels')}")
         return
     setattr(setup, column, channel.id)
@@ -301,7 +319,7 @@ async def _ensure_tags(
         return
     try:
         tags = await client.get_forum_tags(forum_id)
-    except DiscordAdminError as exc:
+    except DISCORD_ERRORS as exc:
         report.errors.append(
             "Could not read the showcase forum's tags: " + _why(exc, "View Channels")
         )
@@ -335,7 +353,7 @@ async def _ensure_tags(
         stored = await client.set_forum_tags(
             forum_id, [*tags, *new_tags], reason=_AUDIT_REASON
         )
-    except DiscordAdminError as exc:
+    except DISCORD_ERRORS as exc:
         report.errors.extend(
             f"{labels[column]}: {_why(exc, 'Manage Channels')}" for column in to_create
         )

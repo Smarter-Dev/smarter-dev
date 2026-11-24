@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC
 from datetime import datetime
+
+import httpx
 
 from smarter_dev.web.jams.discord_setup import CATEGORY_NAME
 from smarter_dev.web.jams.discord_setup import FORUM_TAG_LIMIT
@@ -15,7 +18,7 @@ from tests.web.jam_helpers import FakeDiscord
 from tests.web.jam_helpers import discord_error
 from tests.web.jam_helpers import make_jam
 
-_TEXT, _CATEGORY, _FORUM = 0, 4, 15
+_TEXT, _CATEGORY, _NEWS, _FORUM = 0, 4, 5, 15
 
 
 def _empty_setup() -> JamDiscordSetup:
@@ -302,3 +305,65 @@ async def test_tag_write_failure_leaves_ids_empty():
 
     assert jam.showcase_tag_id is None and jam.year_tag_id is None
     assert len(report.errors) == 2
+
+
+async def test_a_network_failure_is_reported_not_raised():
+    discord, setup = FakeDiscord(), _empty_setup()
+    discord.fail["create_guild_role"] = httpx.ConnectError("no route to host")
+
+    report = await run_jam_setup(discord, setup, make_jam())
+
+    assert "@Jammer role: Discord could not be reached" in report.errors
+    assert setup.role_id is None
+    # The rest of the setup still ran.
+    assert setup.category_id and setup.news_channel_id
+
+
+async def test_an_unreachable_discord_stops_before_creating_anything():
+    discord, setup = FakeDiscord(), _empty_setup()
+    discord.fail["get_guild_channels"] = httpx.ReadTimeout("timed out")
+
+    report = await run_jam_setup(discord, setup, make_jam())
+
+    assert report.errors == [
+        "Could not read the server's channels and roles: Discord could not be reached"
+    ]
+    assert discord.calls == []
+
+
+async def test_news_turned_into_an_announcement_channel_is_kept():
+    discord, setup, jam = FakeDiscord(), _empty_setup(), make_jam()
+    await run_jam_setup(discord, setup, jam)
+    news_id = setup.news_channel_id
+    index = next(i for i, c in enumerate(discord.channels) if c.id == news_id)
+    discord.channels[index] = replace(discord.channels[index], type=_NEWS)
+    discord.calls.clear()
+
+    report = await run_jam_setup(discord, setup, jam)
+
+    assert report.ok, report.errors
+    assert setup.news_channel_id == news_id
+    assert discord.calls == []
+
+
+async def test_an_announcement_jam_news_is_adopted_by_name():
+    discord, setup = FakeDiscord(), _empty_setup()
+    category = discord.add_channel(CATEGORY_NAME, _CATEGORY)
+    news = discord.add_channel("jam-news", _NEWS, category)
+
+    report = await run_jam_setup(discord, setup, make_jam())
+
+    assert report.ok, report.errors
+    assert setup.news_channel_id == news
+    assert "#jam-news" in report.adopted
+    assert [c.name for c in discord.channels].count("jam-news") == 1
+
+
+async def test_only_news_may_be_an_announcement_channel():
+    discord, setup = FakeDiscord(), _empty_setup()
+    category = discord.add_channel(CATEGORY_NAME, _CATEGORY)
+    stray = discord.add_channel("jam-chat", _NEWS, category)
+
+    await run_jam_setup(discord, setup, make_jam())
+
+    assert setup.chat_channel_id != stray

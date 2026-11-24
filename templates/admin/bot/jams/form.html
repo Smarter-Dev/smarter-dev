@@ -29,6 +29,7 @@
             <div class="sk-panel-head">{{ "Jam" if jam else "New Jam" }}</div>
             <div class="sk-panel-body">
                 <form method="post" action="{{ base }}/{{ jam.id ~ '/edit' if jam else 'create' }}">
+{{ csrf_field() }}
                     <label for="name">Name</label>
                     <input type="text" id="name" name="name" maxlength="100" value="{{ form_data.name or '' }}" required>
 

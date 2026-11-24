@@ -29,6 +29,7 @@
             <div class="sk-panel-head">Showcase forum</div>
             <div class="sk-panel-body">
                 <form method="post" action="/admin/bot/guilds/{{ guild.id }}/jams/showcase-forum">
+{{ csrf_field() }}
                     <label for="channel_id">Forum for jam entries</label>
                     <select id="channel_id" name="channel_id">
                         <option value="">New #{{ default_forum_name }} forum, made at setup</option>

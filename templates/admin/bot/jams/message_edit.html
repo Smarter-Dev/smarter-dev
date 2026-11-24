@@ -29,6 +29,7 @@
             <div class="sk-panel-head">Scheduled Message</div>
             <div class="sk-panel-body">
                 <form method="post" action="{{ jam_url }}/messages/{{ message.id }}/edit">
+{{ csrf_field() }}
                     {% set form = form_data %}
                     {% include "admin/bot/jams/_message_fields.html" %}
                     <div style="margin-top:1rem;">

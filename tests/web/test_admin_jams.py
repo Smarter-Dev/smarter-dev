@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import contextmanager
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -17,6 +19,8 @@ import pytest
 from litestar.datastructures import FormMultiDict
 from skrift.auth.guards import Permission
 from skrift.auth.guards import auth_guard
+from skrift.forms.core import csrf_field as skrift_csrf_field
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.bot_admin.jams import MESSAGE_CONTENT_MAX
 from smarter_dev.web.bot_admin.jams import JamsAdminController
@@ -74,6 +78,12 @@ def _form(values: dict) -> FormMultiDict:
     return FormMultiDict(list(values.items()))
 
 
+@jinja2.pass_context
+def _csrf_field(context) -> str:
+    """The app's ``csrf_field`` global: Skrift's own, fed the page's request."""
+    return skrift_csrf_field(context["request"])
+
+
 def _render(response) -> str:
     """Render a handler's template for real, so a broken template fails."""
     env = jinja2.Environment(
@@ -89,14 +99,17 @@ def _render(response) -> str:
         autoescape=True,
     )
     env.globals["site_name"] = lambda: "Smarter Dev"
-    return env.get_template(response.template_name).render(**response.context)
+    env.globals["csrf_field"] = _csrf_field
+    # Litestar hands every template the request; the session holds the token.
+    request = SimpleNamespace(session={})
+    return env.get_template(response.template_name).render(
+        request=request, **response.context
+    )
 
 
-async def _call(handler: str, db_session, *, form=None, discord=None, **path):
-    """Run one controller handler; returns (response, flashes, discord, html)."""
-    discord = discord or _Guild()
-    flashes = SimpleNamespace(success=Mock(), error=Mock())
-    request = SimpleNamespace(form=AsyncMock(return_value=_form(form or {})))
+@contextmanager
+def _patched(discord, flashes, csrf=True):
+    """The controller with its admin shell, Discord and Skrift calls faked."""
     with (
         patch(f"{_MODULE}.get_admin_context", new=AsyncMock(return_value={})),
         patch(f"{_CAMPAIGNS_MODULE}.get_admin_discord_client", return_value=discord),
@@ -104,12 +117,41 @@ async def _call(handler: str, db_session, *, form=None, discord=None, **path):
         patch(f"{_MODULE}.flash_success", flashes.success),
         patch(f"{_MODULE}.flash_error", flashes.error),
         patch(f"{_MODULE}.get_flash_messages", return_value=[]),
+        patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=csrf)),
     ):
-        response = await getattr(JamsAdminController, handler).fn(
-            None, request=request, db_session=db_session, guild_id=GUILD, **path
-        )
+        yield
+
+
+async def _run(handler: str, db_session, *, form=None, **path):
+    request = SimpleNamespace(form=AsyncMock(return_value=_form(form or {})))
+    return await getattr(JamsAdminController, handler).fn(
+        None, request=request, db_session=db_session, guild_id=GUILD, **path
+    )
+
+
+async def _call(
+    handler: str, db_session, *, form=None, discord=None, csrf=True, **path
+):
+    """Run one controller handler; returns (response, flashes, discord, html).
+
+    ``csrf=False`` is a POST whose CSRF token Skrift refuses.
+    """
+    discord = discord or _Guild()
+    flashes = SimpleNamespace(success=Mock(), error=Mock())
+    with _patched(discord, flashes, csrf):
+        response = await _run(handler, db_session, form=form, **path)
     html = _render(response) if hasattr(response, "template_name") else None
     return response, flashes, discord, html
+
+
+async def _call_twice_at_once(handler: str, db_session, engine, discord, **kwargs):
+    """The same request from two sessions, overlapping; returns both responses."""
+    flashes = SimpleNamespace(success=Mock(), error=Mock())
+    async with AsyncSession(engine, expire_on_commit=False) as other:
+        with _patched(discord, flashes):
+            return await asyncio.gather(
+                _run(handler, db_session, **kwargs), _run(handler, other, **kwargs)
+            )
 
 
 def _redirected(response, path: str) -> bool:
@@ -826,3 +868,139 @@ async def test_delete_a_message(db_session):
     assert _redirected(response, f"{_JAMS_URL}/{jam.id}")
     flashes.success.assert_called_once()
     assert await store.list_messages(db_session, jam.id) == []
+
+
+# -- CSRF ---------------------------------------------------------------------
+
+_POSTS = [
+    "jams_showcase_forum",
+    "jam_create",
+    "jam_edit",
+    "jam_setup",
+    "jam_delete",
+    "jam_message_create",
+    "jam_message_edit",
+    "jam_message_retry",
+    "jam_message_delete",
+]
+
+
+def test_the_csrf_list_covers_every_post_route():
+    posts = {
+        name
+        for name, value in vars(JamsAdminController).items()
+        if hasattr(value, "fn") and "POST" in value.http_methods
+    }
+    assert posts == set(_POSTS)
+
+
+@pytest.mark.parametrize("handler", _POSTS)
+async def test_a_post_without_a_valid_csrf_token_changes_nothing(db_session, handler):
+    jam = await _seed_jam(db_session, setup=False)
+    message = await _seed_message(db_session, jam, status="failed", error="nope")
+    path = {}
+    if handler not in ("jams_showcase_forum", "jam_create"):
+        path["jam_id"] = jam.id
+    if handler in ("jam_message_edit", "jam_message_retry", "jam_message_delete"):
+        path["message_id"] = message.id
+    form = {**_VALID_JAM, **_VALID_MESSAGE, "name": "Changed", "channel_id": "14"}
+
+    response, flashes, discord, _ = await _call(
+        handler, db_session, form=form, csrf=False, **path
+    )
+
+    back = _JAMS_URL if "jam_id" not in path else f"{_JAMS_URL}/{jam.id}"
+    assert _redirected(response, back)
+    flashes.error.assert_called_once()
+    assert "session expired" in flashes.error.call_args.args[1]
+    flashes.success.assert_not_called()
+    assert discord.calls == []
+    assert [found.name for found in await _all_jams(db_session)] == [jam.name]
+    assert await store.get_setup(db_session, GUILD) is None
+    [kept] = await store.list_messages(db_session, jam.id)
+    assert (kept.status, kept.content) == ("failed", message.content)
+
+
+async def test_every_form_carries_skrifts_csrf_token(db_session):
+    jam = await _seed_jam(db_session)
+    message = await _seed_message(db_session, jam, status="failed", error="nope")
+    discord = _Guild()
+    discord.add_channel("old-showcase", 15)
+    pages = [
+        await _call("jams_list", db_session, discord=discord),
+        await _call("jam_create_form", db_session),
+        await _call("jam_detail", db_session, jam_id=jam.id),
+        await _call(
+            "jam_message_edit_form", db_session, jam_id=jam.id, message_id=message.id
+        ),
+    ]
+
+    forms = 0
+    for _, _, _, html in pages:
+        opened = html.count('<form method="post"')
+        assert opened, html[:300]
+        assert html.count('<input type="hidden" name="_csrf" value="') == opened
+        forms += opened
+    # list 1, create/edit 1, detail 5 (delete, setup, retry, delete, new), edit 1
+    assert forms == 8
+
+
+# -- two requests at once -----------------------------------------------------
+
+
+class _SlowGuild(_Guild):
+    """A guild whose every answer lets another request run first."""
+
+    async def get_guild_channels(self, guild_id):
+        await asyncio.sleep(0)
+        return await super().get_guild_channels(guild_id)
+
+    async def get_guild_roles(self, guild_id):
+        await asyncio.sleep(0)
+        return await super().get_guild_roles(guild_id)
+
+    async def create_guild_channel(self, guild_id, payload, *, reason):
+        await asyncio.sleep(0)
+        return await super().create_guild_channel(guild_id, payload, reason=reason)
+
+    async def create_guild_role(self, guild_id, name, *, reason):
+        await asyncio.sleep(0)
+        return await super().create_guild_role(guild_id, name, reason=reason)
+
+    async def get_forum_tags(self, channel_id):
+        await asyncio.sleep(0)
+        return await super().get_forum_tags(channel_id)
+
+    async def set_forum_tags(self, channel_id, tags, *, reason):
+        await asyncio.sleep(0)
+        return await super().set_forum_tags(channel_id, tags, reason=reason)
+
+
+async def test_two_setup_runs_at_once_create_everything_once(db_session, test_engine):
+    jam = await _seed_jam(db_session, setup=False)
+    discord = _SlowGuild()
+
+    await _call_twice_at_once(
+        "jam_setup", db_session, test_engine, discord, jam_id=jam.id
+    )
+
+    assert len(discord.created("create_guild_channel")) == 5
+    assert len(discord.created("create_guild_role")) == 1
+    names = [channel.name for channel in discord.channels]
+    assert len(names) == len(set(names)) == 5
+    setup = await store.get_setup(db_session, GUILD)
+    tags = [tag["name"] for tag in discord.tags[setup.showcase_channel_id]]
+    assert sorted(tags) == ["2026", "Holiday Jam"]
+
+
+async def test_a_double_clicked_create_makes_one_jam(db_session, test_engine):
+    discord = _SlowGuild()
+
+    responses = await _call_twice_at_once(
+        "jam_create", db_session, test_engine, discord, form=_VALID_JAM
+    )
+
+    assert len(await _all_jams(db_session)) == 1
+    assert sorted(response.status_code for response in responses)[-1] == 400
+    assert len(discord.created("create_guild_channel")) == 5
+    assert len(discord.created("create_guild_role")) == 1

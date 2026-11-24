@@ -9,12 +9,19 @@ admin page shows as stuck and lets an administrator retry.
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from uuid import UUID
+from weakref import WeakValueDictionary
 
+from sqlalchemy import and_
+from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +40,38 @@ MAX_SEND_DELAY = timedelta(hours=6)
 STUCK_AFTER = timedelta(minutes=10)
 
 _ERROR_MAX = 500
+
+# One lock per guild in this process; a lock nobody holds is dropped.
+_guild_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
+
+
+def _advisory_lock(guild_id: str):
+    """Postgres statement that waits for the guild's jam lock.
+
+    The lock belongs to the transaction and is released when it ends.
+    """
+    return select(
+        func.pg_advisory_xact_lock(func.hashtextextended(f"jam:{guild_id}", 0))
+    )
+
+
+@asynccontextmanager
+async def guild_lock(session: AsyncSession, guild_id: str) -> AsyncIterator[None]:
+    """Let one request at a time change a guild's jams or its Discord setup.
+
+    Two requests at once (a double click, two administrators) would both see
+    nothing there and both create it: two jams on the same dates, or two sets
+    of channels in Discord. The lock is held across web processes by Postgres
+    until the transaction ends, so read what you need after taking it and
+    commit before leaving the block.
+    """
+    lock = _guild_locks.get(guild_id)
+    if lock is None:
+        lock = _guild_locks[guild_id] = asyncio.Lock()
+    async with lock:
+        if session.get_bind().dialect.name == "postgresql":
+            await session.execute(_advisory_lock(guild_id))
+        yield
 
 
 def _utc(moment: datetime) -> datetime:
@@ -114,8 +153,12 @@ async def set_showcase_forum(
 
 
 async def get_or_create_setup(session: AsyncSession, guild_id: str) -> JamDiscordSetup:
-    """The guild's shared setup row, added to the session if it is new."""
-    setup = await get_setup(session, guild_id)
+    """The guild's shared setup row, added to the session if it is new.
+
+    Read from the database every time: under :func:`guild_lock` another
+    request may have just filled it in.
+    """
+    setup = await session.get(JamDiscordSetup, guild_id, populate_existing=True)
     if setup is None:
         setup = JamDiscordSetup(guild_id=guild_id)
         session.add(setup)
@@ -156,14 +199,27 @@ async def retry_message(
     about to post it, and queueing it again would post it twice.
     """
     now = now or datetime.now(UTC)
-    if message.status != "failed" and not is_stuck(message, now):
-        return False
-    message.status = "pending"
-    message.send_at = now
-    message.claimed_at = None
-    message.error = None
+    # Decided by the database in one statement, so a report from the bot that
+    # lands at the same moment is not overwritten.
+    result = await session.execute(
+        update(JamMessage)
+        .where(
+            JamMessage.id == message.id,
+            or_(
+                JamMessage.status == "failed",
+                and_(
+                    JamMessage.status == "sending",
+                    JamMessage.claimed_at < now - STUCK_AFTER,
+                ),
+            ),
+        )
+        .values(status="pending", send_at=now, claimed_at=None, error=None)
+        # The row is read back below instead of being patched in memory.
+        .execution_options(synchronize_session=False)
+    )
     await session.commit()
-    return True
+    await session.refresh(message)
+    return result.rowcount == 1
 
 
 @dataclass(frozen=True)

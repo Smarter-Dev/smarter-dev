@@ -31,6 +31,7 @@ from skrift.auth.guards import auth_guard
 from skrift.flash import flash_error
 from skrift.flash import flash_success
 from skrift.flash import get_flash_messages
+from skrift.forms.core import verify_csrf
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.bot_admin.campaigns import fetch_guild_or_error
@@ -41,6 +42,7 @@ from smarter_dev.web.discord_admin_client import get_admin_discord_client
 from smarter_dev.web.jams import store
 from smarter_dev.web.jams.discord_setup import CATEGORY_NAME
 from smarter_dev.web.jams.discord_setup import CHANNEL_NAMES
+from smarter_dev.web.jams.discord_setup import DISCORD_ERRORS
 from smarter_dev.web.jams.discord_setup import ROLE_NAME
 from smarter_dev.web.jams.discord_setup import JamSetupReport
 from smarter_dev.web.jams.discord_setup import run_jam_setup
@@ -271,13 +273,16 @@ class JamsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str
     ) -> Response:
         """Choose which forum jam entries are posted in."""
+        if (refused := await csrf_refusal(request, _jams_path(guild_id))) is not None:
+            return refused
         form = await request.form()
         channel_id = _text(form, "channel_id")
         if channel_id and channel_id not in {f.id for f in await list_forums(guild_id)}:
             flash_error(request, "That forum was not found in this server.")
             return Redirect(path=_jams_path(guild_id))
-        await store.set_showcase_forum(db_session, guild_id, channel_id or None)
-        await db_session.commit()
+        async with store.guild_lock(db_session, guild_id):
+            await store.set_showcase_forum(db_session, guild_id, channel_id or None)
+            await db_session.commit()
         flash_success(
             request,
             "Showcase forum saved. Press Finish setup on a jam to add its tags there.",
@@ -301,24 +306,30 @@ class JamsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str
     ) -> Response:
         """Create a jam, then whatever it needs in Discord that is missing."""
+        if (refused := await csrf_refusal(request, _jams_path(guild_id))) is not None:
+            return refused
         guild, error = await fetch_guild_or_error(request, db_session, guild_id)
         if error is not None:
             return error
 
         data = read_jam_form(await request.form())
         is_valid, errors, cleaned = validate_jam_form(data)
+        jam = None
         if is_valid:
-            errors = await conflicts(db_session, guild_id, cleaned, None)
-        if errors:
+            # Checked and saved under the guild's lock, so a second click
+            # sees the first jam and is refused as an overlap.
+            async with store.guild_lock(db_session, guild_id):
+                errors = await conflicts(db_session, guild_id, cleaned, None)
+                if not errors:
+                    jam = Jam(guild_id=guild_id, created_by=_CREATED_BY, **cleaned)
+                    db_session.add(jam)
+                # Saved before Discord is touched: if setup fails part way
+                # the jam is still there, and its page offers to finish it.
+                await db_session.commit()
+        if jam is None:
             return await render_jam_form(
                 request, db_session, guild, guild_id, None, data, errors, 400
             )
-
-        jam = Jam(guild_id=guild_id, created_by=_CREATED_BY, **cleaned)
-        db_session.add(jam)
-        # Saved before Discord is touched: if setup fails part way the jam is
-        # still there, and its page offers to finish the setup.
-        await db_session.commit()
 
         report = await set_up_discord(db_session, jam)
         flash_setup_report(request, report, f"Jam “{jam.name}” created.")
@@ -357,6 +368,10 @@ class JamsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str, jam_id: UUID
     ) -> Response:
         """Apply edits to a jam. Nothing in Discord is renamed or removed."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         guild, error = await fetch_guild_or_error(request, db_session, guild_id)
         if error is not None:
             return error
@@ -367,21 +382,16 @@ class JamsAdminController(Controller):
         data = read_jam_form(await request.form())
         is_valid, errors, cleaned = validate_jam_form(data)
         if is_valid:
-            errors = await conflicts(db_session, guild_id, cleaned, jam)
+            async with store.guild_lock(db_session, guild_id):
+                await db_session.refresh(jam)
+                errors = await conflicts(db_session, guild_id, cleaned, jam)
+                if not errors:
+                    apply_jam_edit(jam, cleaned)
+                await db_session.commit()
         if errors:
             return await render_jam_form(
                 request, db_session, guild, guild_id, jam, data, errors, 400
             )
-
-        # A renamed tag or a start in another year points the jam at a
-        # different forum tag. The old one stays in Discord untouched.
-        if cleaned["tag_name"].lower() != jam.tag_name.lower():
-            jam.showcase_tag_id = None
-        if str(cleaned["starts_at"].year) != jam.year_tag_name:
-            jam.year_tag_id = None
-        for field, value in cleaned.items():
-            setattr(jam, field, value)
-        await db_session.commit()
         flash_success(request, "Jam updated.")
         if jam.missing_tags:
             flash_error(
@@ -395,6 +405,10 @@ class JamsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str, jam_id: UUID
     ) -> Response:
         """Create whichever Discord pieces the jam needs and does not have."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         jam = await store.get_jam(db_session, guild_id, jam_id)
         if jam is None:
             flash_error(request, "Jam not found.")
@@ -408,6 +422,10 @@ class JamsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str, jam_id: UUID
     ) -> Response:
         """Delete a jam and its scheduled messages. Discord is left as it is."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         jam = await store.get_jam(db_session, guild_id, jam_id)
         if jam is None:
             flash_error(request, "Jam not found.")
@@ -427,6 +445,10 @@ class JamsAdminController(Controller):
         self, request: Request, db_session: AsyncSession, guild_id: str, jam_id: UUID
     ) -> Response:
         """Schedule a message into one of the jam's channels."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         guild, error = await fetch_guild_or_error(request, db_session, guild_id)
         if error is not None:
             return error
@@ -485,6 +507,10 @@ class JamsAdminController(Controller):
         message_id: UUID,
     ) -> Response:
         """Apply edits to an unsent message; a failed one is queued again."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         guild, error = await fetch_guild_or_error(request, db_session, guild_id)
         if error is not None:
             return error
@@ -527,6 +553,10 @@ class JamsAdminController(Controller):
         message_id: UUID,
     ) -> Response:
         """Queue a failed or stuck message to send now."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         _, message = await load_message(db_session, guild_id, jam_id, message_id)
         if message is None:
             flash_error(request, "Message not found.")
@@ -549,6 +579,10 @@ class JamsAdminController(Controller):
         message_id: UUID,
     ) -> Response:
         """Delete a scheduled message."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
         _, message = await load_message(db_session, guild_id, jam_id, message_id)
         if message is None:
             flash_error(request, "Message not found.")
@@ -565,11 +599,19 @@ class JamsAdminController(Controller):
 MESSAGE_CHANNELS = [(key, CHANNEL_NAMES[key]) for key in JAM_MESSAGE_CHANNEL_KEYS]
 
 
+async def csrf_refusal(request: Request, back: str) -> Response | None:
+    """Send a POST without a valid CSRF token back where it came from."""
+    if await verify_csrf(request):
+        return None
+    flash_error(request, "Your session expired. Please try again.")
+    return Redirect(path=back)
+
+
 async def list_forums(guild_id: str) -> list[DiscordChannel]:
     """The guild's forum channels, or none when Discord cannot be asked."""
     try:
         channels = await get_admin_discord_client().get_guild_channels(guild_id)
-    except DiscordAdminError:
+    except DISCORD_ERRORS:
         return []
     return [channel for channel in channels if channel.type == _FORUM]
 
@@ -598,6 +640,20 @@ def discord_parts(setup: JamDiscordSetup, jam: Jam) -> list[dict]:
             "id": jam.year_tag_id,
         },
     ]
+
+
+def apply_jam_edit(jam: Jam, cleaned: dict) -> None:
+    """Write a valid form onto a jam.
+
+    A renamed tag or a start in another year points the jam at a different
+    forum tag. The old one stays in Discord untouched.
+    """
+    if cleaned["tag_name"].lower() != jam.tag_name.lower():
+        jam.showcase_tag_id = None
+    if str(cleaned["starts_at"].year) != jam.year_tag_name:
+        jam.year_tag_id = None
+    for field, value in cleaned.items():
+        setattr(jam, field, value)
 
 
 async def conflicts(
@@ -640,13 +696,17 @@ async def set_up_discord(db_session: AsyncSession, jam: Jam) -> JamSetupReport:
         report = JamSetupReport()
         report.errors.append("The Discord bot token is not configured.")
         return report
-    setup = await store.get_or_create_setup(db_session, jam.guild_id)
-    try:
-        report = await run_jam_setup(client, setup, jam)
-    finally:
-        # Ids recorded before a failure are kept, so the next run does not
-        # create those pieces a second time.
-        await db_session.commit()
+    # One setup run per guild at a time. A second run waits, then reads what
+    # the first one made and finds nothing left to create.
+    async with store.guild_lock(db_session, jam.guild_id):
+        await db_session.refresh(jam)
+        setup = await store.get_or_create_setup(db_session, jam.guild_id)
+        try:
+            report = await run_jam_setup(client, setup, jam)
+        finally:
+            # Ids recorded before a failure are kept, so the next run does
+            # not create those pieces a second time.
+            await db_session.commit()
     return report
 
 

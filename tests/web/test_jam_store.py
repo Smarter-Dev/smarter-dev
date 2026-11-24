@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
+from types import SimpleNamespace
+
+from sqlalchemy import update
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.jams import store
 from smarter_dev.web.models import Jam
@@ -301,3 +307,79 @@ async def test_deleting_a_jam_deletes_its_messages(db_session):
     await db_session.commit()
 
     assert await store.get_message(db_session, jam.id, message.id) is None
+
+
+async def test_retry_is_decided_by_the_row_not_a_stale_copy(db_session, test_engine):
+    """The bot reports "sent" after the admin's page loaded the failed row."""
+    _, message = await _seed(db_session)
+    late = START + timedelta(days=2)
+    await store.claim_due_messages(db_session, late)
+    message = await _status(db_session, message)
+    assert message.status == "failed"
+    async with AsyncSession(test_engine) as bot:
+        await bot.execute(
+            update(JamMessage)
+            .where(JamMessage.id == message.id)
+            .values(status="sent", error=None)
+        )
+        await bot.commit()
+    assert message.status == "failed"
+
+    assert not await store.retry_message(db_session, message, late)
+
+    assert message.status == "sent"
+
+
+# -- the guild lock -----------------------------------------------------------
+
+
+def test_the_lock_statement_is_a_transaction_advisory_lock():
+    sql = str(
+        store._advisory_lock("42").compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    )
+    assert (
+        sql
+        == "SELECT pg_advisory_xact_lock(hashtextextended('jam:42', 0)) AS pg_advisory_xact_lock_1"
+    )
+
+
+class _Session:
+    def __init__(self, dialect: str) -> None:
+        self.dialect = dialect
+        self.executed: list = []
+
+    def get_bind(self):
+        return SimpleNamespace(dialect=SimpleNamespace(name=self.dialect))
+
+    async def execute(self, statement) -> None:
+        self.executed.append(str(statement.compile(dialect=postgresql.dialect())))
+
+
+async def test_postgres_takes_the_advisory_lock_and_sqlite_does_not():
+    postgres, sqlite = _Session("postgresql"), _Session("sqlite")
+
+    async with store.guild_lock(postgres, "42"):
+        assert len(postgres.executed) == 1
+    async with store.guild_lock(sqlite, "42"):
+        pass
+
+    assert "pg_advisory_xact_lock(hashtextextended(" in postgres.executed[0]
+    assert sqlite.executed == []
+
+
+async def test_the_lock_admits_one_holder_per_guild_at_a_time():
+    session, order = _Session("sqlite"), []
+
+    async def hold(name: str, guild: str) -> None:
+        async with store.guild_lock(session, guild):
+            order.append(f"{name} in")
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            order.append(f"{name} out")
+
+    await asyncio.gather(hold("a", "1"), hold("b", "1"), hold("c", "2"))
+
+    assert order.index("a out") < order.index("b in")
+    assert order.index("c in") < order.index("a out")

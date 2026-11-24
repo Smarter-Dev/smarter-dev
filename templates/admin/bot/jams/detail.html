@@ -36,6 +36,7 @@
                 <div style="margin-top:1rem;">
                     <a href="{{ jam_url }}/edit" class="sk-btn-outline sk-btn-small">Edit</a>
                     <form method="post" action="{{ jam_url }}/delete" style="display:inline;" onsubmit="return confirm('Delete this jam and its scheduled messages? Nothing is removed from Discord.')">
+{{ csrf_field() }}
                         <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
                     </form>
                 </div>
@@ -58,6 +59,7 @@
                     </tbody>
                 </table>
                 <form method="post" action="{{ jam_url }}/setup" style="margin-top:1rem;">
+{{ csrf_field() }}
                     {% if not setup_finished %}
                     <button type="submit" class="sk-btn">Finish setup</button>
                     <small class="sk-text-muted">Creates only what is missing. Anything that already exists under the same name is reused.</small>
@@ -112,10 +114,12 @@
                                 {% endif %}
                                 {% if message.status == "failed" or stuck %}
                                 <form method="post" action="{{ jam_url }}/messages/{{ message.id }}/retry" style="display:inline;">
+{{ csrf_field() }}
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Send now</button>
                                 </form>
                                 {% endif %}
                                 <form method="post" action="{{ jam_url }}/messages/{{ message.id }}/delete" style="display:inline;" onsubmit="return confirm('Delete this message?')">
+{{ csrf_field() }}
                                     <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Delete</button>
                                 </form>
                             </td>
@@ -142,6 +146,7 @@
             <div class="sk-panel-head">Schedule a Message</div>
             <div class="sk-panel-body">
                 <form method="post" action="{{ jam_url }}/messages/create">
+{{ csrf_field() }}
                     {% set form = message_form %}
                     {% include "admin/bot/jams/_message_fields.html" %}
                     <div style="margin-top:1rem;">
