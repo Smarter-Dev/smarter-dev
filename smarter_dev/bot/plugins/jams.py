@@ -1,4 +1,4 @@
-"""Code jams: scheduled posts, showcase tags, the Jammer role and teams.
+"""Code jams: scheduled posts, showcase entries, the Jammer role and teams.
 
 Wiring only. What each piece does lives in ``smarter_dev.bot.jams``.
 """
@@ -72,6 +72,23 @@ async def on_thread_create(event: hikari.GuildThreadCreateEvent) -> None:
         await jams.tag_showcase_post(api, plugin.bot.rest, event.thread)
     except Exception as error:  # noqa: BLE001 - tagging never breaks other listeners
         logger.warning("jam entry tagging failed: %r", error)
+    try:
+        await jams.record_showcase_post(api, plugin.bot.rest, event.thread)
+    except Exception as error:  # noqa: BLE001 - nor does recording the entry
+        logger.warning("jam entry recording failed: %r", error)
+
+
+@plugin.listener(hikari.GuildThreadDeleteEvent)
+async def on_thread_delete(event: hikari.GuildThreadDeleteEvent) -> None:
+    api = _jam_api()
+    if api is None:
+        return
+    try:
+        await jams.forget_showcase_post(
+            api, int(event.guild_id), int(event.parent_id), int(event.thread_id)
+        )
+    except Exception as error:  # noqa: BLE001 - never breaks other listeners
+        logger.warning("jam entry removal failed: %r", error)
 
 
 async def _answer(ctx: lightbulb.Context, work) -> None:
@@ -168,21 +185,29 @@ async def team_command(ctx: lightbulb.Context) -> None:
 @lightbulb.command("invite", "Add a teammate to this team thread")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def invite_command(ctx: lightbulb.Context) -> None:
-    me = await _me_or_say_starting(ctx)
-    if me is None:
-        return
     target = ctx.options.user
     await _answer(
         ctx,
         lambda api: jams.invite_to_team(
             api,
             ctx.bot.rest,
-            _limits,
             guild_id=int(ctx.guild_id),
             channel_id=int(ctx.channel_id),
-            bot_user_id=int(me.id),
+            user_id=int(ctx.user.id),
             target_id=int(target.id),
             target_is_bot=bool(target.is_bot),
+        ),
+    )
+
+
+@jam_group.child
+@lightbulb.command("leave", "Leave your jam team")
+@lightbulb.implements(lightbulb.SlashSubCommand)
+async def leave_command(ctx: lightbulb.Context) -> None:
+    await _answer(
+        ctx,
+        lambda api: jams.leave_team(
+            api, ctx.bot.rest, int(ctx.guild_id), int(ctx.user.id)
         ),
     )
 
