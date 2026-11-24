@@ -14,6 +14,7 @@ from unittest.mock import Mock
 from unittest.mock import patch
 from uuid import uuid4
 
+import httpx
 import jinja2
 import pytest
 from litestar.datastructures import FormMultiDict
@@ -1004,3 +1005,65 @@ async def test_a_double_clicked_create_makes_one_jam(db_session, test_engine):
     assert sorted(response.status_code for response in responses)[-1] == 400
     assert len(discord.created("create_guild_channel")) == 5
     assert len(discord.created("create_guild_role")) == 1
+
+
+# -- second review round ------------------------------------------------------
+
+
+class _Unreachable(_Guild):
+    async def get_guild(self, guild_id: str) -> DiscordGuildDetail:
+        raise httpx.ConnectError("no route to Discord")
+
+
+@pytest.mark.parametrize(
+    ("handler", "kwargs"),
+    [("jams_list", {}), ("jam_create", {"form": _VALID_JAM})],
+)
+async def test_an_unreachable_discord_is_a_503_page_not_a_crash(
+    db_session, handler, kwargs
+):
+    # The error page is drawn by the shared campaigns helper.
+    with (
+        patch(f"{_CAMPAIGNS_MODULE}.get_admin_context", new=AsyncMock(return_value={})),
+        patch(f"{_CAMPAIGNS_MODULE}.get_flash_messages", return_value=[]),
+    ):
+        response, _, _, _ = await _call(
+            handler, db_session, discord=_Unreachable(), **kwargs
+        )
+
+    assert response.status_code == 503
+    assert "could not be reached" in response.context["error"]
+    assert await _all_jams(db_session) == []
+
+
+async def test_an_edit_that_lost_to_the_bot_says_nothing_was_saved(db_session):
+    jam = await _seed_jam(db_session)
+    message = await _seed_message(db_session, jam)
+
+    with patch(f"{_MODULE}.store.save_message_edit", new=AsyncMock(return_value=False)):
+        response, flashes, _, _ = await _call(
+            "jam_message_edit",
+            db_session,
+            form=_VALID_MESSAGE,
+            jam_id=jam.id,
+            message_id=message.id,
+        )
+
+    assert _redirected(response, f"{_JAMS_URL}/{jam.id}")
+    flashes.error.assert_called_once()
+    assert "Nothing was saved" in flashes.error.call_args.args[1]
+    flashes.success.assert_not_called()
+
+
+async def test_delete_waits_for_a_setup_run_on_the_same_server(db_session, test_engine):
+    jam = await _seed_jam(db_session)
+    async with AsyncSession(test_engine, expire_on_commit=False) as other:
+        async with store.guild_lock(other, GUILD):
+            delete = asyncio.create_task(_call("jam_delete", db_session, jam_id=jam.id))
+            await asyncio.sleep(0.05)
+            assert not delete.done()
+        response, flashes, _, _ = await delete
+
+    assert _redirected(response, _JAMS_URL)
+    flashes.success.assert_called_once()
+    assert await _all_jams(db_session) == []

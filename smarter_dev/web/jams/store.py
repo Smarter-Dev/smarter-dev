@@ -1,10 +1,14 @@
 """Database operations for jams and their scheduled messages.
 
-Sending is at-most-once. The bot does not read due messages and report back
-afterwards, because a lost report would post the message again; it claims
-them first (``pending`` -> ``sending``) and then reports ``sent`` or
-``failed``. A claim that is never reported on stays ``sending``, which the
+A message is handed to the bot once. The bot does not read due messages and
+report back afterwards, because a lost report would post the message again;
+it claims them first (``pending`` -> ``sending``) and then reports ``sent``
+or ``failed``. A claim that is never reported on stays ``sending``, which the
 admin page shows as stuck and lets an administrator retry.
+
+That is not a promise of one post in the channel: after a timeout or a 5xx
+the bot's REST client asks Discord again by itself, and an earlier try may
+have gone through. The bot logs a warning when that happens.
 """
 
 from __future__ import annotations
@@ -215,6 +219,34 @@ async def retry_message(
         )
         .values(status="pending", send_at=now, claimed_at=None, error=None)
         # The row is read back below instead of being patched in memory.
+        .execution_options(synchronize_session=False)
+    )
+    await session.commit()
+    await session.refresh(message)
+    return result.rowcount == 1
+
+
+async def save_message_edit(
+    session: AsyncSession, message: JamMessage, changes: dict[str, object]
+) -> bool:
+    """Save an edit to an unsent message. False if the row moved on meanwhile.
+
+    A failed message is queued again; a pending one keeps its state. The row
+    must still be in the state the form was checked against: if the bot
+    claimed it, or "Send now" queued it, while the form was being saved,
+    nothing is written, so the edit can neither post the message twice nor
+    report as saved a text the bot is no longer going to post.
+    """
+    seen = message.status
+    if seen not in ("pending", "failed"):
+        return False
+    values = dict(changes)
+    if seen == "failed":
+        values.update(status="pending", error=None)
+    result = await session.execute(
+        update(JamMessage)
+        .where(JamMessage.id == message.id, JamMessage.status == seen)
+        .values(**values)
         .execution_options(synchronize_session=False)
     )
     await session.commit()

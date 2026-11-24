@@ -330,6 +330,55 @@ async def test_retry_is_decided_by_the_row_not_a_stale_copy(db_session, test_eng
     assert message.status == "sent"
 
 
+async def test_an_edit_is_not_saved_over_a_message_the_bot_claimed(
+    db_session, test_engine
+):
+    """The bot claims the message after the edit handler read it as pending."""
+    _, message = await _seed(db_session)
+    async with AsyncSession(test_engine) as bot:
+        assert len(await store.claim_due_messages(bot, START + timedelta(hours=1))) == 1
+    assert message.status == "pending"
+
+    saved = await store.save_message_edit(db_session, message, {"content": "New"})
+
+    assert not saved
+    assert (message.status, message.content) != ("pending", "New")
+    assert message.status == "sending"
+
+
+async def test_an_edit_does_not_requeue_a_failed_message_sent_meanwhile(
+    db_session, test_engine
+):
+    """ "Send now" and the bot both act after the edit handler read "failed"."""
+    _, message = await _seed(db_session, status="failed", error="Too late")
+    async with AsyncSession(test_engine) as other:
+        await other.execute(
+            update(JamMessage)
+            .where(JamMessage.id == message.id)
+            .values(status="sending", error=None)
+        )
+        await other.commit()
+    assert message.status == "failed"
+
+    assert not await store.save_message_edit(db_session, message, {"content": "New"})
+
+    assert message.status == "sending"
+
+
+async def test_an_edit_saves_and_only_a_failed_message_changes_state(db_session):
+    _, pending = await _seed(db_session)
+
+    assert await store.save_message_edit(db_session, pending, {"content": "New"})
+    assert (pending.status, pending.content) == ("pending", "New")
+
+    failed = make_message(pending.jam, status="failed", error="Too late")
+    db_session.add(failed)
+    await db_session.commit()
+
+    assert await store.save_message_edit(db_session, failed, {"content": "Again"})
+    assert (failed.status, failed.error, failed.content) == ("pending", None, "Again")
+
+
 # -- the guild lock -----------------------------------------------------------
 
 

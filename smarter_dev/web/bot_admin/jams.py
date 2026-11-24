@@ -426,12 +426,14 @@ class JamsAdminController(Controller):
             refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
         ) is not None:
             return refused
-        jam = await store.get_jam(db_session, guild_id, jam_id)
-        if jam is None:
-            flash_error(request, "Jam not found.")
-            return Redirect(path=_jams_path(guild_id))
-        await db_session.delete(jam)
-        await db_session.commit()
+        # Under the guild's lock, so a setup run in progress finishes first.
+        async with store.guild_lock(db_session, guild_id):
+            jam = await store.get_jam(db_session, guild_id, jam_id)
+            if jam is None:
+                flash_error(request, "Jam not found.")
+                return Redirect(path=_jams_path(guild_id))
+            await db_session.delete(jam)
+            await db_session.commit()
         flash_success(
             request,
             "Jam deleted. Nothing was removed from Discord.",
@@ -528,15 +530,12 @@ class JamsAdminController(Controller):
                 request, db_session, guild, jam, message, data, errors, 400
             )
 
-        for field, value in cleaned.items():
-            setattr(message, field, value)
-        # Only a failed message changes state. A pending one is left as it
-        # is: if the bot claimed it while this form was open, writing
-        # "pending" back would post it a second time.
-        if message.status == "failed":
-            message.status = "pending"
-            message.error = None
-        await db_session.commit()
+        if not await store.save_message_edit(db_session, message, cleaned):
+            flash_error(
+                request,
+                "This message changed while you were editing it. Nothing was saved.",
+            )
+            return Redirect(path=_jam_path(guild_id, jam_id))
         flash_success(request, "Message updated.")
         return Redirect(path=_jam_path(guild_id, jam_id))
 

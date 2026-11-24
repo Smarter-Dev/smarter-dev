@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import UUID
 
+import httpx
 from litestar import Controller, Request, get, post
 from litestar.response import Redirect, Response, Template as TemplateResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -630,6 +631,13 @@ async def fetch_guild_or_error(
     except DiscordAdminError as exc:
         return None, await render_error(
             request, db_session, guild_id, f"Discord API error: {exc}", 503
+        )
+    except httpx.HTTPError as exc:
+        # A timeout or a refused connection, not an answer from Discord.
+        logger.warning("Discord unreachable for guild %s: %r", guild_id, exc)
+        return None, await render_error(
+            request, db_session, guild_id,
+            "Discord could not be reached. Please try again in a minute.", 503,
         )
     return guild, None
 
