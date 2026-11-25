@@ -14,9 +14,11 @@ session:
   max_age: 2592000  # 30 days
 
 auth:
-  redirect_base_url: "https://smarter.dev"
+  redirect_base_url: "https://admin.smarter.dev"
   allowed_redirect_domains:
-    - "*.smarter.dev"
+    # Bare domain matches the apex and every subdomain; "*.smarter.dev"
+    # alone would refuse a sign-in that returns to https://smarter.dev.
+    - "smarter.dev"
   providers:
     discord:
       client_id: $DISCORD_APPLICATION_ID

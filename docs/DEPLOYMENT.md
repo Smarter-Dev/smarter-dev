@@ -232,6 +232,6 @@ restores the former active/passive watcher schedule.
 
 ### Admin interface not working
 - Check `DISCORD_CLIENT_ID` and `DISCORD_CLIENT_SECRET`
-- Verify `DISCORD_REDIRECT_URI` matches your OAuth app settings
+- Verify the callback URIs (`<admin host>/auth/<provider>/callback`) match your OAuth app settings
 - The admin lives at `/admin` (Skrift's built-in interface); access requires
   a user with the administrator role
