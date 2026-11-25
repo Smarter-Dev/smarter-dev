@@ -32,6 +32,7 @@ from sqlalchemy import Select
 from sqlalchemy import delete
 from sqlalchemy import func
 from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -51,6 +52,8 @@ NOT_A_TEAM = "not_a_team"
 NOT_YOUR_TEAM = "not_your_team"
 TEAM_HAS_ENTRY = "team_has_entry"
 FULL = "full"
+NOT_FOUND = "not_found"
+LEFT_TEAM = "left_team"
 
 
 @dataclass(frozen=True)
@@ -175,11 +178,12 @@ async def list_entries(session: AsyncSession, jam_id: UUID) -> list[EntryRow]:
     """A jam's showcase posts in the order they were made.
 
     The first post from a team or a solo member is their entry. A later one
-    from the same team or member is marked as extra to it.
+    from the same team or member is marked as extra to it. Posts an
+    administrator removed are left out; see :func:`list_removed`.
     """
     result = await session.execute(
         select(JamSubmission)
-        .where(JamSubmission.jam_id == jam_id)
+        .where(JamSubmission.jam_id == jam_id, JamSubmission.removed_at.is_(None))
         .options(selectinload(JamSubmission.team))
         .execution_options(populate_existing=True)
     )
@@ -197,11 +201,22 @@ async def list_entries(session: AsyncSession, jam_id: UUID) -> list[EntryRow]:
     return rows
 
 
+async def list_removed(session: AsyncSession, jam_id: UUID) -> list[JamSubmission]:
+    """The jam's posts an administrator stopped counting, oldest first."""
+    result = await session.execute(
+        select(JamSubmission)
+        .where(JamSubmission.jam_id == jam_id, JamSubmission.removed_at.is_not(None))
+        .options(selectinload(JamSubmission.team))
+        .execution_options(populate_existing=True)
+    )
+    return sorted(result.scalars(), key=_post_order)
+
+
 async def _team_has_entry(session: AsyncSession, team_id: UUID) -> bool:
     count = await session.scalar(
         select(func.count())
         .select_from(JamSubmission)
-        .where(JamSubmission.team_id == team_id)
+        .where(JamSubmission.team_id == team_id, JamSubmission.removed_at.is_(None))
     )
     return bool(count)
 
@@ -214,6 +229,7 @@ async def _has_solo_entry(session: AsyncSession, jam_id: UUID, user_id: str) -> 
             JamSubmission.jam_id == jam_id,
             JamSubmission.author_id == user_id,
             JamSubmission.team_id.is_(None),
+            JamSubmission.removed_at.is_(None),
         )
     )
     return bool(count)
@@ -372,6 +388,15 @@ async def _leave_team(
         return TeamOutcome(refusal=TEAM_HAS_ENTRY, team=info, members_left=size)
     team.members.remove(member)
     if size == 1:
+        # Deleting the team deletes its posts' records. A removed post's
+        # record is kept, with no team, so the bot does not record the post
+        # again when it next looks through the forum.
+        await session.execute(
+            update(JamSubmission)
+            .where(JamSubmission.team_id == team.id)
+            .values(team_id=None)
+            .execution_options(synchronize_session=False)
+        )
         await session.delete(team)
     await session.flush()
     return TeamOutcome(team=info, members_left=size - 1)
@@ -386,14 +411,17 @@ async def record_submission(
     *,
     thread_id: str,
     author_id: str,
-    now: datetime | None = None,
+    posted_at: datetime | None = None,
 ) -> SubmissionOutcome | None:
     """Record a showcase post against its author's team, or as a solo entry.
 
-    ``None`` if the jam is not open. The post is kept even when its team or
-    author already has an entry; the outcome says which post is the entry.
+    ``posted_at`` is when the post was made, which can be well before it is
+    recorded: the bot picks up posts it missed. ``None`` if the jam was not
+    open then, or an administrator removed the post. The post is kept even
+    when its team or author already has an entry; the outcome says which post
+    is the entry.
     """
-    now = now or datetime.now(UTC)
+    posted_at = posted_at or datetime.now(UTC)
     async with store.guild_lock(session, jam.guild_id):
         result = await session.execute(
             select(JamSubmission)
@@ -402,11 +430,13 @@ async def record_submission(
         )
         submission = result.scalar_one_or_none()
         new = submission is None
-        if submission is not None and submission.jam_id != jam.id:
+        if submission is not None and (
+            submission.jam_id != jam.id or submission.removed_at is not None
+        ):
             await session.commit()
             return None
         if submission is None:
-            if not is_open(jam, now):
+            if not is_open(jam, posted_at):
                 await session.commit()
                 return None
             team = await team_of(session, jam.id, author_id)
@@ -427,7 +457,9 @@ async def record_submission(
             )
         else:
             team = None
-        same = select(JamSubmission).where(JamSubmission.jam_id == jam.id)
+        same = select(JamSubmission).where(
+            JamSubmission.jam_id == jam.id, JamSubmission.removed_at.is_(None)
+        )
         if submission.team_id is not None:
             same = same.where(JamSubmission.team_id == submission.team_id)
         else:
@@ -461,9 +493,53 @@ async def remove_submission(
 
 
 async def remove_entry(session: AsyncSession, jam: Jam, thread_id: str) -> bool:
-    """Forget one of this jam's showcase posts, for the admin page."""
-    this_jam = select(Jam.id).where(Jam.id == jam.id)
-    return await _delete_submission(session, jam.guild_id, thread_id, this_jam)
+    """Stop counting one of this jam's showcase posts, for the admin page.
+
+    The record is kept and marked: the post is still in Discord, and the bot
+    would record it again if it were forgotten.
+    """
+    async with store.guild_lock(session, jam.guild_id):
+        submission = await _submission(session, jam, thread_id)
+        changed = submission is not None and submission.removed_at is None
+        if changed:
+            submission.removed_at = datetime.now(UTC)
+        await session.commit()
+    return changed
+
+
+async def restore_entry(session: AsyncSession, jam: Jam, thread_id: str) -> str | None:
+    """Count a post again that an administrator had removed.
+
+    Returns why not, or ``None`` when it counts again. A post is restored
+    only while its author is where they were when it was recorded: alone, or
+    on that team. Otherwise the author would be entered twice.
+    """
+    async with store.guild_lock(session, jam.guild_id):
+        submission = await _submission(session, jam, thread_id)
+        refusal = None
+        if submission is None or submission.removed_at is None:
+            refusal = NOT_FOUND
+        else:
+            now_on = await team_of(session, jam.id, submission.author_id)
+            if (now_on.id if now_on else None) == submission.team_id:
+                submission.removed_at = None
+            elif submission.team_id is None:
+                refusal = ON_A_TEAM
+            else:
+                refusal = LEFT_TEAM
+        await session.commit()
+    return refusal
+
+
+async def _submission(
+    session: AsyncSession, jam: Jam, thread_id: str
+) -> JamSubmission | None:
+    result = await session.execute(
+        select(JamSubmission)
+        .where(JamSubmission.jam_id == jam.id, JamSubmission.thread_id == thread_id)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _delete_submission(

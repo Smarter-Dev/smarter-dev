@@ -30,6 +30,7 @@ from smarter_dev.web.bot_admin.jams import read_jam_message_form
 from smarter_dev.web.bot_admin.jams import validate_jam_form
 from smarter_dev.web.bot_admin.jams import validate_jam_message_form
 from smarter_dev.web.discord_admin_client import DiscordGuildDetail
+from smarter_dev.web.jams import results
 from smarter_dev.web.jams import store
 from smarter_dev.web.jams import teams
 from smarter_dev.web.models import Jam
@@ -192,7 +193,7 @@ def test_every_route_needs_an_administrator():
         for value in vars(JamsAdminController).values()
         if hasattr(value, "fn") and hasattr(value, "guards")
     ]
-    assert len(handlers) == 15
+    assert len(handlers) == 17
     for handler in handlers:
         assert handler.guards[0] is auth_guard
         assert isinstance(handler.guards[1], Permission)
@@ -581,6 +582,292 @@ async def test_remove_entry_forgets_the_post_and_frees_the_team(db_session):
     assert discord.calls == []
     assert await teams.list_entries(db_session, jam.id) == []
     assert len(await teams.list_teams(db_session, jam.id)) == 1
+    # The record is kept, so the bot does not find the post and record it again.
+    [kept] = await teams.list_removed(db_session, jam.id)
+    assert kept.thread_id == "700"
+
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    assert "Entries (0)" in html and "Removed post" in html
+    assert f"{_JAMS_URL}/{jam.id}/entries/700/restore" in html
+    assert html.count("None yet") == 1
+
+
+async def test_restore_entry_counts_the_post_again(db_session):
+    jam = await _seed_jam(db_session)
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="9"))
+    await db_session.commit()
+    await teams.remove_entry(db_session, jam, "700")
+
+    response, flashes, _, _ = await _call(
+        "jam_entry_restore", db_session, jam_id=jam.id, thread_id="700"
+    )
+    _, again, _, _ = await _call(
+        "jam_entry_restore", db_session, jam_id=jam.id, thread_id="700"
+    )
+    _, missing, _, _ = await _call(
+        "jam_entry_restore", db_session, jam_id=uuid4(), thread_id="700"
+    )
+
+    assert _redirected(response, f"{_JAMS_URL}/{jam.id}")
+    assert "counts again" in flashes.success.call_args.args[1]
+    assert "not found" in again.error.call_args.args[1]
+    assert "not found" in missing.error.call_args.args[1]
+    assert len(await teams.list_entries(db_session, jam.id)) == 1
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+    assert "Entries (1)" in html and "Removed post" not in html
+
+
+async def test_restore_says_when_the_author_has_joined_a_team(db_session):
+    jam = await _seed_jam(db_session)
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="9"))
+    await db_session.commit()
+    await teams.remove_entry(db_session, jam, "700")
+    made = await teams.create_team(
+        db_session,
+        jam,
+        name="Elves",
+        thread_id="500",
+        user_id="9",
+        now=store.as_utc(jam.starts_at),
+    )
+    assert made.refusal is None
+
+    _, flashes, _, _ = await _call(
+        "jam_entry_restore", db_session, jam_id=jam.id, thread_id="700"
+    )
+
+    assert "joined a team" in flashes.error.call_args.args[1]
+    assert await teams.list_entries(db_session, jam.id) == []
+
+
+async def test_restore_says_when_the_author_has_left_the_team(db_session):
+    jam = await _seed_jam(db_session)
+    opened = store.as_utc(jam.starts_at)
+    await teams.create_team(
+        db_session, jam, name="Elves", thread_id="500", user_id="9", now=opened
+    )
+    await teams.add_member(
+        db_session, jam, thread_id="500", user_id="8", invited_by="9", now=opened
+    )
+    await teams.record_submission(
+        db_session, jam, thread_id="700", author_id="9", posted_at=opened
+    )
+    await teams.remove_entry(db_session, jam, "700")
+    await teams.leave_team(db_session, jam, thread_id="500", user_id="9")
+
+    _, flashes, _, _ = await _call(
+        "jam_entry_restore", db_session, jam_id=jam.id, thread_id="700"
+    )
+
+    assert "left the team" in flashes.error.call_args.args[1]
+    assert await teams.list_entries(db_session, jam.id) == []
+
+
+async def test_restore_without_a_valid_csrf_token_keeps_the_post_removed(db_session):
+    jam = await _seed_jam(db_session)
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="9"))
+    await db_session.commit()
+    await teams.remove_entry(db_session, jam, "700")
+
+    await _call(
+        "jam_entry_restore", db_session, jam_id=jam.id, thread_id="700", csrf=False
+    )
+
+    assert await teams.list_entries(db_session, jam.id) == []
+
+
+# -- results ------------------------------------------------------------------
+
+
+async def _seed_voted_jam(db_session, *, counted: bool):
+    """A jam whose voting ended an hour ago, with a team entry and two solo ones."""
+    now = datetime.now(UTC)
+    jam = await _seed_jam(
+        db_session,
+        starts_at=now - timedelta(days=40),
+        submissions_close_at=now - timedelta(days=8),
+        voting_ends_at=now - timedelta(hours=1),
+    )
+    elves = await _seed_team(db_session, jam, "500", "1", "2", name="Elves <i>")
+    db_session.add_all(
+        [
+            JamSubmission(
+                jam_id=jam.id, thread_id="700", author_id="1", team_id=elves.id
+            ),
+            JamSubmission(jam_id=jam.id, thread_id="701", author_id="8"),
+            JamSubmission(jam_id=jam.id, thread_id="702", author_id="9"),
+            JamSubmission(jam_id=jam.id, thread_id="703", author_id="9"),
+        ]
+    )
+    await db_session.commit()
+    if counted:
+        refusal = await results.save_votes(
+            db_session,
+            jam.id,
+            [
+                results.VoteCount("700", 12, 5),
+                results.VoteCount("701", 12, 9),
+                results.VoteCount("702", 3, 3),
+                results.VoteCount("703", 99, 99),
+            ],
+            [],
+        )
+        assert refusal is None
+    return jam
+
+
+def _results_panel(html: str) -> str:
+    start = html.index('<div class="sk-panel-head">Results</div>')
+    return html[start : html.index('<div class="sk-panel-head">Scheduled Messages')]
+
+
+async def test_detail_ranks_the_entries_once_votes_are_counted(db_session):
+    jam = await _seed_voted_jam(db_session, counted=True)
+
+    response, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    rows = response.context["results"]
+    # Same reactions: the entry more people reacted to is first. The extra
+    # post 703 is not ranked, whatever its count.
+    assert [
+        (row["rank"], row["thread_id"], row["reactions"], row["reactors"], row["tied"])
+        for row in rows
+    ] == [(1, "701", 12, 9, False), (2, "700", 12, 5, False), (3, "702", 3, 3, False)]
+    panel = _results_panel(html)
+    assert "<th>Reactions</th>" in panel and "<th>People who reacted</th>" in panel
+    assert panel.index("<code>701</code>") < panel.index("<code>700</code>")
+    assert "<code>703</code>" not in panel
+    assert "Elves &lt;i&gt;" in panel and "<i>" not in panel
+    assert f"https://discord.com/channels/{GUILD}/701" in panel
+    assert "Tied" not in panel.split("</table>")[0]
+    assert f'action="{_JAMS_URL}/{jam.id}/recount"' in panel
+    assert "Counted " in panel
+
+
+async def test_detail_marks_entries_level_on_both_counts_as_tied(db_session):
+    jam = await _seed_voted_jam(db_session, counted=False)
+    await results.save_votes(
+        db_session,
+        jam.id,
+        [
+            results.VoteCount("700", 4, 4),
+            results.VoteCount("701", 4, 4),
+            results.VoteCount("702", 1, 1),
+        ],
+        [],
+    )
+
+    response, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    assert [(row["rank"], row["tied"]) for row in response.context["results"]] == [
+        (1, True),
+        (1, True),
+        (3, False),
+    ]
+    assert _results_panel(html).split("</table>")[0].count("Tied") == 2
+
+
+async def test_detail_says_when_the_votes_will_be_counted(db_session):
+    jam = await _seed_jam(db_session, voting_ends_at=START + timedelta(days=40))
+    unset = await _seed_jam(
+        db_session,
+        setup=False,
+        starts_at=START + timedelta(days=365),
+        submissions_close_at=START + timedelta(days=398),
+    )
+
+    response, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+    _, _, _, unset_html = await _call("jam_detail", db_session, jam_id=unset.id)
+
+    assert response.context["results"] is None
+    panel = _results_panel(html)
+    assert "counts the votes when voting ends, 2027-01-10 00:00 UTC" in panel
+    assert "recount" not in panel and "<table" not in panel
+    assert "Voting end is not set" in _results_panel(unset_html)
+    assert "Team threads locked" in html and "Not yet" in html
+
+
+async def test_detail_says_the_count_is_under_way_after_voting_ends(db_session):
+    jam = await _seed_voted_jam(db_session, counted=False)
+
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    panel = _results_panel(html)
+    assert "The bot is counting the votes" in panel
+    assert "recount" not in panel and "<table" not in panel
+
+
+async def test_detail_says_votes_wait_for_the_team_threads(db_session):
+    now = datetime.now(UTC)
+    jam = await _seed_jam(
+        db_session,
+        starts_at=now - timedelta(days=40),
+        submissions_close_at=now - timedelta(days=2),
+        voting_ends_at=now - timedelta(hours=1),
+    )
+
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    panel = _results_panel(html)
+    assert "has not finished locking the team threads" in panel
+    assert "7 days after submissions closed" in panel
+
+    await results.mark_teams_closed(db_session, jam.id)
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    assert "The bot is counting the votes" in _results_panel(html)
+    assert "Not yet" not in html
+
+
+async def test_a_counted_jam_with_no_entries_says_so(db_session):
+    now = datetime.now(UTC)
+    jam = await _seed_jam(
+        db_session,
+        starts_at=now - timedelta(days=40),
+        submissions_close_at=now - timedelta(days=8),
+        voting_ends_at=now - timedelta(hours=1),
+    )
+    await results.save_votes(db_session, jam.id, [], [])
+
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    assert "No entries to rank." in _results_panel(html)
+
+
+async def test_recount_drops_the_counts_so_the_bot_counts_again(db_session):
+    jam = await _seed_voted_jam(db_session, counted=True)
+
+    response, flashes, discord, _ = await _call(
+        "jam_recount", db_session, jam_id=jam.id
+    )
+
+    assert _redirected(response, f"{_JAMS_URL}/{jam.id}")
+    assert "count the votes again" in flashes.success.call_args.args[1]
+    assert discord.calls == []
+    [work] = await results.list_work(db_session)
+    assert work.count_votes is True
+    rows = await teams.list_entries(db_session, jam.id)
+    assert {row.submission.reaction_count for row in rows} == {None}
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+    assert "The bot is counting the votes" in _results_panel(html)
+
+
+async def test_recount_without_a_valid_csrf_token_keeps_the_counts(db_session):
+    jam = await _seed_voted_jam(db_session, counted=True)
+
+    await _call("jam_recount", db_session, jam_id=jam.id, csrf=False)
+
+    assert await results.list_work(db_session) == []
+    [first, *_] = await results.list_results(db_session, jam.id)
+    assert (first.thread_id, first.reactions) == ("701", 12)
+
+
+async def test_recount_of_an_unknown_jam_goes_back_to_the_list(db_session):
+    response, flashes, _, _ = await _call("jam_recount", db_session, jam_id=uuid4())
+
+    assert _redirected(response, _JAMS_URL)
+    flashes.error.assert_called_once()
 
 
 async def test_remove_entry_only_reaches_the_jams_own_posts(db_session):
@@ -983,6 +1270,8 @@ _POSTS = [
     "jam_message_retry",
     "jam_message_delete",
     "jam_entry_remove",
+    "jam_entry_restore",
+    "jam_recount",
 ]
 
 
@@ -1004,7 +1293,7 @@ async def test_a_post_without_a_valid_csrf_token_changes_nothing(db_session, han
         path["jam_id"] = jam.id
     if handler in ("jam_message_edit", "jam_message_retry", "jam_message_delete"):
         path["message_id"] = message.id
-    if handler == "jam_entry_remove":
+    if handler in ("jam_entry_remove", "jam_entry_restore"):
         path["thread_id"] = "700"
     db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="1"))
     await db_session.commit()
@@ -1028,9 +1317,12 @@ async def test_a_post_without_a_valid_csrf_token_changes_nothing(db_session, han
 
 
 async def test_every_form_carries_skrifts_csrf_token(db_session):
-    jam = await _seed_jam(db_session)
+    jam = await _seed_jam(db_session, voting_ends_at=START, votes_counted_at=START)
     message = await _seed_message(db_session, jam, status="failed", error="nope")
     db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="1"))
+    db_session.add(
+        JamSubmission(jam_id=jam.id, thread_id="701", author_id="2", removed_at=START)
+    )
     await db_session.commit()
     discord = _Guild()
     discord.add_channel("old-showcase", 15)
@@ -1049,9 +1341,9 @@ async def test_every_form_carries_skrifts_csrf_token(db_session):
         assert opened, html[:300]
         assert html.count('<input type="hidden" name="_csrf" value="') == opened
         forms += opened
-    # list 1, create/edit 1, detail 6 (delete, setup, remove entry, retry,
-    # delete, new), edit 1
-    assert forms == 9
+    # list 1, create/edit 1, detail 8 (delete, setup, remove entry, restore
+    # entry, count again, retry, delete, new), edit 1
+    assert forms == 11
 
 
 # -- two requests at once -----------------------------------------------------

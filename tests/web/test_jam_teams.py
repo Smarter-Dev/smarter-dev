@@ -56,7 +56,7 @@ async def _add(db_session, jam, user_id, *, by="1", thread_id=THREAD, now=OPEN):
 
 async def _post(db_session, jam, thread_id, author_id, now=OPEN):
     return await teams.record_submission(
-        db_session, jam, thread_id=thread_id, author_id=author_id, now=now
+        db_session, jam, thread_id=thread_id, author_id=author_id, posted_at=now
     )
 
 

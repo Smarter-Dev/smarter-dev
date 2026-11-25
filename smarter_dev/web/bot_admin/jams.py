@@ -13,6 +13,7 @@ repeating-message controller, so they can be tested without a request.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from datetime import datetime
 from typing import Any
 from typing import Protocol
@@ -39,6 +40,7 @@ from smarter_dev.web.bot_admin.campaigns import parse_campaign_datetime
 from smarter_dev.web.discord_admin_client import DiscordAdminError
 from smarter_dev.web.discord_admin_client import DiscordChannel
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
+from smarter_dev.web.jams import results
 from smarter_dev.web.jams import store
 from smarter_dev.web.jams import teams
 from smarter_dev.web.jams.discord_setup import CATEGORY_NAME
@@ -618,6 +620,67 @@ class JamsAdminController(Controller):
             flash_error(request, "Entry not found.")
         return Redirect(path=_jam_path(guild_id, jam_id))
 
+    @post(
+        "/guilds/{guild_id:str}/jams/{jam_id:uuid}/entries/{thread_id:str}/restore",
+        guards=_ADMIN,
+    )
+    async def jam_entry_restore(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        guild_id: str,
+        jam_id: UUID,
+        thread_id: str,
+    ) -> Response:
+        """Count a removed showcase post again."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
+        jam = await store.get_jam(db_session, guild_id, jam_id)
+        refusal = (
+            teams.NOT_FOUND
+            if jam is None
+            else await teams.restore_entry(db_session, jam, thread_id)
+        )
+        if refusal is None:
+            flash_success(request, "Post restored. It counts again.")
+        elif refusal == teams.ON_A_TEAM:
+            flash_error(
+                request,
+                "Not restored: its author has joined a team since, and would "
+                "be entered twice.",
+            )
+        elif refusal == teams.LEFT_TEAM:
+            flash_error(
+                request,
+                "Not restored: its author has left the team it was posted "
+                "for, and could be entered twice.",
+            )
+        else:
+            flash_error(request, "Removed post not found.")
+        return Redirect(path=_jam_path(guild_id, jam_id))
+
+    @post("/guilds/{guild_id:str}/jams/{jam_id:uuid}/recount", guards=_ADMIN)
+    async def jam_recount(
+        self, request: Request, db_session: AsyncSession, guild_id: str, jam_id: UUID
+    ) -> Response:
+        """Drop the vote counts so the bot counts the reactions again."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
+        jam = await store.get_jam(db_session, guild_id, jam_id)
+        if jam is None:
+            flash_error(request, "Jam not found.")
+            return Redirect(path=f"/admin/bot/guilds/{guild_id}/jams")
+        await results.clear_votes(db_session, jam)
+        flash_success(
+            request,
+            "The bot will count the votes again. Reload this page in a few minutes.",
+        )
+        return Redirect(path=_jam_path(guild_id, jam_id))
+
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -857,6 +920,33 @@ async def render_jam_detail(
         }
         for row in await teams.list_entries(db_session, jam.id)
     ]
+    removed_rows = [
+        {
+            "thread_id": post.thread_id,
+            "author_id": post.author_id,
+            "team_name": post.team.name if post.team is not None else None,
+        }
+        for post in await teams.list_removed(db_session, jam.id)
+    ]
+    counted_at = store.as_utc(jam.votes_counted_at) if jam.votes_counted_at else None
+    result_rows = (
+        None
+        if counted_at is None
+        else [
+            {
+                "rank": row.rank,
+                "tied": row.tied,
+                "thread_id": row.thread_id,
+                "author_id": row.author_id,
+                "team_name": row.team_name,
+                "reactions": row.reactions,
+                "reactors": row.reactors,
+            }
+            for row in await results.list_results(db_session, jam.id)
+        ]
+    )
+    voting_ends_at = store.as_utc(jam.voting_ends_at) if jam.voting_ends_at else None
+    now = datetime.now(UTC)
     setup = await store.get_setup(db_session, jam.guild_id) or JamDiscordSetup(
         guild_id=jam.guild_id
     )
@@ -873,6 +963,12 @@ async def render_jam_detail(
         teams=team_rows,
         entries=entry_rows,
         entry_team_ids={row["team_id"] for row in entry_rows if row["team_id"]},
+        removed=removed_rows,
+        results=result_rows,
+        votes_counted_at=counted_at,
+        voting_ended=voting_ends_at is not None and now > voting_ends_at,
+        teams_closing=results.is_closing(jam, now),
+        close_within_days=results.CLOSE_WITHIN.days,
         messages=messages,
         stuck_ids={message.id for message in messages if store.is_stuck(message)},
         message_channels=MESSAGE_CHANNELS,

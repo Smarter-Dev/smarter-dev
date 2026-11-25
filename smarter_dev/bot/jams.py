@@ -1,18 +1,23 @@
 """What the bot does for code jams.
 
-Five jobs, all driven by what an administrator set up on the jam admin pages:
+Eight jobs, all driven by what an administrator set up on the jam admin pages:
 
 - post scheduled jam messages when they fall due;
 - tag a new post in the showcase forum with the jam's tag and its year;
 - record that post as an entry of its author's team, or of the author alone;
 - give and take the Jammer role (``/jam subscribe``, ``/jam unsubscribe``);
 - make a private team thread, add teammates up to the jam's team size and
-  let a member leave (``/jam team``, ``/jam invite``, ``/jam leave``).
+  let a member leave (``/jam team``, ``/jam invite``, ``/jam leave``);
+- look in the showcase forum for posts it missed while it was restarting;
+- when submissions close, tell each team in its thread and lock the thread;
+- when voting ends, count the reactions on every entry.
+
+The last three are :func:`run_jam_work`: the web API says what is due.
 
 Jams, teams and entries live in the web database, which also decides who may
 join or leave a team. A team's roster is its rows there, not the people in
-its Discord thread. The only state kept here is :class:`TeamLimits`, which is
-in memory and forgotten when the bot restarts.
+its Discord thread. The only state kept here is :class:`TeamLimits` and
+:class:`WorkPacer`, which are in memory and forgotten when the bot restarts.
 
 The functions take the REST client and return the text to answer with, so the
 plugin (``smarter_dev.bot.plugins.jams``) is only wiring.
@@ -23,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -73,6 +79,10 @@ TEAM_HAS_ENTRY = (
 )
 NOT_ON_A_TEAM = "You are not on a team for this jam."
 
+# How long before one step of a jam's work is tried again: the next look for
+# missed posts, or another go at a step that failed.
+WORK_EVERY_SECONDS = 10 * 60.0
+
 
 @dataclass(frozen=True)
 class JamInfo:
@@ -114,6 +124,50 @@ def _parse_guild_jam(data: dict[str, Any]) -> GuildJam:
             showcase_tag_id=jam.get("showcase_tag_id"),
             year_tag_id=jam.get("year_tag_id"),
         ),
+    )
+
+
+@dataclass(frozen=True)
+class JamWork:
+    """What the web API says is due for one jam."""
+
+    jam_id: str
+    guild_id: int
+    name: str
+    showcase_channel_id: int | None
+    tag_ids: tuple[str, ...]
+    starts_at: datetime
+    submissions_close_at: datetime
+    voting_ends_at: datetime | None
+    known_posts: frozenset[str]
+    find_missed_posts: bool
+    # (team name, team thread, its entry or None); None when not due.
+    teams_to_close: tuple[tuple[str, int, str | None], ...] | None
+    count_votes: bool
+
+
+def _parse_work(data: dict[str, Any]) -> JamWork:
+    showcase = data.get("showcase_channel_id")
+    voting_ends = data.get("voting_ends_at")
+    to_close = data.get("teams_to_close")
+    return JamWork(
+        jam_id=str(data["jam_id"]),
+        guild_id=int(data["guild_id"]),
+        name=data["name"],
+        showcase_channel_id=int(showcase) if showcase else None,
+        tag_ids=tuple(data.get("tag_ids") or ()),
+        starts_at=datetime.fromisoformat(data["starts_at"]),
+        submissions_close_at=datetime.fromisoformat(data["submissions_close_at"]),
+        voting_ends_at=datetime.fromisoformat(voting_ends) if voting_ends else None,
+        known_posts=frozenset(str(post) for post in data.get("known_posts") or ()),
+        find_missed_posts=bool(data.get("find_missed_posts")),
+        teams_to_close=None
+        if to_close is None
+        else tuple(
+            (team["name"], int(team["thread_id"]), team.get("entry_thread_id"))
+            for team in to_close
+        ),
+        count_votes=bool(data.get("count_votes")),
     )
 
 
@@ -178,13 +232,34 @@ class JamApi:
         )
 
     async def record_submission(
-        self, guild_id: int, thread_id: int, author_id: int
+        self, guild_id: int, thread_id: int, author_id: int, posted_at: datetime
     ) -> dict[str, Any]:
         return await self._team_call(
             guild_id,
             "submissions",
-            {"thread_id": str(thread_id), "author_id": str(author_id)},
+            {
+                "thread_id": str(thread_id),
+                "author_id": str(author_id),
+                "posted_at": posted_at.isoformat(),
+            },
         )
+
+    async def jam_work(self) -> list[JamWork]:
+        """Every jam with something to do now."""
+        response = await self._client.get("/jam-work")
+        return [_parse_work(item) for item in response.json().get("jams") or []]
+
+    async def teams_closed(self, jam_id: str) -> dict[str, Any]:
+        response = await self._client.post(f"/jam-work/{jam_id}/teams-closed")
+        return dict(response.json())
+
+    async def save_votes(
+        self, jam_id: str, counts: list[dict[str, Any]], gone: list[str]
+    ) -> dict[str, Any]:
+        response = await self._client.post(
+            f"/jam-work/{jam_id}/votes", json_data={"counts": counts, "gone": gone}
+        )
+        return dict(response.json())
 
     async def remove_submission(self, guild_id: int, thread_id: int) -> None:
         await self._team_call(guild_id, f"submissions/{thread_id}/remove", {})
@@ -356,6 +431,10 @@ async def tag_showcase_post(
     if info is None:
         return False
     wanted = [tag for tag in (info.jam.showcase_tag_id, info.jam.year_tag_id) if tag]
+    return await _tag_post(rest, thread, wanted)
+
+
+async def _tag_post(rest: Any, thread: Any, wanted: list[str]) -> bool:
     current = [str(tag) for tag in thread.applied_tag_ids]
     if all(tag in current for tag in wanted):
         return False
@@ -386,9 +465,13 @@ async def record_showcase_post(
     info = await _entry_jam(api, thread, now)
     if info is None:
         return False
+    return await _record_post(api, rest, thread, info.jam.name)
+
+
+async def _record_post(api: JamApi, rest: Any, thread: Any, jam_name: str) -> bool:
     author_id = int(thread.owner_id)
     result = await api.record_submission(
-        int(thread.guild_id), int(thread.id), author_id
+        int(thread.guild_id), int(thread.id), author_id, thread.created_at
     )
     if not result.get("ok") or not result.get("new"):
         return False
@@ -406,7 +489,7 @@ async def record_showcase_post(
     whose = "your team already has" if team else "you already have"
     text = (
         f"<@{author_id}>, your post <#{thread.id}> is up, but {whose} an entry "
-        f"in **{info.jam.name}**: <#{entry_id}>. Only the first post counts. "
+        f"in **{jam_name}**: <#{entry_id}>. Only the first post counts. "
         "Ask a moderator if you want to switch."
     )
     try:
@@ -446,6 +529,283 @@ async def _tell(
         )
     except hikari.HTTPError as error:
         logger.warning("could not post a jam notice in %s: %r", channel_id, error)
+
+
+# -- After the jam starts -----------------------------------------------------
+
+
+class WorkPacer:
+    """Spaces out a jam's steps: each is tried at most once per ``every``."""
+
+    def __init__(
+        self,
+        *,
+        every: float = WORK_EVERY_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._every = every
+        self._clock = clock
+        self._tried: dict[tuple[str, str], float] = {}
+
+    def due(self, step: str, jam_id: str) -> bool:
+        """Whether to try the step now. Saying yes starts its wait."""
+        now = self._clock()
+        tried = self._tried.get((step, jam_id))
+        if tried is not None and now - tried < self._every:
+            return False
+        self._tried[(step, jam_id)] = now
+        return True
+
+
+async def _plain(work: Awaitable[Any]) -> Any:
+    return await work
+
+
+def _always() -> bool:
+    return True
+
+
+async def run_jam_work(
+    api: JamApi,
+    rest: Any,
+    pacer: WorkPacer,
+    *,
+    shield: Callable[[Awaitable[Any]], Awaitable[Any]] = _plain,
+    acting: Callable[[], bool] = _always,
+) -> None:
+    """Do what the web API says is due for each jam.
+
+    ``shield`` runs one post's or one team's part to the end even if the bot
+    is shutting down. ``acting`` says whether this process is still the one
+    to do the work: it is asked before each post and each team, and the round
+    ends when it says no, because another process has taken over. Everything
+    here is safe to do again after a failure, and a jam that fails does not
+    stop the next.
+    """
+    for work in await api.jam_work():
+        if not acting():
+            return
+        try:
+            await _do_jam_work(api, rest, pacer, work, shield, acting)
+        except Exception as error:  # noqa: BLE001 - tried again on a later round
+            logger.warning("jam work failed for %s: %r", work.jam_id, error)
+
+
+async def _do_jam_work(
+    api: JamApi,
+    rest: Any,
+    pacer: WorkPacer,
+    work: JamWork,
+    shield: Any,
+    acting: Callable[[], bool],
+) -> None:
+    if work.teams_to_close is not None:
+        if pacer.due("close", work.jam_id):
+            await _close_jam(api, rest, work, shield, acting)
+    elif work.find_missed_posts and pacer.due("find", work.jam_id):
+        await find_missed_posts(api, rest, work, shield, acting)
+    if work.count_votes and pacer.due("count", work.jam_id):
+        await count_votes(api, rest, work, acting)
+
+
+async def _showcase_posts(rest: Any, work: JamWork) -> list[Any]:
+    """Every post in the showcase forum that could be from this jam."""
+    showcase_id = work.showcase_channel_id
+    posts = [
+        thread
+        for thread in await rest.fetch_active_threads(work.guild_id)
+        if thread.parent_id == showcase_id
+    ]
+    # Newest archived first. A post archived before the jam started was made
+    # before it started.
+    async for thread in rest.fetch_public_archived_threads(showcase_id):
+        if thread.archive_timestamp < work.starts_at:
+            break
+        posts.append(thread)
+    return posts
+
+
+async def find_missed_posts(
+    api: JamApi,
+    rest: Any,
+    work: JamWork,
+    shield: Any = _plain,
+    acting: Callable[[], bool] = _always,
+) -> int | None:
+    """Record showcase posts made during the jam that were never recorded.
+
+    The bot hears of a post once, as it is made. One made while the bot or
+    the web app was restarting is found here: tagged, recorded and announced
+    like any other. Returns how many were recorded, or ``None`` if the forum
+    could not be read or this process stopped acting before the end.
+    """
+    if work.showcase_channel_id is None:
+        return 0
+    try:
+        posts = await _showcase_posts(rest, work)
+    except hikari.HTTPError as error:
+        logger.warning("could not read the showcase for %s: %r", work.jam_id, error)
+        return None
+    missed = sorted(
+        (
+            post
+            for post in posts
+            if post.type == hikari.ChannelType.GUILD_PUBLIC_THREAD
+            and str(post.id) not in work.known_posts
+            and work.starts_at <= post.created_at <= work.submissions_close_at
+        ),
+        key=lambda post: int(post.id),
+    )
+    recorded = 0
+    for post in missed:
+        if not acting():
+            return None
+        # An archived post is left untagged: tagging would reopen it.
+        if work.tag_ids and not post.is_archived:
+            await _tag_post(rest, post, list(work.tag_ids))
+        if await shield(_record_post(api, rest, post, work.name)):
+            recorded += 1
+    if recorded:
+        logger.info("recorded %s missed posts for jam %s", recorded, work.jam_id)
+    return recorded
+
+
+async def _close_jam(
+    api: JamApi,
+    rest: Any,
+    work: JamWork,
+    shield: Any,
+    acting: Callable[[], bool] = _always,
+) -> None:
+    """Tell every team that submissions closed and lock its thread."""
+    if await find_missed_posts(api, rest, work, shield, acting) is None:
+        # A team is told which entry it has, so every post must be known.
+        return
+    # Asked again: a post recorded since the work was listed, here or as it
+    # was made, may be the entry of a team about to be told.
+    fresh = [item for item in await api.jam_work() if item.jam_id == work.jam_id]
+    if not fresh or fresh[0].teams_to_close is None:
+        return
+    work = fresh[0]
+    closed = []
+    for name, thread_id, entry_id in work.teams_to_close:
+        if not acting():
+            return
+        closed.append(await shield(_close_team(rest, work, name, thread_id, entry_id)))
+    if all(closed):
+        await api.teams_closed(work.jam_id)
+
+
+def _closing_notice(work: JamWork, entry_id: str | None) -> str:
+    lines = [
+        f"Submissions for **{work.name}** are closed, so this thread is now locked."
+    ]
+    if entry_id:
+        lines.append(f"Your team's entry: <#{entry_id}>")
+    else:
+        lines.append("Your team did not post an entry.")
+    showcase = (
+        f"<#{work.showcase_channel_id}>" if work.showcase_channel_id else "the showcase"
+    )
+    now = datetime.now(UTC)
+    if work.voting_ends_at is not None and work.voting_ends_at > now:
+        until = f"<t:{int(work.voting_ends_at.timestamp())}:F>"
+        lines.append(
+            f"Voting is open until {until}. React to the entries you like in "
+            f"{showcase}: every reaction on an entry's first message is a vote."
+        )
+    return "\n".join(lines)
+
+
+async def _close_team(
+    rest: Any, work: JamWork, name: str, thread_id: int, entry_id: str | None
+) -> bool:
+    """Lock one team's thread and say why; whether it needs no second try.
+
+    Locked first: a thread already locked was told on an earlier try, so the
+    notice is never posted twice.
+    """
+    try:
+        thread = await rest.fetch_channel(thread_id)
+    except hikari.NotFoundError:
+        return True
+    except hikari.HTTPError as error:
+        logger.warning("could not read team thread %s (%s): %r", thread_id, name, error)
+        return False
+    if getattr(thread, "is_locked", False):
+        return True
+    try:
+        await rest.edit_channel(
+            thread_id,
+            archived=False,
+            locked=True,
+            reason="Code jam submissions closed",
+        )
+    except hikari.NotFoundError:
+        return True
+    except hikari.HTTPError as error:
+        logger.warning("could not lock team thread %s (%s): %r", thread_id, name, error)
+        return False
+    await _tell(rest, thread_id, _closing_notice(work, entry_id))
+    return True
+
+
+async def _count_post(rest: Any, post_id: int) -> tuple[int, int] | None:
+    """The reactions on a post's first message, and how many people reacted.
+
+    ``None`` if the post is gone from Discord. A post whose first message
+    alone was deleted has no reactions.
+    """
+    try:
+        # A forum post's first message has the post's own id.
+        message = await rest.fetch_message(post_id, post_id)
+    except hikari.NotFoundError:
+        try:
+            await rest.fetch_channel(post_id)
+        except hikari.NotFoundError:
+            return None
+        return (0, 0)
+    people: set[int] = set()
+    total = 0
+    for reaction in message.reactions:
+        total += reaction.count
+        async for user in rest.fetch_reactions_for_emoji(
+            post_id, post_id, reaction.emoji
+        ):
+            people.add(int(user.id))
+    return (total, len(people))
+
+
+async def count_votes(
+    api: JamApi, rest: Any, work: JamWork, acting: Callable[[], bool] = _always
+) -> bool:
+    """Count the reactions on every recorded post and hand them to the web API.
+
+    All or nothing: if one post cannot be read, nothing is saved and the
+    whole count is tried again later, so the results never mix two moments.
+    """
+    counts: list[dict[str, Any]] = []
+    gone: list[str] = []
+    for post_id in sorted(work.known_posts):
+        if not acting():
+            return False
+        count = await _count_post(rest, int(post_id))
+        if count is None:
+            gone.append(post_id)
+        else:
+            counts.append(
+                {"thread_id": post_id, "reactions": count[0], "reactors": count[1]}
+            )
+    if not acting():
+        return False
+    result = await api.save_votes(work.jam_id, counts, gone)
+    if not result.get("ok"):
+        logger.warning(
+            "votes for jam %s were refused: %s", work.jam_id, result.get("reason")
+        )
+        return False
+    logger.info("counted votes on %s posts for jam %s", len(counts), work.jam_id)
+    return True
 
 
 # -- Jammer role --------------------------------------------------------------
