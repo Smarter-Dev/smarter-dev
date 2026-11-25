@@ -58,7 +58,11 @@ async def work_once() -> None:
     if api is None or not leadership.is_acting():
         return
     await jams.run_jam_work(
-        api, plugin.bot.rest, _pacer, shield=leadership.run_accepted
+        api,
+        plugin.bot.rest,
+        _pacer,
+        shield=leadership.run_accepted,
+        acting=leadership.is_acting,
     )
 
 

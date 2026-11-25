@@ -561,36 +561,51 @@ async def _plain(work: Awaitable[Any]) -> Any:
     return await work
 
 
+def _always() -> bool:
+    return True
+
+
 async def run_jam_work(
     api: JamApi,
     rest: Any,
     pacer: WorkPacer,
     *,
     shield: Callable[[Awaitable[Any]], Awaitable[Any]] = _plain,
+    acting: Callable[[], bool] = _always,
 ) -> None:
     """Do what the web API says is due for each jam.
 
     ``shield`` runs one post's or one team's part to the end even if the bot
-    is shutting down. Everything here is safe to do again after a failure,
-    and a jam that fails does not stop the next.
+    is shutting down. ``acting`` says whether this process is still the one
+    to do the work: it is asked before each post and each team, and the round
+    ends when it says no, because another process has taken over. Everything
+    here is safe to do again after a failure, and a jam that fails does not
+    stop the next.
     """
     for work in await api.jam_work():
+        if not acting():
+            return
         try:
-            await _do_jam_work(api, rest, pacer, work, shield)
+            await _do_jam_work(api, rest, pacer, work, shield, acting)
         except Exception as error:  # noqa: BLE001 - tried again on a later round
             logger.warning("jam work failed for %s: %r", work.jam_id, error)
 
 
 async def _do_jam_work(
-    api: JamApi, rest: Any, pacer: WorkPacer, work: JamWork, shield: Any
+    api: JamApi,
+    rest: Any,
+    pacer: WorkPacer,
+    work: JamWork,
+    shield: Any,
+    acting: Callable[[], bool],
 ) -> None:
     if work.teams_to_close is not None:
         if pacer.due("close", work.jam_id):
-            await _close_jam(api, rest, work, shield)
+            await _close_jam(api, rest, work, shield, acting)
     elif work.find_missed_posts and pacer.due("find", work.jam_id):
-        await find_missed_posts(api, rest, work, shield)
+        await find_missed_posts(api, rest, work, shield, acting)
     if work.count_votes and pacer.due("count", work.jam_id):
-        await count_votes(api, rest, work)
+        await count_votes(api, rest, work, acting)
 
 
 async def _showcase_posts(rest: Any, work: JamWork) -> list[Any]:
@@ -611,14 +626,18 @@ async def _showcase_posts(rest: Any, work: JamWork) -> list[Any]:
 
 
 async def find_missed_posts(
-    api: JamApi, rest: Any, work: JamWork, shield: Any = _plain
+    api: JamApi,
+    rest: Any,
+    work: JamWork,
+    shield: Any = _plain,
+    acting: Callable[[], bool] = _always,
 ) -> int | None:
     """Record showcase posts made during the jam that were never recorded.
 
     The bot hears of a post once, as it is made. One made while the bot or
     the web app was restarting is found here: tagged, recorded and announced
     like any other. Returns how many were recorded, or ``None`` if the forum
-    could not be read.
+    could not be read or this process stopped acting before the end.
     """
     if work.showcase_channel_id is None:
         return 0
@@ -639,6 +658,8 @@ async def find_missed_posts(
     )
     recorded = 0
     for post in missed:
+        if not acting():
+            return None
         # An archived post is left untagged: tagging would reopen it.
         if work.tag_ids and not post.is_archived:
             await _tag_post(rest, post, list(work.tag_ids))
@@ -649,22 +670,28 @@ async def find_missed_posts(
     return recorded
 
 
-async def _close_jam(api: JamApi, rest: Any, work: JamWork, shield: Any) -> None:
+async def _close_jam(
+    api: JamApi,
+    rest: Any,
+    work: JamWork,
+    shield: Any,
+    acting: Callable[[], bool] = _always,
+) -> None:
     """Tell every team that submissions closed and lock its thread."""
-    recorded = await find_missed_posts(api, rest, work, shield)
-    if recorded is None:
+    if await find_missed_posts(api, rest, work, shield, acting) is None:
         # A team is told which entry it has, so every post must be known.
         return
-    if recorded:
-        # A post just found may be the entry of a team about to be told.
-        fresh = [item for item in await api.jam_work() if item.jam_id == work.jam_id]
-        if not fresh or fresh[0].teams_to_close is None:
+    # Asked again: a post recorded since the work was listed, here or as it
+    # was made, may be the entry of a team about to be told.
+    fresh = [item for item in await api.jam_work() if item.jam_id == work.jam_id]
+    if not fresh or fresh[0].teams_to_close is None:
+        return
+    work = fresh[0]
+    closed = []
+    for name, thread_id, entry_id in work.teams_to_close:
+        if not acting():
             return
-        work = fresh[0]
-    closed = [
-        await shield(_close_team(rest, work, name, thread_id, entry_id))
-        for name, thread_id, entry_id in work.teams_to_close or ()
-    ]
+        closed.append(await shield(_close_team(rest, work, name, thread_id, entry_id)))
     if all(closed):
         await api.teams_closed(work.jam_id)
 
@@ -749,7 +776,9 @@ async def _count_post(rest: Any, post_id: int) -> tuple[int, int] | None:
     return (total, len(people))
 
 
-async def count_votes(api: JamApi, rest: Any, work: JamWork) -> bool:
+async def count_votes(
+    api: JamApi, rest: Any, work: JamWork, acting: Callable[[], bool] = _always
+) -> bool:
     """Count the reactions on every recorded post and hand them to the web API.
 
     All or nothing: if one post cannot be read, nothing is saved and the
@@ -758,6 +787,8 @@ async def count_votes(api: JamApi, rest: Any, work: JamWork) -> bool:
     counts: list[dict[str, Any]] = []
     gone: list[str] = []
     for post_id in sorted(work.known_posts):
+        if not acting():
+            return False
         count = await _count_post(rest, int(post_id))
         if count is None:
             gone.append(post_id)
@@ -765,6 +796,8 @@ async def count_votes(api: JamApi, rest: Any, work: JamWork) -> bool:
             counts.append(
                 {"thread_id": post_id, "reactions": count[0], "reactors": count[1]}
             )
+    if not acting():
+        return False
     result = await api.save_votes(work.jam_id, counts, gone)
     if not result.get("ok"):
         logger.warning(

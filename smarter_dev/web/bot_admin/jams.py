@@ -638,8 +638,19 @@ class JamsAdminController(Controller):
         ) is not None:
             return refused
         jam = await store.get_jam(db_session, guild_id, jam_id)
-        if jam is not None and await teams.restore_entry(db_session, jam, thread_id):
+        refusal = (
+            teams.NOT_FOUND
+            if jam is None
+            else await teams.restore_entry(db_session, jam, thread_id)
+        )
+        if refusal is None:
             flash_success(request, "Post restored. It counts again.")
+        elif refusal == teams.ON_A_TEAM:
+            flash_error(
+                request,
+                "Not restored: its author has joined a team since, and would "
+                "be entered twice.",
+            )
         else:
             flash_error(request, "Removed post not found.")
         return Redirect(path=_jam_path(guild_id, jam_id))

@@ -1622,6 +1622,78 @@ async def test_closing_stops_if_the_jam_is_no_longer_closing_after_a_found_post(
     assert work_reports(fake) == []
 
 
+async def test_an_entry_recorded_since_the_work_was_listed_is_still_named():
+    # The post was recorded as it was made, after this round asked for work:
+    # the forum scan finds nothing new, and the first answer is out of date.
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    api = jams.JamApi(fake)
+    asked = api.jam_work
+
+    async def ask_again():
+        answer = await asked()
+        fake.work = [closing_work(("Elves", 500, "700"), known_posts=["700"])]
+        return answer
+
+    api.jam_work = ask_again
+
+    await jams.run_jam_work(api, rest, jams.WorkPacer())
+
+    assert submissions(fake) == []
+    assert "Your team's entry: <#700>" in notices(rest)[500]
+
+
+async def test_closing_stops_between_teams_when_another_process_takes_over():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None), ("Reindeer", 501, None))]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    acting = [True]
+    rest.edit_channel.side_effect = lambda *args, **kwargs: acting.clear()
+
+    await run_work(fake, rest, acting=lambda: bool(acting))
+
+    # The team in hand is finished; the next is left to the other process.
+    assert list(notices(rest)) == [500]
+    assert work_reports(fake) == []
+
+
+async def test_finding_posts_stops_when_another_process_takes_over():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_active_threads.return_value = [
+        showcase_post(id=701, created_at=CLOSE - timedelta(minutes=2)),
+        showcase_post(id=702, created_at=CLOSE - timedelta(minutes=1)),
+    ]
+    rest.fetch_channel = AsyncMock()
+    acting = [True]
+    rest.edit_channel.side_effect = lambda *args, **kwargs: acting.clear()
+
+    await run_work(fake, rest, acting=lambda: bool(acting))
+
+    # No team is closed on a scan that was not finished.
+    assert [body["thread_id"] for body in submissions(fake)] == ["701"]
+    rest.fetch_channel.assert_not_awaited()
+    assert work_reports(fake) == []
+
+
+async def test_a_count_is_not_saved_by_a_process_that_stopped_acting():
+    fake = FakeApi()
+    fake.work = [counting_work("700", "701"), jam_work(jam_id="j2")]
+    rest = voted_rest({700: {"🎄": [1]}, 701: {"🎄": [1]}})
+    asked = []
+
+    def acting() -> bool:
+        asked.append(1)
+        return len(asked) < 4
+
+    await run_work(fake, rest, acting=acting)
+
+    assert rest.fetch_message.await_count == 2
+    assert fake.posts == []
+    rest.fetch_active_threads.assert_not_awaited()
+
+
 def reaction(emoji: str, count: int) -> SimpleNamespace:
     return SimpleNamespace(emoji=emoji, count=count)
 
@@ -1953,6 +2025,23 @@ async def test_jam_work_runs_only_when_this_process_is_acting(wired, monkeypatch
     await jams_plugin.work_once()
 
     assert [path for path, _ in wired.api.posts] == [f"{JAM_API}/submissions"]
+
+
+async def test_jam_work_ends_when_this_process_stops_acting_mid_round(
+    wired, monkeypatch
+):
+    wired.api.work = [jam_work()]
+    wired.rest.fetch_active_threads.return_value = [
+        showcase_post(id=701),
+        showcase_post(id=702),
+    ]
+    acting = [True]
+    monkeypatch.setattr(leadership, "is_acting", lambda: bool(acting))
+    wired.rest.edit_channel.side_effect = lambda *args, **kwargs: acting.clear()
+
+    await jams_plugin.work_once()
+
+    assert [body["thread_id"] for body in submissions(wired.api)] == ["701"]
 
 
 async def test_unloading_stops_both_loops(wired, monkeypatch):

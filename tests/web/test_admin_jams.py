@@ -618,6 +618,29 @@ async def test_restore_entry_counts_the_post_again(db_session):
     assert "Entries (1)" in html and "Removed post" not in html
 
 
+async def test_restore_says_when_the_author_has_joined_a_team(db_session):
+    jam = await _seed_jam(db_session)
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="9"))
+    await db_session.commit()
+    await teams.remove_entry(db_session, jam, "700")
+    made = await teams.create_team(
+        db_session,
+        jam,
+        name="Elves",
+        thread_id="500",
+        user_id="9",
+        now=store.as_utc(jam.starts_at),
+    )
+    assert made.refusal is None
+
+    _, flashes, _, _ = await _call(
+        "jam_entry_restore", db_session, jam_id=jam.id, thread_id="700"
+    )
+
+    assert "joined a team" in flashes.error.call_args.args[1]
+    assert await teams.list_entries(db_session, jam.id) == []
+
+
 async def test_restore_without_a_valid_csrf_token_keeps_the_post_removed(db_session):
     jam = await _seed_jam(db_session)
     db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="9"))

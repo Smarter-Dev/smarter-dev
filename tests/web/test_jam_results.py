@@ -324,15 +324,46 @@ async def test_a_removed_solo_post_lets_the_member_join_a_team(db_session):
     assert made.refusal is None
 
 
+async def test_a_solo_post_is_not_restored_once_its_author_is_on_a_team(db_session):
+    jam = await _jam(db_session)
+    await _post(db_session, jam, "700", "9")
+    await teams.remove_entry(db_session, jam, "700")
+    await _team(db_session, jam, "500", "9")
+
+    assert await teams.restore_entry(db_session, jam, "700") == teams.ON_A_TEAM
+
+    assert await teams.list_entries(db_session, jam.id) == []
+    assert len(await teams.list_removed(db_session, jam.id)) == 1
+
+
+async def test_a_removed_post_outlives_its_team(db_session):
+    jam = await _jam(db_session)
+    await _team(db_session, jam, "500", "9")
+    await _post(db_session, jam, "700", "9")
+    await teams.remove_entry(db_session, jam, "700")
+
+    left = await teams.leave_team(db_session, jam, thread_id="500", user_id="9")
+
+    assert left.refusal is None and left.members_left == 0
+    assert await teams.list_teams(db_session, jam.id) == []
+    # Still known, so the bot does not record it again from the forum.
+    assert (await _work(db_session, OPEN)).known_posts == ("700",)
+    assert await _post(db_session, jam, "700", "9") is None
+    # Restored, it is the author's own entry: the team is gone.
+    assert await teams.restore_entry(db_session, jam, "700") is None
+    [row] = await teams.list_entries(db_session, jam.id)
+    assert (row.submission.thread_id, row.team) == ("700", None)
+
+
 async def test_a_restored_post_counts_again(db_session):
     jam = await _jam(db_session)
     await _post(db_session, jam, "700", "9")
     await _post(db_session, jam, "701", "9")
     await teams.remove_entry(db_session, jam, "700")
 
-    assert await teams.restore_entry(db_session, jam, "700") is True
-    assert await teams.restore_entry(db_session, jam, "700") is False
-    assert await teams.restore_entry(db_session, jam, "999") is False
+    assert await teams.restore_entry(db_session, jam, "700") is None
+    assert await teams.restore_entry(db_session, jam, "700") == teams.NOT_FOUND
+    assert await teams.restore_entry(db_session, jam, "999") == teams.NOT_FOUND
 
     rows = await teams.list_entries(db_session, jam.id)
     assert [(row.submission.thread_id, row.extra_to) for row in rows] == [
@@ -354,7 +385,7 @@ async def test_removing_reaches_only_the_jams_own_posts(db_session):
     await _post(db_session, jam, "700", "9")
 
     assert await teams.remove_entry(db_session, other, "700") is False
-    assert await teams.restore_entry(db_session, other, "700") is False
+    assert await teams.restore_entry(db_session, other, "700") == teams.NOT_FOUND
 
     assert len(await teams.list_entries(db_session, jam.id)) == 1
 

@@ -32,6 +32,7 @@ from sqlalchemy import Select
 from sqlalchemy import delete
 from sqlalchemy import func
 from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -51,6 +52,7 @@ NOT_A_TEAM = "not_a_team"
 NOT_YOUR_TEAM = "not_your_team"
 TEAM_HAS_ENTRY = "team_has_entry"
 FULL = "full"
+NOT_FOUND = "not_found"
 
 
 @dataclass(frozen=True)
@@ -385,6 +387,15 @@ async def _leave_team(
         return TeamOutcome(refusal=TEAM_HAS_ENTRY, team=info, members_left=size)
     team.members.remove(member)
     if size == 1:
+        # Deleting the team deletes its posts' records. A removed post's
+        # record is kept, with no team, so the bot does not record the post
+        # again when it next looks through the forum.
+        await session.execute(
+            update(JamSubmission)
+            .where(JamSubmission.team_id == team.id)
+            .values(team_id=None)
+            .execution_options(synchronize_session=False)
+        )
         await session.delete(team)
     await session.flush()
     return TeamOutcome(team=info, members_left=size - 1)
@@ -486,29 +497,47 @@ async def remove_entry(session: AsyncSession, jam: Jam, thread_id: str) -> bool:
     The record is kept and marked: the post is still in Discord, and the bot
     would record it again if it were forgotten.
     """
-    return await _set_removed(session, jam, thread_id, removed=True)
-
-
-async def restore_entry(session: AsyncSession, jam: Jam, thread_id: str) -> bool:
-    """Count a post again that an administrator had removed."""
-    return await _set_removed(session, jam, thread_id, removed=False)
-
-
-async def _set_removed(
-    session: AsyncSession, jam: Jam, thread_id: str, *, removed: bool
-) -> bool:
     async with store.guild_lock(session, jam.guild_id):
-        result = await session.execute(
-            select(JamSubmission)
-            .where(JamSubmission.jam_id == jam.id, JamSubmission.thread_id == thread_id)
-            .execution_options(populate_existing=True)
-        )
-        submission = result.scalar_one_or_none()
-        changed = submission is not None and (submission.removed_at is None) == removed
+        submission = await _submission(session, jam, thread_id)
+        changed = submission is not None and submission.removed_at is None
         if changed:
-            submission.removed_at = datetime.now(UTC) if removed else None
+            submission.removed_at = datetime.now(UTC)
         await session.commit()
     return changed
+
+
+async def restore_entry(session: AsyncSession, jam: Jam, thread_id: str) -> str | None:
+    """Count a post again that an administrator had removed.
+
+    Returns why not, or ``None`` when it counts again. A post its author made
+    alone is not restored once the author is on a team: they would be
+    entered twice.
+    """
+    async with store.guild_lock(session, jam.guild_id):
+        submission = await _submission(session, jam, thread_id)
+        refusal = None
+        if submission is None or submission.removed_at is None:
+            refusal = NOT_FOUND
+        elif (
+            submission.team_id is None
+            and await team_of(session, jam.id, submission.author_id) is not None
+        ):
+            refusal = ON_A_TEAM
+        else:
+            submission.removed_at = None
+        await session.commit()
+    return refusal
+
+
+async def _submission(
+    session: AsyncSession, jam: Jam, thread_id: str
+) -> JamSubmission | None:
+    result = await session.execute(
+        select(JamSubmission)
+        .where(JamSubmission.jam_id == jam.id, JamSubmission.thread_id == thread_id)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
 
 
 async def _delete_submission(
