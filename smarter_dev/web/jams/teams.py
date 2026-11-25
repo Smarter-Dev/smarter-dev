@@ -53,6 +53,7 @@ NOT_YOUR_TEAM = "not_your_team"
 TEAM_HAS_ENTRY = "team_has_entry"
 FULL = "full"
 NOT_FOUND = "not_found"
+LEFT_TEAM = "left_team"
 
 
 @dataclass(frozen=True)
@@ -509,22 +510,23 @@ async def remove_entry(session: AsyncSession, jam: Jam, thread_id: str) -> bool:
 async def restore_entry(session: AsyncSession, jam: Jam, thread_id: str) -> str | None:
     """Count a post again that an administrator had removed.
 
-    Returns why not, or ``None`` when it counts again. A post its author made
-    alone is not restored once the author is on a team: they would be
-    entered twice.
+    Returns why not, or ``None`` when it counts again. A post is restored
+    only while its author is where they were when it was recorded: alone, or
+    on that team. Otherwise the author would be entered twice.
     """
     async with store.guild_lock(session, jam.guild_id):
         submission = await _submission(session, jam, thread_id)
         refusal = None
         if submission is None or submission.removed_at is None:
             refusal = NOT_FOUND
-        elif (
-            submission.team_id is None
-            and await team_of(session, jam.id, submission.author_id) is not None
-        ):
-            refusal = ON_A_TEAM
         else:
-            submission.removed_at = None
+            now_on = await team_of(session, jam.id, submission.author_id)
+            if (now_on.id if now_on else None) == submission.team_id:
+                submission.removed_at = None
+            elif submission.team_id is None:
+                refusal = ON_A_TEAM
+            else:
+                refusal = LEFT_TEAM
         await session.commit()
     return refusal
 

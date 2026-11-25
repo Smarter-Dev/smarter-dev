@@ -336,6 +336,40 @@ async def test_a_solo_post_is_not_restored_once_its_author_is_on_a_team(db_sessi
     assert len(await teams.list_removed(db_session, jam.id)) == 1
 
 
+async def test_a_team_post_is_not_restored_once_its_author_has_left_the_team(
+    db_session,
+):
+    jam = await _jam(db_session)
+    await _team(db_session, jam, "500", "9", "8")
+    await _post(db_session, jam, "700", "9")
+    await teams.remove_entry(db_session, jam, "700")
+    left = await teams.leave_team(db_session, jam, thread_id="500", user_id="9")
+    assert left.refusal is None and left.members_left == 1
+    await _post(db_session, jam, "701", "9")
+
+    assert await teams.restore_entry(db_session, jam, "700") == teams.LEFT_TEAM
+
+    rows = await teams.list_entries(db_session, jam.id)
+    assert [(row.submission.thread_id, row.team) for row in rows] == [("701", None)]
+    # The team is not locked again by a post from someone no longer on it.
+    gone = await teams.leave_team(db_session, jam, thread_id="500", user_id="8")
+    assert gone.refusal is None
+
+
+async def test_a_team_post_is_restored_while_its_author_is_still_on_the_team(
+    db_session,
+):
+    jam = await _jam(db_session)
+    await _team(db_session, jam, "500", "9", "8")
+    await _post(db_session, jam, "700", "9")
+    await teams.remove_entry(db_session, jam, "700")
+
+    assert await teams.restore_entry(db_session, jam, "700") is None
+
+    [row] = await teams.list_entries(db_session, jam.id)
+    assert (row.submission.thread_id, row.team.name) == ("700", "Elves")
+
+
 async def test_a_removed_post_outlives_its_team(db_session):
     jam = await _jam(db_session)
     await _team(db_session, jam, "500", "9")

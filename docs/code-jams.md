@@ -80,7 +80,9 @@ The jam's admin page lists the teams with their members, and every recorded
 post marked "Entry" or "Extra post". "Remove entry" stops counting a post and
 leaves it in Discord; use it when a team wants a later post to count instead.
 Removing a team's only post unlocks the team again. A removed post is listed
-under the entries with a "Restore" button, which counts it again.
+under the entries with a "Restore" button, which counts it again. A post is
+not restored if its author has since joined or left a team, because they
+would be entered twice.
 
 Only threads made by `/jam team` after this feature went live are teams. A
 team thread made before that has no team record: its members count as solo

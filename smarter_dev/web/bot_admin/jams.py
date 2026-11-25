@@ -651,6 +651,12 @@ class JamsAdminController(Controller):
                 "Not restored: its author has joined a team since, and would "
                 "be entered twice.",
             )
+        elif refusal == teams.LEFT_TEAM:
+            flash_error(
+                request,
+                "Not restored: its author has left the team it was posted "
+                "for, and could be entered twice.",
+            )
         else:
             flash_error(request, "Removed post not found.")
         return Redirect(path=_jam_path(guild_id, jam_id))
