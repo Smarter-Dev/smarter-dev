@@ -80,10 +80,11 @@ clears the stored one.
    `second_factors`; passkey sign-in needs the enrollment store.
 2. Check the matching secret keys still exist in `smarter-dev-secrets`
    (`github-client-id`/`-secret`, `google-client-id`/`-secret`) and that the
-   provider's OAuth app lists `https://smarter.dev/auth/<provider>/callback`.
-   At the admin-host cutover, add
-   `https://admin.smarter.dev/auth/<provider>/callback` first; see
-   `docs/admin-host.md`.
+   provider's OAuth app lists `https://admin.smarter.dev/auth/<provider>/callback`;
+   the Python app signs in on the admin host (`auth.redirect_base_url`), so
+   that is the callback to register. See `docs/admin-host.md`. A re-enabled
+   passkey works only from the admin host, because Skrift takes the WebAuthn
+   origin from `redirect_base_url` (the relying-party id stays `smarter.dev`).
 3. Update `tests/web/test_sign_in_methods.py` for the new set of methods.
 4. Merge and deploy as usual. `app.yaml` is an image input, so web, bot and
    the workers roll on the new tag; there is no migration.

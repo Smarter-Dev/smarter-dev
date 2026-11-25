@@ -181,8 +181,9 @@ new route return 200 instead of 401.
 ## At cutover
 
 1. Zech adds the admin callback URI to each provider OAuth app **before**
-   changing the running app. Keep the existing `smarter.dev` callbacks for
-   rollback:
+   changing the running app. The `smarter.dev` callbacks no longer matter for
+   rollback: Google no longer accepts one, so rolling this change back would
+   break Google sign-in:
 
    | Provider | Add this callback URI |
    | --- | --- |
@@ -192,8 +193,6 @@ new route return 200 instead of 401.
 
    The old `/bot-admin` Discord flow and its `DISCORD_REDIRECT_URI` setting
    were removed (nothing live read them), so no `/bot-admin` callback is needed.
-   The configmap key stays for one deploy, unused, so pods from the previous
-   rollout can still start; delete it in the follow-up change.
 2. In `app.yaml`, set `auth.redirect_base_url` to
    `https://admin.smarter.dev`; `allowed_redirect_domains` is the bare
    `smarter.dev`, which allows the apex and every subdomain (a `*.smarter.dev`
@@ -215,8 +214,9 @@ points to `admin.smarter.dev` for Python-owned bot configuration, signed
 channel-config links and chat-error links. Search links (`/s/<token>`,
 including the OpenSearch description), search previews (`/ai/search/<token>`)
 and the Polar checkout success URL (`/sudo/...`) use `SITE_BASE_URL`, because
-the Worker serves them (and redirects tokens it doesn't know to the admin
-host). Both default to `http://localhost:8000` for local
+the Worker serves them. Once the Cloudflare site serves `smarter.dev`
+(site PR 138), the Worker will redirect tokens it doesn't know to the admin
+host. Both default to `http://localhost:8000` for local
 development.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and
@@ -227,3 +227,14 @@ security link because Python serves it until cutover and the Worker afterwards.
 Email addresses ending `@smarter.dev` are contact or sender addresses and are
 unrelated to routing. Tests using a `smarter.dev` base explicitly exercise
 public URLs or URL formatting.
+
+## Rolling back
+
+The `DISCORD_REDIRECT_URI` configmap key is gone, so a plain
+`kubectl rollout undo` on the website, agent-worker or chat-child-worker lands
+on a ReplicaSet that requires it and hangs in `CreateContainerConfigError`.
+Roll back by reverting the follow-up PR and then the cutover PR (#276) in git,
+in that order, or by `kubectl set image` to the older tag on the current pod
+spec (the old code starts without the variable). Google sign-in only works on
+the admin callback, so do not roll back past this change without re-adding the
+`smarter.dev` callback there.
