@@ -1,10 +1,11 @@
 # Python app on admin.smarter.dev
 
 The Python web app, bot API and workers remain behind the `smarter-dev-website`
-service. The ingress can accept both `smarter.dev` and `admin.smarter.dev`, but
-production login and Python-owned links stay on `smarter.dev` until Zech signs
-off on the new site and the cutover task runs. Nothing about login changes
-until the **At cutover** section runs.
+service. The ingress accepts both `smarter.dev` and `admin.smarter.dev`.
+Production login (`auth.redirect_base_url`) and Python-owned links
+(`ADMIN_BASE_URL`) are on `admin.smarter.dev` as of cutover step 1 (#505), while
+`smarter.dev` still reaches the cluster. Moving `smarter.dev` itself to the
+Cloudflare Worker is a later step.
 
 ## Now
 
@@ -189,17 +190,17 @@ new route return 200 instead of 401.
    | GitHub | `https://admin.smarter.dev/auth/github/callback` |
    | Google | `https://admin.smarter.dev/auth/google/callback` |
 
-   Add `https://admin.smarter.dev/bot-admin/auth/discord/callback` to the
-   Discord app for the separate bot-admin flow too.
+   The old `/bot-admin` Discord flow and its `DISCORD_REDIRECT_URI` setting
+   were removed (nothing live read them), so no `/bot-admin` callback is needed.
 2. In `app.yaml`, set `auth.redirect_base_url` to
-   `https://admin.smarter.dev`. In `k8s/configmap.yaml`, set
-   `DISCORD_REDIRECT_URI` to
-   `https://admin.smarter.dev/bot-admin/auth/discord/callback` and
-   `ADMIN_BASE_URL` to `https://admin.smarter.dev`. Update the production
-   fallback of `effective_discord_redirect_uri` in
-   `smarter_dev/shared/config.py` to the admin host in the same change.
-   Leave `SITE_BASE_URL=https://smarter.dev` and the `.smarter.dev` session
-   cookie in place.
+   `https://admin.smarter.dev`; `allowed_redirect_domains` is the bare
+   `smarter.dev`, which allows the apex and every subdomain (a `*.smarter.dev`
+   pattern does not match the apex, so a sign-in returning to
+   `https://smarter.dev/...` would be refused). In `k8s/configmap.yaml`, set
+   `ADMIN_BASE_URL` to `https://admin.smarter.dev`.
+   Leave `SITE_BASE_URL=https://smarter.dev`, `domain: smarter.dev` (the
+   passkey relying-party id; changing it orphans enrolled passkeys) and the
+   `.smarter.dev` session cookie in place.
 3. Deploy the cutover change. Check sign-in on `admin.smarter.dev` with
    Discord, GitHub and Google. The shared cookie lets the public site and
    admin host share the login.
@@ -208,9 +209,11 @@ new route return 200 instead of 401.
 
 Production `SITE_BASE_URL` points to `smarter.dev` for public privacy, terms,
 chat-agent, signup confirmation and account billing URLs. `ADMIN_BASE_URL`
-also points to `smarter.dev` now, then changes to `admin.smarter.dev` at
-cutover for Python-owned bot configuration, search and admin links, including
-the answer view. Both default to `http://localhost:8000` for local
+points to `admin.smarter.dev` for Python-owned bot configuration, signed
+channel-config links, chat-error links, search-link (`/s/<token>`) and
+OpenSearch URLs, and the `/ai/answer/<id>` answer view. Search previews
+(`/ai/search/<token>`) and the Polar checkout success URL (`/sudo/...`) use
+`SITE_BASE_URL`, because the Worker serves them. Both default to `http://localhost:8000` for local
 development.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and

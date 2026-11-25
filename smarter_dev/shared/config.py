@@ -236,10 +236,6 @@ class Settings(BaseSettings):
         alias="discord_application_secret",
         description="Discord OAuth client secret",
     )
-    discord_redirect_uri: str | None = Field(
-        default=None,
-        description="Discord OAuth redirect URI",
-    )
 
     # Monitoring and Logging
     sentry_dsn: str | None = Field(
@@ -441,16 +437,6 @@ class Settings(BaseSettings):
         if self.is_testing and self.test_redis_url:
             return self.test_redis_url
         return self.redis_url
-
-    @property
-    def effective_discord_redirect_uri(self) -> str:
-        """Get the effective Discord OAuth redirect URI based on environment."""
-        if self.discord_redirect_uri:
-            return self.discord_redirect_uri
-
-        if self.is_development:
-            return "http://localhost:8000/bot-admin/auth/discord/callback"
-        return "https://smarter.dev/bot-admin/auth/discord/callback"
 
 
 # Global settings instance

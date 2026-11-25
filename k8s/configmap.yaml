@@ -16,9 +16,6 @@ data:
   # Skrift CMS environment
   SKRIFT_ENV: "production"
 
-  # Discord OAuth redirect URI
-  DISCORD_REDIRECT_URI: "https://smarter.dev/bot-admin/auth/discord/callback"
-  
   # Rate limiting configuration
   RATE_LIMIT_ENABLED: "true"
   RATE_LIMIT_REQUESTS: "100"
@@ -44,8 +41,8 @@ data:
   SITE_BASE_URL: "https://smarter.dev"
   # Explicit billing-only preview opt-in; does not change global/public links.
   SITE_BILLING_ALLOWED_ORIGINS: '["https://smarter.dev", "https://next.smarter.dev"]'
-  # Keep Python-owned links on the current host; flip to https://admin.smarter.dev at cutover (#123).
-  ADMIN_BASE_URL: "https://smarter.dev"
+  # Python-owned links (admin, bot config, chat errors, answer view) use the admin host.
+  ADMIN_BASE_URL: "https://admin.smarter.dev"
 
   # Internal media service (LaTeX, audio transcode, cards). ClusterIP DNS name
   # from k8s/deploy-media.yaml; no trailing slash. The matching MEDIA_API_KEY is

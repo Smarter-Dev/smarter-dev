@@ -99,11 +99,6 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-application-id
-                  - name: DISCORD_REDIRECT_URI
-                    valueFrom:
-                      configMapKeyRef:
-                        name: smarter-dev-config
-                        key: DISCORD_REDIRECT_URI
                   - name: FHI1OT
                     valueFrom:
                       secretKeyRef:

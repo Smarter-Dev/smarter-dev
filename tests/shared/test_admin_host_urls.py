@@ -23,34 +23,61 @@ def _production_settings():
         environment="production",
         site_base_url=data["SITE_BASE_URL"],
         admin_base_url=data["ADMIN_BASE_URL"],
-        discord_redirect_uri=None,
         api_secret_key="test-secret",
     )
 
 
 def test_production_url_bases_route_public_and_admin_links(monkeypatch):
     settings = _production_settings()
-    for base in (settings.site_base_url, settings.admin_base_url):
+    for base, host in (
+        (settings.site_base_url, "smarter.dev"),
+        (settings.admin_base_url, "admin.smarter.dev"),
+    ):
         parsed = urlparse(base)
         assert parsed.scheme == "https"
-        assert parsed.netloc == "smarter.dev"
+        assert parsed.netloc == host
         assert parsed.path == ""
 
     monkeypatch.setattr(privacy_notice, "get_settings", lambda: settings)
     assert privacy_notice.privacy_url() == "https://smarter.dev/privacy"
 
-    # The builder is wired to the admin setting even while production keeps
-    # both settings on the current public host until cutover.
-    cutover_settings = settings.model_copy(
-        update={"admin_base_url": "https://admin.smarter.dev"}
-    )
-    monkeypatch.setattr(config_links, "get_settings", lambda: cutover_settings)
+    monkeypatch.setattr(config_links, "get_settings", lambda: settings)
     assert config_links.build_config_link_url(
         guild_id="1", channel_id="2", discord_user_id="3"
     ).startswith("https://admin.smarter.dev/admin/bot/configure/")
-    assert settings.effective_discord_redirect_uri == (
-        "https://smarter.dev/bot-admin/auth/discord/callback"
-    )
+
+
+def test_login_callbacks_use_admin_host_and_return_to_either_host():
+    from skrift.lib.redirects import is_safe_redirect_url
+
+    repo = Path(__file__).resolve().parents[2]
+    auth = yaml.safe_load((repo / "app.yaml").read_text())["auth"]
+    assert auth["redirect_base_url"] == "https://admin.smarter.dev"
+    domains = auth["allowed_redirect_domains"]
+    for url in (
+        "https://smarter.dev/account",
+        "https://admin.smarter.dev/admin",
+        "https://next.smarter.dev/",
+    ):
+        assert is_safe_redirect_url(url, domains), url
+    assert not is_safe_redirect_url("https://evilsmarter.dev/", domains)
+
+
+def test_dead_bot_admin_redirect_setting_is_gone():
+    repo = Path(__file__).resolve().parents[2]
+    data = yaml.safe_load((repo / "k8s/configmap.yaml").read_text())["data"]
+    assert "DISCORD_REDIRECT_URI" not in data
+    assert not hasattr(Settings, "effective_discord_redirect_uri")
+
+
+async def test_search_preview_url_stays_on_public_host(monkeypatch):
+    from smarter_dev.web import search_previews
+
+    settings = _production_settings()
+    monkeypatch.setattr(search_previews, "get_settings", lambda: settings)
+    session = SimpleNamespace(add=lambda row: None, flush=AsyncMock())
+    reservation = await search_previews.create_search_preview(session, "q", token="t0k")
+    assert reservation.url == "https://smarter.dev/ai/search/t0k"
 
 
 async def test_production_confirmation_email_uses_public_host(monkeypatch):
