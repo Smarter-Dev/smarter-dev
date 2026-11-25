@@ -65,7 +65,13 @@ def test_login_callbacks_use_admin_host_and_return_to_either_host():
 
 def test_dead_bot_admin_redirect_setting_is_gone():
     repo = Path(__file__).resolve().parents[2]
-    for manifest in (repo / "k8s").glob("*.yaml"):
+    manifests = [
+        path
+        for pattern in ("*.yaml", "*.yml")
+        for path in (repo / "k8s").rglob(pattern)
+    ]
+    assert manifests
+    for manifest in manifests:
         assert "DISCORD_REDIRECT_URI" not in manifest.read_text(), manifest.name
     assert "discord_redirect_uri" not in Settings.model_fields
     assert not hasattr(Settings, "effective_discord_redirect_uri")
