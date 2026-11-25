@@ -41,6 +41,11 @@ data:
   SITE_BASE_URL: "https://smarter.dev"
   # Explicit billing-only preview opt-in; does not change global/public links.
   SITE_BILLING_ALLOWED_ORIGINS: '["https://smarter.dev", "https://next.smarter.dev"]'
+  # Unused: nothing reads DISCORD_REDIRECT_URI any more. Kept for this deploy
+  # only so pods from the previous rollout (or a rollout undo) can still start;
+  # removed in the next change.
+  DISCORD_REDIRECT_URI: "https://smarter.dev/bot-admin/auth/discord/callback"
+
   # Python-owned links (admin, bot config, chat errors, answer view) use the admin host.
   ADMIN_BASE_URL: "https://admin.smarter.dev"
 

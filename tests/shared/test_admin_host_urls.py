@@ -65,8 +65,12 @@ def test_login_callbacks_use_admin_host_and_return_to_either_host():
 
 def test_dead_bot_admin_redirect_setting_is_gone():
     repo = Path(__file__).resolve().parents[2]
-    data = yaml.safe_load((repo / "k8s/configmap.yaml").read_text())["data"]
-    assert "DISCORD_REDIRECT_URI" not in data
+    # The configmap key stays one deploy so old pods can start; nothing reads it.
+    for manifest in (repo / "k8s").glob("*.yaml"):
+        if manifest.name == "configmap.yaml":
+            continue
+        assert "DISCORD_REDIRECT_URI" not in manifest.read_text(), manifest.name
+    assert "discord_redirect_uri" not in Settings.model_fields
     assert not hasattr(Settings, "effective_discord_redirect_uri")
 
 
@@ -111,4 +115,60 @@ async def test_production_billing_portal_fallback_uses_public_host(monkeypatch):
     assert await portal.create_portal_session("customer-id") == "https://polar.test"
     assert create.await_args.kwargs["request"]["return_url"] == (
         "https://smarter.dev/account/billing"
+    )
+
+
+def test_search_link_urls_stay_on_public_host(monkeypatch):
+    from smarter_dev.web import dashboard_controller
+
+    settings = _production_settings()
+    monkeypatch.setattr(dashboard_controller, "get_settings", lambda: settings)
+    link = SimpleNamespace(token="tok", open_addresses=False)
+    state = dashboard_controller.link_state(link)
+    assert state["url"] == "https://smarter.dev/s/tok?q=%s"
+
+
+async def test_opensearch_description_stays_on_public_host(monkeypatch):
+    from smarter_dev.web import search_link_controller as slc
+
+    settings = _production_settings()
+    monkeypatch.setattr(slc, "get_settings", lambda: settings)
+    session = SimpleNamespace(
+        scalar=AsyncMock(return_value=SimpleNamespace(token="tok"))
+    )
+    response = await slc.SearchLinkController.opensearch.fn(
+        object(), session, "tok"
+    )
+    body = response.content
+    assert "https://smarter.dev/s/tok" in body
+    assert "admin.smarter.dev" not in body
+
+
+async def test_checkout_success_url_stays_on_public_host(monkeypatch):
+    from smarter_dev.web import controllers
+
+    settings = _production_settings()
+    monkeypatch.setattr(controllers, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        controllers.flags_service, "is_enabled", AsyncMock(return_value=True)
+    )
+    create = AsyncMock(return_value="https://polar.test/checkout")
+    monkeypatch.setattr(controllers, "create_checkout_session", create)
+
+    class _Request:
+        session = {"user_id": "u1"}
+
+        async def form(self):
+            return {"role": "hacker"}
+
+    session = SimpleNamespace(
+        execute=AsyncMock(
+            return_value=SimpleNamespace(
+                scalar_one_or_none=lambda: SimpleNamespace(id="u1")
+            )
+        )
+    )
+    await controllers.SudoController.checkout.fn(object(), _Request(), session)
+    assert create.await_args.kwargs["success_url"] == (
+        "https://smarter.dev/sudo/checkout/success"
     )

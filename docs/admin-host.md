@@ -192,6 +192,8 @@ new route return 200 instead of 401.
 
    The old `/bot-admin` Discord flow and its `DISCORD_REDIRECT_URI` setting
    were removed (nothing live read them), so no `/bot-admin` callback is needed.
+   The configmap key stays for one deploy, unused, so pods from the previous
+   rollout can still start; delete it in the follow-up change.
 2. In `app.yaml`, set `auth.redirect_base_url` to
    `https://admin.smarter.dev`; `allowed_redirect_domains` is the bare
    `smarter.dev`, which allows the apex and every subdomain (a `*.smarter.dev`
@@ -210,10 +212,11 @@ new route return 200 instead of 401.
 Production `SITE_BASE_URL` points to `smarter.dev` for public privacy, terms,
 chat-agent, signup confirmation and account billing URLs. `ADMIN_BASE_URL`
 points to `admin.smarter.dev` for Python-owned bot configuration, signed
-channel-config links, chat-error links, search-link (`/s/<token>`) and
-OpenSearch URLs, and the `/ai/answer/<id>` answer view. Search previews
-(`/ai/search/<token>`) and the Polar checkout success URL (`/sudo/...`) use
-`SITE_BASE_URL`, because the Worker serves them. Both default to `http://localhost:8000` for local
+channel-config links and chat-error links. Search links (`/s/<token>`,
+including the OpenSearch description), search previews (`/ai/search/<token>`)
+and the Polar checkout success URL (`/sudo/...`) use `SITE_BASE_URL`, because
+the Worker serves them (and redirects tokens it doesn't know to the admin
+host). Both default to `http://localhost:8000` for local
 development.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and
