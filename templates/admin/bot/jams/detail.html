@@ -71,6 +71,78 @@
             </div>
         </div>
 
+        {% set discord_url = "https://discord.com/channels/" ~ guild.id ~ "/" %}
+        <div class="sk-panel">
+            <div class="sk-panel-head">Teams ({{ teams|length }})</div>
+            <div class="sk-panel-body">
+                {% if teams %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Team</th>
+                            <th>Members</th>
+                            <th>Entry</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for team in teams %}
+                        <tr>
+                            <td><a href="{{ discord_url }}{{ team.thread_id }}" target="_blank" rel="noopener">{{ team.name }}</a></td>
+                            <td>{% for member_id in team.member_ids %}<code>{{ member_id }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+                            <td>{% if team.id in entry_team_ids %}<span class="sk-pill sk-pill-published">Posted</span>{% else %}<span class="sk-pill sk-pill-draft">None yet</span>{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <small class="sk-text-muted">Members are Discord user ids. A team with an entry can no longer change.</small>
+                {% else %}
+                <p class="sk-no-items">No teams yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Entries ({{ entries|selectattr("extra_to", "none")|list|length }})</div>
+            <div class="sk-panel-body">
+                {% if entries %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Post</th>
+                            <th>From</th>
+                            <th>Status</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in entries %}
+                        <tr>
+                            <td><a href="{{ discord_url }}{{ row.thread_id }}" target="_blank" rel="noopener"><code>{{ row.thread_id }}</code></a></td>
+                            <td>{% if row.team_name %}{{ row.team_name }}{% else %}Solo{% endif %}<div class="sk-text-muted" style="font-size:0.85rem;">posted by <code>{{ row.author_id }}</code></div></td>
+                            <td>
+                                {% if row.extra_to %}
+                                <span class="sk-pill sk-pill-draft">Extra post</span>
+                                <div class="sk-text-muted" style="font-size:0.85rem;">Does not count. The entry is <code>{{ row.extra_to }}</code>.</div>
+                                {% else %}
+                                <span class="sk-pill sk-pill-published">Entry</span>
+                                {% endif %}
+                            </td>
+                            <td style="white-space:nowrap;">
+                                <form method="post" action="{{ jam_url }}/entries/{{ row.thread_id }}/remove" style="display:inline;" onsubmit="return confirm('Stop counting this post as an entry? The post stays in Discord. If the same team or member has a later post, that one becomes the entry.')">
+{{ csrf_field() }}
+                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Remove entry</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No entries yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
         <div class="sk-panel">
             <div class="sk-panel-head">Scheduled Messages ({{ messages|length }})</div>
             <div class="sk-panel-body">

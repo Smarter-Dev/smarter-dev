@@ -40,6 +40,7 @@ from smarter_dev.web.discord_admin_client import DiscordAdminError
 from smarter_dev.web.discord_admin_client import DiscordChannel
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
 from smarter_dev.web.jams import store
+from smarter_dev.web.jams import teams
 from smarter_dev.web.jams.discord_setup import CATEGORY_NAME
 from smarter_dev.web.jams.discord_setup import CHANNEL_NAMES
 from smarter_dev.web.jams.discord_setup import DISCORD_ERRORS
@@ -591,6 +592,32 @@ class JamsAdminController(Controller):
             flash_success(request, "Message deleted.")
         return Redirect(path=_jam_path(guild_id, jam_id))
 
+    @post(
+        "/guilds/{guild_id:str}/jams/{jam_id:uuid}/entries/{thread_id:str}/remove",
+        guards=_ADMIN,
+    )
+    async def jam_entry_remove(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        guild_id: str,
+        jam_id: UUID,
+        thread_id: str,
+    ) -> Response:
+        """Stop counting a showcase post as an entry. The post stays in Discord."""
+        if (
+            refused := await csrf_refusal(request, _jam_path(guild_id, jam_id))
+        ) is not None:
+            return refused
+        jam = await store.get_jam(db_session, guild_id, jam_id)
+        if jam is not None and await teams.remove_entry(db_session, jam, thread_id):
+            flash_success(
+                request, "Entry removed. The post itself is still in Discord."
+            )
+        else:
+            flash_error(request, "Entry not found.")
+        return Redirect(path=_jam_path(guild_id, jam_id))
+
 
 # -- Helpers ------------------------------------------------------------------
 
@@ -808,6 +835,28 @@ async def render_jam_detail(
 ) -> TemplateResponse:
     """Render a jam's page, optionally with a rejected new-message form."""
     messages = await store.list_messages(db_session, jam.id)
+    # Plain values, read as each query returns: the entries query reloads the
+    # team rows, and a template must never touch an attribute that needs a
+    # database read.
+    team_rows = [
+        {
+            "id": team.id,
+            "name": team.name,
+            "thread_id": team.thread_id,
+            "member_ids": sorted(member.user_id for member in team.members),
+        }
+        for team in await teams.list_teams(db_session, jam.id)
+    ]
+    entry_rows = [
+        {
+            "thread_id": row.submission.thread_id,
+            "author_id": row.submission.author_id,
+            "team_id": row.team.id if row.team is not None else None,
+            "team_name": row.team.name if row.team is not None else None,
+            "extra_to": row.extra_to,
+        }
+        for row in await teams.list_entries(db_session, jam.id)
+    ]
     setup = await store.get_setup(db_session, jam.guild_id) or JamDiscordSetup(
         guild_id=jam.guild_id
     )
@@ -821,6 +870,9 @@ async def render_jam_detail(
         jam=jam,
         discord_parts=discord_parts(setup, jam),
         setup_finished=not setup.missing_parts and not jam.missing_tags,
+        teams=team_rows,
+        entries=entry_rows,
+        entry_team_ids={row["team_id"] for row in entry_rows if row["team_id"]},
         messages=messages,
         stuck_ids={message.id for message in messages if store.is_stuck(message)},
         message_channels=MESSAGE_CHANNELS,

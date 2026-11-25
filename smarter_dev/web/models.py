@@ -15,6 +15,7 @@ from sqlalchemy import Boolean
 from sqlalchemy import DateTime, Date
 from sqlalchemy import Float
 from sqlalchemy import ForeignKey
+from sqlalchemy import ForeignKeyConstraint
 from sqlalchemy import Index, UniqueConstraint, CheckConstraint
 from sqlalchemy import Integer
 from sqlalchemy import JSON
@@ -6703,3 +6704,103 @@ class JamMessage(Base):
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
 
     jam: Mapped["Jam"] = relationship(back_populates="messages")
+
+
+class JamTeam(Base):
+    """A team in one jam, and its private thread in the jam chat channel.
+
+    A team belongs to the jam it was made in. Its members are
+    :class:`JamTeamMember` rows; the people Discord shows in the thread are
+    not the roster (a moderator can add anyone to a thread).
+    """
+
+    __tablename__ = "jam_teams"
+    __table_args__ = (
+        Index("ix_jam_teams_jam_id", "jam_id"),
+        UniqueConstraint("thread_id", name="uq_jam_teams_thread_id"),
+        # The target of the member rows' two-column key, which keeps a
+        # member's jam the same as their team's.
+        UniqueConstraint("id", "jam_id", name="uq_jam_teams_id_jam_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    jam_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("jams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    thread_id: Mapped[str] = mapped_column(String(22), nullable=False)
+    # The Discord id of the member who made the team.
+    created_by: Mapped[str] = mapped_column(String(22), nullable=False)
+
+    members: Mapped[list["JamTeamMember"]] = relationship(
+        back_populates="team", cascade="all, delete-orphan", passive_deletes=True
+    )
+
+
+class JamTeamMember(Base):
+    """One member of one team.
+
+    ``jam_id`` repeats the team's jam so the database can hold a member to one
+    team per jam: the pair (jam, member) is unique.
+    """
+
+    __tablename__ = "jam_team_members"
+    __table_args__ = (
+        Index("ix_jam_team_members_team_id", "team_id"),
+        UniqueConstraint(
+            "jam_id", "user_id", name="uq_jam_team_members_jam_id_user_id"
+        ),
+        ForeignKeyConstraint(
+            ["team_id", "jam_id"],
+            ["jam_teams.id", "jam_teams.jam_id"],
+            name="fk_jam_team_members_team_id_jam_id_jam_teams",
+            ondelete="CASCADE",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    team_id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), nullable=False)
+    jam_id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), nullable=False)
+    user_id: Mapped[str] = mapped_column(String(22), nullable=False)
+
+    team: Mapped["JamTeam"] = relationship(back_populates="members")
+
+
+class JamSubmission(Base):
+    """A post in the showcase forum made while a jam took submissions.
+
+    ``team_id`` is the author's team when they posted, or ``None`` for a
+    member working alone. Every post is kept. A team or a solo member has one
+    entry, their earliest post; later ones are shown to the admin as extra.
+    """
+
+    __tablename__ = "jam_submissions"
+    __table_args__ = (
+        Index("ix_jam_submissions_jam_id", "jam_id"),
+        UniqueConstraint("thread_id", name="uq_jam_submissions_thread_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    jam_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("jams.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # The showcase post; a forum post is a thread.
+    thread_id: Mapped[str] = mapped_column(String(22), nullable=False)
+    author_id: Mapped[str] = mapped_column(String(22), nullable=False)
+    team_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("jam_teams.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+
+    team: Mapped["JamTeam | None"] = relationship()

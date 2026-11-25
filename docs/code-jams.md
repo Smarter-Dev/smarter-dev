@@ -34,7 +34,8 @@ The bot needs these permissions:
 - Manage Channels and Manage Roles, for setup and for giving the role;
 - Create Private Threads, for team threads;
 - Manage Threads, to put the jam's tags on members' showcase posts (the tags
-  are moderator-only) and to remove a team thread that could not be finished;
+  are moderator-only), to remove a team thread that could not be finished,
+  and to lock a team thread once its last member has left;
 - Mention @everyone, @here and All Roles, to ping the `Jammer` role, which
   members cannot mention themselves.
 
@@ -49,6 +50,37 @@ One jam is open at a time, and the next jam reuses the same channels and role.
 - `/jam team <name>` makes a private team thread under `#jam-chat`.
 - `/jam invite <user>`, used inside a team thread, adds a teammate up to the
   jam's team size.
+- `/jam leave` takes the member off their team.
+
+## Teams and entries
+
+A member is on one team per jam. `/jam team` and `/jam invite` refuse a member
+who is already on a team, until they use `/jam leave`. They also refuse a
+member who has already entered on their own. Teams can be made and changed
+only while the jam is open.
+When the last member leaves, the team is removed and its thread is locked and
+archived.
+
+A post in the showcase forum, made while the jam is taking submissions, is an
+entry. The bot tags it and records it for the author's team, or for the author
+alone if they have no team. Each team, and each solo member, has one entry:
+the first post. A later post stays up but does not count, and the bot says
+which post does: in the team's thread, or by DM to a solo member.
+
+Once a team has an entry its members are fixed: `/jam invite` and `/jam leave`
+stop working for it. The bot says so in the team thread when the entry lands.
+
+Deleting a showcase post in Discord removes its record. If the team has a
+later post, that one becomes the entry.
+
+The jam's admin page lists the teams with their members, and every recorded
+post marked "Entry" or "Extra post". "Remove entry" stops counting a post and
+leaves it in Discord; use it when a team wants a later post to count instead.
+Removing a team's only post unlocks the team again.
+
+Only threads made by `/jam team` after this feature went live are teams. A
+team thread made before that has no team record: its members count as solo
+until they run `/jam team` again.
 
 ## Team threads are private: keep handlers off `#jam-chat`
 

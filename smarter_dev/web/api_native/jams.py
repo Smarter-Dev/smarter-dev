@@ -1,8 +1,10 @@
 """Bot API for code jams.
 
 ``GET /api/guilds/{guild_id}/jam`` tells the bot which jam is on and where its
-channels are.
-
+channels are. The routes under it keep the jam's teams and showcase entries;
+the rules are in :mod:`smarter_dev.web.jams.teams`. A team change the rules
+refuse is still a 200: the body says ``"ok": false`` and why, because the
+bot's API client treats every 4xx as a failure and reads no body from it.
 
 The bot polls ``POST /api/jam-messages/claim`` and posts what it gets back,
 then reports each message with ``mark-sent`` or ``mark-failed``. Claiming
@@ -31,6 +33,7 @@ from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.jams import store
+from smarter_dev.web.jams import teams
 from smarter_dev.web.models import JAM_CHANNEL_COLUMNS
 
 # Declared per route, like the other bot API controllers: Skrift's auth guard
@@ -42,6 +45,63 @@ class MarkJamMessageFailedRequest(BaseModel):
     """Why the bot could not post a claimed message."""
 
     error: str = Field(min_length=1, max_length=2000)
+
+
+# A Discord id: digits only.
+_DISCORD_ID = r"^[0-9]{1,22}$"
+
+NO_JAM = "no_jam"
+
+
+class CreateJamTeamRequest(BaseModel):
+    """A team thread the bot just made, and the member who asked for it."""
+
+    name: str = Field(min_length=1, max_length=100)
+    thread_id: str = Field(pattern=_DISCORD_ID)
+    user_id: str = Field(pattern=_DISCORD_ID)
+
+
+class AddJamTeamMemberRequest(BaseModel):
+    """Who to add to a team, and the team member adding them."""
+
+    user_id: str = Field(pattern=_DISCORD_ID)
+    invited_by: str = Field(pattern=_DISCORD_ID)
+
+
+class LeaveJamTeamRequest(BaseModel):
+    """The member leaving a team."""
+
+    user_id: str = Field(pattern=_DISCORD_ID)
+
+
+class RecordJamSubmissionRequest(BaseModel):
+    """A new post in the showcase forum."""
+
+    thread_id: str = Field(pattern=_DISCORD_ID)
+    author_id: str = Field(pattern=_DISCORD_ID)
+
+
+def _team_json(team: teams.TeamInfo | None) -> dict[str, Any] | None:
+    if team is None:
+        return None
+    return {
+        "name": team.name,
+        "thread_id": team.thread_id,
+        "member_ids": list(team.member_ids),
+    }
+
+
+def _team_outcome_json(outcome: teams.TeamOutcome) -> dict[str, Any]:
+    return {
+        "ok": outcome.refusal is None,
+        "reason": outcome.refusal,
+        "team": _team_json(outcome.team),
+        "already": outcome.already,
+        "members_left": outcome.members_left,
+    }
+
+
+_NO_JAM_BODY: dict[str, Any] = {"ok": False, "reason": NO_JAM, "team": None}
 
 
 def _parse_message_id(value: str) -> UUID:
@@ -140,3 +200,128 @@ class GuildJamController(Controller):
                 "year_tag_id": jam.year_tag_id,
             },
         }
+
+    @get("/members/{user_id:str}", guards=BOT_API_GUARDS)
+    async def get_jam_member(
+        self, db_session: AsyncSession, guild_id: str, user_id: str
+    ) -> dict[str, Any]:
+        """The member's team in the current jam, and whether they may join one.
+
+        ``reason`` is why they cannot make or join a team now; ``None`` if
+        they can.
+        """
+        jam = await store.current_jam(db_session, guild_id)
+        if jam is None:
+            return dict(_NO_JAM_BODY)
+        refused = await teams.cannot_join(db_session, jam, user_id)
+        team = await teams.team_of(db_session, jam.id, user_id)
+        return {
+            "ok": refused is None,
+            "reason": refused.refusal if refused else None,
+            "team": _team_json(teams.team_info(team)),
+        }
+
+    @post("/teams", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def create_jam_team(
+        self, db_session: AsyncSession, guild_id: str, data: CreateJamTeamRequest
+    ) -> dict[str, Any]:
+        """Record a team for the thread the bot made."""
+        jam = await store.current_jam(db_session, guild_id)
+        if jam is None:
+            return dict(_NO_JAM_BODY)
+        outcome = await teams.create_team(
+            db_session,
+            jam,
+            name=data.name,
+            thread_id=data.thread_id,
+            user_id=data.user_id,
+        )
+        return _team_outcome_json(outcome)
+
+    @post(
+        "/teams/{thread_id:str}/members",
+        status_code=HTTP_200_OK,
+        guards=BOT_API_GUARDS,
+    )
+    async def add_jam_team_member(
+        self,
+        db_session: AsyncSession,
+        guild_id: str,
+        thread_id: str,
+        data: AddJamTeamMemberRequest,
+    ) -> dict[str, Any]:
+        """Add a member to the team whose thread this is."""
+        jam = await store.current_jam(db_session, guild_id)
+        if jam is None:
+            return dict(_NO_JAM_BODY)
+        outcome = await teams.add_member(
+            db_session,
+            jam,
+            thread_id=thread_id,
+            user_id=data.user_id,
+            invited_by=data.invited_by,
+        )
+        return _team_outcome_json(outcome)
+
+    @post(
+        "/teams/{thread_id:str}/leave",
+        status_code=HTTP_200_OK,
+        guards=BOT_API_GUARDS,
+    )
+    async def leave_jam_team(
+        self,
+        db_session: AsyncSession,
+        guild_id: str,
+        thread_id: str,
+        data: LeaveJamTeamRequest,
+    ) -> dict[str, Any]:
+        """Take a member off the team whose thread this is."""
+        jam = await store.current_jam(db_session, guild_id)
+        if jam is None:
+            return dict(_NO_JAM_BODY)
+        outcome = await teams.leave_team(
+            db_session, jam, thread_id=thread_id, user_id=data.user_id
+        )
+        return _team_outcome_json(outcome)
+
+    @post("/submissions", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def record_jam_submission(
+        self,
+        db_session: AsyncSession,
+        guild_id: str,
+        data: RecordJamSubmissionRequest,
+    ) -> dict[str, Any]:
+        """Record a showcase post against its author's team.
+
+        ``entry_thread_id`` is the post that counts for that team or solo
+        member. ``new`` is false when this post was recorded before.
+        """
+        jam = await store.current_jam(db_session, guild_id)
+        outcome = (
+            None
+            if jam is None
+            else await teams.record_submission(
+                db_session, jam, thread_id=data.thread_id, author_id=data.author_id
+            )
+        )
+        if outcome is None:
+            return dict(_NO_JAM_BODY)
+        return {
+            "ok": True,
+            "reason": None,
+            "team": _team_json(outcome.team),
+            "entry_thread_id": outcome.entry_thread_id,
+            "new": outcome.new,
+        }
+
+    @post(
+        "/submissions/{thread_id:str}/remove",
+        status_code=HTTP_200_OK,
+        guards=BOT_API_GUARDS,
+    )
+    async def remove_jam_submission(
+        self, db_session: AsyncSession, guild_id: str, thread_id: str
+    ) -> dict[str, bool]:
+        """Forget a showcase post that was deleted in Discord."""
+        removed = await teams.remove_submission(db_session, guild_id, thread_id)
+        return {"removed": removed}

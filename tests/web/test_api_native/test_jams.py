@@ -1,4 +1,4 @@
-"""Tests for the bot API that claims and reports scheduled jam messages."""
+"""Tests for the bot API for code jams: messages, teams and entries."""
 
 from __future__ import annotations
 
@@ -62,7 +62,24 @@ def test_every_route_carries_the_bot_api_guards():
         "mark_jam_message_failed",
     ):
         assert getattr(JamMessageController, name).guards is guards
-    assert GuildJamController.get_guild_jam.guards is guards
+    for name in (
+        "get_guild_jam",
+        "get_jam_member",
+        "create_jam_team",
+        "add_jam_team_member",
+        "leave_jam_team",
+        "record_jam_submission",
+        "remove_jam_submission",
+    ):
+        assert getattr(GuildJamController, name).guards is guards
+    routes = [
+        value
+        for controller in (JamMessageController, GuildJamController)
+        for value in vars(controller).values()
+        if hasattr(value, "fn")
+    ]
+    assert len(routes) == 10
+    assert all(route.guards is guards for route in routes)
 
 
 async def test_claim_hands_each_message_out_once(client, db_session):
@@ -199,3 +216,170 @@ async def test_guild_jam_keeps_the_channels_between_jams(client, db_session):
     assert body["jam"] is None
     assert body["role_id"] == "20"
     assert body["channels"]["chat"] == "12"
+
+
+# -- teams and entries --------------------------------------------------------
+
+JAM = f"/api/guilds/{GUILD}/jam"
+
+
+async def _open_jam(db_session, **overrides):
+    now = datetime.now(UTC)
+    values = {
+        "starts_at": now - timedelta(days=1),
+        "submissions_close_at": now + timedelta(days=30),
+    }
+    values.update(overrides)
+    jam = make_jam(**values)
+    db_session.add_all([jam, make_setup()])
+    await db_session.commit()
+    return jam
+
+
+def _make_team(client, thread_id="500", user_id="1", name="Elves") -> dict:
+    response = client.post(
+        f"{JAM}/teams", json={"name": name, "thread_id": thread_id, "user_id": user_id}
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _invite(client, user_id, by="1", thread_id="500") -> dict:
+    response = client.post(
+        f"{JAM}/teams/{thread_id}/members",
+        json={"user_id": user_id, "invited_by": by},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def _post_entry(client, thread_id, author_id) -> dict:
+    response = client.post(
+        f"{JAM}/submissions", json={"thread_id": thread_id, "author_id": author_id}
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+async def test_a_team_is_made_joined_and_left(client, db_session):
+    await _open_jam(db_session)
+
+    made = _make_team(client)
+    added = _invite(client, "2")
+    member = client.get(f"{JAM}/members/2").json()
+    left = client.post(f"{JAM}/teams/500/leave", json={"user_id": "2"}).json()
+
+    assert made == {
+        "ok": True,
+        "reason": None,
+        "team": {"name": "Elves", "thread_id": "500", "member_ids": ["1"]},
+        "already": False,
+        "members_left": 0,
+    }
+    assert added["ok"] is True and added["already"] is False
+    assert member == {
+        "ok": False,
+        "reason": "on_a_team",
+        "team": {"name": "Elves", "thread_id": "500", "member_ids": ["1", "2"]},
+    }
+    assert left["ok"] is True and left["members_left"] == 1
+    assert client.get(f"{JAM}/members/2").json() == {
+        "ok": True,
+        "reason": None,
+        "team": None,
+    }
+
+
+async def test_a_refused_team_change_is_a_200_that_says_why(client, db_session):
+    """The bot's API client raises on any 4xx and reads no body from it."""
+    await _open_jam(db_session, max_team_size=2)
+    _make_team(client)
+    _make_team(client, thread_id="501", user_id="3")
+
+    assert _make_team(client, thread_id="502")["reason"] == "on_a_team"
+    assert _invite(client, "3")["reason"] == "on_a_team"
+    assert _invite(client, "4", by="9")["reason"] == "not_your_team"
+    assert _invite(client, "4", thread_id="999")["reason"] == "not_a_team"
+    assert _invite(client, "2")["ok"] is True
+    assert _invite(client, "4")["reason"] == "full"
+
+
+async def test_no_team_before_the_jam_starts(client, db_session):
+    now = datetime.now(UTC)
+    await _open_jam(db_session, starts_at=now + timedelta(days=7))
+
+    assert client.get(f"{JAM}/members/1").json()["reason"] == "not_open"
+    assert _make_team(client)["reason"] == "not_open"
+    assert _post_entry(client, "700", "1")["reason"] == "no_jam"
+
+
+async def test_team_routes_say_no_jam_between_jams(client, db_session):
+    now = datetime.now(UTC)
+    await _open_jam(
+        db_session,
+        starts_at=now - timedelta(days=40),
+        submissions_close_at=now - timedelta(days=1),
+    )
+    no_jam = {"ok": False, "reason": "no_jam", "team": None}
+
+    assert client.get(f"{JAM}/members/1").json() == no_jam
+    assert _make_team(client) == no_jam
+    assert _invite(client, "2") == no_jam
+    assert client.post(f"{JAM}/teams/500/leave", json={"user_id": "1"}).json() == no_jam
+    assert _post_entry(client, "700", "1") == no_jam
+
+
+async def test_a_showcase_post_is_recorded_against_the_team(client, db_session):
+    await _open_jam(db_session)
+    _make_team(client)
+    _invite(client, "2")
+
+    first = _post_entry(client, "700", "2")
+    second = _post_entry(client, "701", "1")
+    again = _post_entry(client, "701", "1")
+    solo = _post_entry(client, "702", "9")
+
+    assert first == {
+        "ok": True,
+        "reason": None,
+        "team": {"name": "Elves", "thread_id": "500", "member_ids": ["1", "2"]},
+        "entry_thread_id": "700",
+        "new": True,
+    }
+    assert (second["entry_thread_id"], second["new"]) == ("700", True)
+    assert (again["entry_thread_id"], again["new"]) == ("700", False)
+    assert solo["team"] is None and solo["entry_thread_id"] == "702"
+    assert _invite(client, "3")["reason"] == "team_has_entry"
+    left = client.post(f"{JAM}/teams/500/leave", json={"user_id": "2"}).json()
+    assert left["reason"] == "team_has_entry"
+    assert _make_team(client, thread_id="501", user_id="9")["reason"] == "has_entry"
+
+
+async def test_a_deleted_post_is_forgotten(client, db_session):
+    await _open_jam(db_session)
+    _make_team(client)
+    _post_entry(client, "700", "1")
+
+    removed = client.post(f"{JAM}/submissions/700/remove").json()
+    again = client.post(f"{JAM}/submissions/700/remove").json()
+
+    assert (removed, again) == ({"removed": True}, {"removed": False})
+    assert client.post(f"{JAM}/teams/500/leave", json={"user_id": "1"}).json()["ok"]
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        ("teams", {"name": "", "thread_id": "500", "user_id": "1"}),
+        ("teams", {"name": "x" * 101, "thread_id": "500", "user_id": "1"}),
+        ("teams", {"name": "Elves", "thread_id": "abc", "user_id": "1"}),
+        ("teams", {"name": "Elves", "thread_id": "500", "user_id": "1 OR 1"}),
+        ("teams/500/members", {"user_id": "2"}),
+        ("teams/500/leave", {}),
+        ("submissions", {"thread_id": "700", "author_id": ""}),
+    ],
+)
+async def test_malformed_team_requests_are_rejected(client, db_session, path, body):
+    await _open_jam(db_session)
+
+    assert client.post(f"{JAM}/{path}", json=body).status_code == 422

@@ -31,8 +31,12 @@ from smarter_dev.web.bot_admin.jams import validate_jam_form
 from smarter_dev.web.bot_admin.jams import validate_jam_message_form
 from smarter_dev.web.discord_admin_client import DiscordGuildDetail
 from smarter_dev.web.jams import store
+from smarter_dev.web.jams import teams
 from smarter_dev.web.models import Jam
 from smarter_dev.web.models import JamMessage
+from smarter_dev.web.models import JamSubmission
+from smarter_dev.web.models import JamTeam
+from smarter_dev.web.models import JamTeamMember
 from tests.web.jam_helpers import GUILD
 from tests.web.jam_helpers import START
 from tests.web.jam_helpers import FakeDiscord
@@ -188,7 +192,7 @@ def test_every_route_needs_an_administrator():
         for value in vars(JamsAdminController).values()
         if hasattr(value, "fn") and hasattr(value, "guards")
     ]
-    assert len(handlers) == 14
+    assert len(handlers) == 15
     for handler in handlers:
         assert handler.guards[0] is auth_guard
         assert isinstance(handler.guards[1], Permission)
@@ -506,6 +510,100 @@ async def test_detail_shows_setup_and_messages(db_session):
     assert "“Holiday Jam” showcase tag" in html and "“2026” showcase tag" in html
     assert "#jam-news" in html and "pings @Jammer" in html
     assert "The jam is open!" in html
+
+
+async def _seed_team(db_session, jam: Jam, thread_id: str, *members: str, name: str):
+    team = JamTeam(jam_id=jam.id, name=name, thread_id=thread_id, created_by="1")
+    for member in members:
+        team.members.append(JamTeamMember(jam_id=jam.id, user_id=member))
+    db_session.add(team)
+    await db_session.commit()
+    return team
+
+
+async def test_detail_lists_teams_members_and_entries(db_session):
+    jam = await _seed_jam(db_session)
+    elves = await _seed_team(db_session, jam, "500", "2", "1", name="Tinsel <b>Bots")
+    await _seed_team(db_session, jam, "501", "3", name="Reindeer")
+    db_session.add_all(
+        [
+            JamSubmission(
+                jam_id=jam.id, thread_id="700", author_id="1", team_id=elves.id
+            ),
+            JamSubmission(
+                jam_id=jam.id, thread_id="701", author_id="2", team_id=elves.id
+            ),
+            JamSubmission(jam_id=jam.id, thread_id="702", author_id="9"),
+        ]
+    )
+    await db_session.commit()
+
+    response, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    assert "Teams (2)" in html
+    assert "Tinsel &lt;b&gt;Bots" in html and "<b>Bots" not in html
+    assert "<code>1</code>, <code>2</code>" in html
+    assert f"https://discord.com/channels/{GUILD}/500" in html
+    assert html.count("None yet") == 1
+    # Two entries: the team's first post and the solo one. The third is extra.
+    assert "Entries (2)" in html
+    assert html.count("Extra post") == 1
+    assert "The entry is <code>700</code>" in html
+    assert "Solo" in html
+    assert html.count("Remove entry") == 3
+    assert f"{_JAMS_URL}/{jam.id}/entries/701/remove" in html
+    assert response.context["entry_team_ids"] == {elves.id}
+
+
+async def test_detail_with_no_teams_or_entries_says_so(db_session):
+    jam = await _seed_jam(db_session)
+
+    _, _, _, html = await _call("jam_detail", db_session, jam_id=jam.id)
+
+    assert "Teams (0)" in html and "No teams yet." in html
+    assert "Entries (0)" in html and "No entries yet." in html
+
+
+async def test_remove_entry_forgets_the_post_and_frees_the_team(db_session):
+    jam = await _seed_jam(db_session)
+    elves = await _seed_team(db_session, jam, "500", "1", "2", name="Elves")
+    db_session.add(
+        JamSubmission(jam_id=jam.id, thread_id="700", author_id="1", team_id=elves.id)
+    )
+    await db_session.commit()
+
+    response, flashes, discord, _ = await _call(
+        "jam_entry_remove", db_session, jam_id=jam.id, thread_id="700"
+    )
+
+    assert _redirected(response, f"{_JAMS_URL}/{jam.id}")
+    assert "still in Discord" in flashes.success.call_args.args[1]
+    assert discord.calls == []
+    assert await teams.list_entries(db_session, jam.id) == []
+    assert len(await teams.list_teams(db_session, jam.id)) == 1
+
+
+async def test_remove_entry_only_reaches_the_jams_own_posts(db_session):
+    jam = await _seed_jam(db_session)
+    other = await _seed_jam(
+        db_session,
+        setup=False,
+        starts_at=START + timedelta(days=365),
+        submissions_close_at=START + timedelta(days=398),
+    )
+    db_session.add(JamSubmission(jam_id=other.id, thread_id="700", author_id="1"))
+    await db_session.commit()
+
+    _, flashes, _, _ = await _call(
+        "jam_entry_remove", db_session, jam_id=jam.id, thread_id="700"
+    )
+    _, missing, _, _ = await _call(
+        "jam_entry_remove", db_session, jam_id=uuid4(), thread_id="700"
+    )
+
+    assert flashes.error.call_args.args[1] == "Entry not found."
+    assert missing.error.call_args.args[1] == "Entry not found."
+    assert len(await teams.list_entries(db_session, other.id)) == 1
 
 
 async def test_detail_before_any_setup_marks_everything_missing(db_session):
@@ -884,6 +982,7 @@ _POSTS = [
     "jam_message_edit",
     "jam_message_retry",
     "jam_message_delete",
+    "jam_entry_remove",
 ]
 
 
@@ -905,6 +1004,10 @@ async def test_a_post_without_a_valid_csrf_token_changes_nothing(db_session, han
         path["jam_id"] = jam.id
     if handler in ("jam_message_edit", "jam_message_retry", "jam_message_delete"):
         path["message_id"] = message.id
+    if handler == "jam_entry_remove":
+        path["thread_id"] = "700"
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="1"))
+    await db_session.commit()
     form = {**_VALID_JAM, **_VALID_MESSAGE, "name": "Changed", "channel_id": "14"}
 
     response, flashes, discord, _ = await _call(
@@ -921,11 +1024,14 @@ async def test_a_post_without_a_valid_csrf_token_changes_nothing(db_session, han
     assert await store.get_setup(db_session, GUILD) is None
     [kept] = await store.list_messages(db_session, jam.id)
     assert (kept.status, kept.content) == ("failed", message.content)
+    assert len(await teams.list_entries(db_session, jam.id)) == 1
 
 
 async def test_every_form_carries_skrifts_csrf_token(db_session):
     jam = await _seed_jam(db_session)
     message = await _seed_message(db_session, jam, status="failed", error="nope")
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="1"))
+    await db_session.commit()
     discord = _Guild()
     discord.add_channel("old-showcase", 15)
     pages = [
@@ -943,8 +1049,9 @@ async def test_every_form_carries_skrifts_csrf_token(db_session):
         assert opened, html[:300]
         assert html.count('<input type="hidden" name="_csrf" value="') == opened
         forms += opened
-    # list 1, create/edit 1, detail 5 (delete, setup, retry, delete, new), edit 1
-    assert forms == 8
+    # list 1, create/edit 1, detail 6 (delete, setup, remove entry, retry,
+    # delete, new), edit 1
+    assert forms == 9
 
 
 # -- two requests at once -----------------------------------------------------

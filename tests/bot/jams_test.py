@@ -1,4 +1,4 @@
-"""The bot's side of code jams: scheduled posts, showcase tags, role, teams."""
+"""The bot's side of code jams: scheduled posts, showcase entries, role, teams."""
 
 from __future__ import annotations
 
@@ -29,6 +29,7 @@ CHAT = 12
 SHOWCASE = 14
 ROLE = 20
 THREAD = 500
+DM = 900
 
 
 def guild_jam(*, jam: bool = True, **overrides) -> dict:
@@ -51,8 +52,16 @@ def guild_jam(*, jam: bool = True, **overrides) -> dict:
     return body
 
 
+JAM_API = f"/guilds/{GUILD}/jam"
+
+
 class FakeApi:
-    """The web API as the bot sees it: one guild's jam and a queue of claims."""
+    """The web API as the bot sees it: one guild's jam and a queue of claims.
+
+    It keeps teams and showcase posts the way the web API does, so a test can
+    read ``teams`` and ``entries`` afterwards. ``refuse`` makes one kind of
+    team change fail with a given reason: ``{"teams": "on_a_team"}``.
+    """
 
     def __init__(self, body: dict | None = None, due: list[dict] | None = None):
         self.body = guild_jam() if body is None else body
@@ -61,24 +70,125 @@ class FakeApi:
         self.posts: list[tuple[str, dict | None]] = []
         self.fail_get = False
         self.fail_posts: set[str] = set()
+        # Paths whose change is saved but whose reply never arrives.
+        self.lose_replies: set[str] = set()
+        # thread id -> {"name", "thread_id", "member_ids"}
+        self.teams: dict[str, dict] = {}
+        # showcase thread id -> the team's thread id, or "solo:<author>"
+        self.entries: dict[str, str] = {}
+        self.refuse: dict[str, str] = {}
+
+    def add_team(self, thread_id: int = THREAD, *members: int, name: str = "Elves"):
+        self.teams[str(thread_id)] = {
+            "name": name,
+            "thread_id": str(thread_id),
+            "member_ids": [str(member) for member in members or (1,)],
+        }
+
+    def _team_of(self, user_id: str) -> dict | None:
+        for team in self.teams.values():
+            if user_id in team["member_ids"]:
+                return team
+        return None
+
+    def _has_entry(self, owner: str) -> bool:
+        return owner in self.entries.values()
+
+    def _cannot_join(self, user_id: str) -> dict | None:
+        if (team := self._team_of(user_id)) is not None:
+            return {"ok": False, "reason": "on_a_team", "team": team}
+        if self._has_entry(f"solo:{user_id}"):
+            return {"ok": False, "reason": "has_entry", "team": None}
+        return None
 
     async def get(self, path, **_):
         self.gets.append(path)
         if self.fail_get:
             raise RuntimeError("api down")
+        if path.startswith(f"{JAM_API}/members/"):
+            user_id = path.rsplit("/", 1)[1]
+            body = self._cannot_join(user_id) or {
+                "ok": True,
+                "reason": None,
+                "team": None,
+            }
+            if "members" in self.refuse:
+                body = {"ok": False, "reason": self.refuse["members"], "team": None}
+            return SimpleNamespace(json=lambda: body)
         return SimpleNamespace(json=lambda: self.body)
 
     async def post(self, path, json_data=None):
         if any(path.endswith(suffix) for suffix in self.fail_posts):
             raise RuntimeError("api down")
         self.posts.append((path, json_data))
+        if any(path.endswith(suffix) for suffix in self.lose_replies):
+            self._jam_post(path[len(JAM_API) + 1 :].split("/"), json_data)
+            raise RuntimeError("timed out")
         if path == "/jam-messages/claim":
             due, self.due = self.due, []
             return SimpleNamespace(json=lambda: {"messages": due})
+        if path.startswith(f"{JAM_API}/"):
+            body = self._jam_post(path[len(JAM_API) + 1 :].split("/"), json_data)
+            return SimpleNamespace(json=lambda: body)
         return SimpleNamespace(json=lambda: {"success": True})
 
+    def _jam_post(self, parts: list[str], data: dict) -> dict:
+        kind = parts[-1]
+        if kind in self.refuse:
+            return {"ok": False, "reason": self.refuse[kind], "team": None}
+        done = {"ok": True, "reason": None, "already": False, "members_left": 0}
+        if parts == ["teams"]:
+            if (refused := self._cannot_join(data["user_id"])) is not None:
+                return refused
+            self.add_team(int(data["thread_id"]), data["user_id"], name=data["name"])
+            return {**done, "team": self.teams[data["thread_id"]]}
+        if parts == ["submissions"]:
+            thread_id, author = data["thread_id"], data["author_id"]
+            team = self._team_of(author)
+            owner = team["thread_id"] if team else f"solo:{author}"
+            new = thread_id not in self.entries
+            self.entries.setdefault(thread_id, owner)
+            first = min(
+                (post for post, whose in self.entries.items() if whose == owner),
+                key=int,
+            )
+            return {
+                "ok": True,
+                "reason": None,
+                "team": team,
+                "entry_thread_id": first,
+                "new": new,
+            }
+        if parts[0] == "submissions":
+            return {"removed": self.entries.pop(parts[1], None) is not None}
+        team = self.teams.get(parts[1])
+        if kind == "leave":
+            if team is None or data["user_id"] not in team["member_ids"]:
+                return {**done, "team": team, "already": True}
+            if self._has_entry(team["thread_id"]):
+                return {"ok": False, "reason": "team_has_entry", "team": team}
+            team["member_ids"].remove(data["user_id"])
+            if not team["member_ids"]:
+                del self.teams[parts[1]]
+            return {**done, "team": team, "members_left": len(team["member_ids"])}
+        # members
+        if team is None:
+            return {"ok": False, "reason": "not_a_team", "team": None}
+        if data["invited_by"] not in team["member_ids"]:
+            return {"ok": False, "reason": "not_your_team", "team": team}
+        if data["user_id"] in team["member_ids"]:
+            return {**done, "team": team, "already": True}
+        if self._has_entry(team["thread_id"]):
+            return {"ok": False, "reason": "team_has_entry", "team": team}
+        if (refused := self._cannot_join(data["user_id"])) is not None:
+            return refused
+        if len(team["member_ids"]) >= self.body["jam"]["max_team_size"]:
+            return {"ok": False, "reason": "full", "team": team}
+        team["member_ids"].append(data["user_id"])
+        return {**done, "team": team}
 
-def make_rest(**members) -> Mock:
+
+def make_rest() -> Mock:
     rest = Mock()
     for name in (
         "create_message",
@@ -86,17 +196,13 @@ def make_rest(**members) -> Mock:
         "add_role_to_member",
         "remove_role_from_member",
         "add_thread_member",
+        "remove_thread_member",
         "delete_channel",
     ):
         setattr(rest, name, AsyncMock())
     rest.create_thread = AsyncMock(return_value=SimpleNamespace(id=THREAD))
     rest.fetch_active_threads = AsyncMock(return_value=[])
-    rest.fetch_channel = AsyncMock(return_value=team_thread())
-    rest.fetch_thread_members = AsyncMock(
-        return_value=[
-            SimpleNamespace(user_id=uid) for uid in members.get("ids", [BOT_ID, 1])
-        ]
-    )
+    rest.create_dm_channel = AsyncMock(return_value=SimpleNamespace(id=DM))
     return rest
 
 
@@ -128,6 +234,7 @@ def showcase_post(**overrides) -> SimpleNamespace:
         "id": 700,
         "guild_id": GUILD,
         "parent_id": SHOWCASE,
+        "owner_id": 1,
         "type": hikari.ChannelType.GUILD_PUBLIC_THREAD,
         "created_at": NOW - timedelta(seconds=2),
         "applied_tag_ids": [],
@@ -496,18 +603,23 @@ async def test_leave_works_between_jams():
 # -- teams ---------------------------------------------------------------------
 
 
-async def test_team_makes_a_private_thread_members_cannot_invite_to():
-    rest = make_rest()
-
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi()),
-        rest,
-        jams.TeamLimits(),
+async def make_team(fake=None, rest=None, limits=None, user=1, name="Elves", now=NOW):
+    return await jams.create_team(
+        jams.JamApi(fake or FakeApi()),
+        rest or make_rest(),
+        limits or jams.TeamLimits(),
         GUILD,
-        1,
-        "  Tinsel   Bots ",
+        user,
+        name,
         bot_user_id=BOT_ID,
+        now=now,
     )
+
+
+async def test_team_makes_a_private_thread_members_cannot_invite_to():
+    fake, rest = FakeApi(), make_rest()
+
+    reply = await make_team(fake, rest, name="  Tinsel   Bots ")
 
     call = rest.create_thread.await_args
     assert call.args == (CHAT, hikari.ChannelType.GUILD_PRIVATE_THREAD, "Tinsel Bots")
@@ -516,7 +628,22 @@ async def test_team_makes_a_private_thread_members_cannot_invite_to():
     welcome = rest.create_message.await_args
     assert welcome.args[0] == THREAD
     assert "up to 2 teammates" in welcome.args[1]
+    assert "`/jam leave`" in welcome.args[1]
     assert reply == f"Your team thread is ready: <#{THREAD}>"
+
+
+async def test_a_new_team_is_recorded_with_its_thread_and_maker():
+    fake = FakeApi()
+
+    await make_team(fake, name="Tinsel Bots")
+
+    assert fake.posts == [
+        (
+            f"{JAM_API}/teams",
+            {"name": "Tinsel Bots", "thread_id": str(THREAD), "user_id": "1"},
+        )
+    ]
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1"]
 
 
 @pytest.mark.parametrize(
@@ -532,18 +659,23 @@ async def test_team_makes_a_private_thread_members_cannot_invite_to():
 async def test_team_refusals_make_no_thread(body, name, expected):
     rest = make_rest()
 
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi(body)),
-        rest,
-        jams.TeamLimits(),
-        GUILD,
-        1,
-        name,
-        bot_user_id=BOT_ID,
-    )
+    reply = await make_team(FakeApi(body), rest, name=name)
 
     assert expected in reply
     rest.create_thread.assert_not_awaited()
+
+
+async def test_no_team_before_the_jam_starts():
+    fake, rest = FakeApi(), make_rest()
+    start = datetime(2026, 12, 1, tzinfo=UTC)
+
+    reply = await make_team(fake, rest, now=start - timedelta(seconds=1))
+
+    assert "Teams open when **Holiday Chatbot Jam** starts" in reply
+    assert f"<t:{int(start.timestamp())}:F>" in reply
+    rest.create_thread.assert_not_awaited()
+    assert fake.posts == []
+    assert "ready" in await make_team(fake, rest, now=start)
 
 
 async def test_a_solo_jam_has_no_teams():
@@ -551,183 +683,340 @@ async def test_a_solo_jam_has_no_teams():
     body["jam"]["max_team_size"] = 1
     rest = make_rest()
 
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi(body)),
-        rest,
-        jams.TeamLimits(),
-        GUILD,
-        1,
-        "Elves",
-        bot_user_id=BOT_ID,
-    )
+    reply = await make_team(FakeApi(body), rest)
 
     assert "solo jam" in reply
     rest.create_thread.assert_not_awaited()
 
 
+async def test_a_member_on_a_team_cannot_make_another():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD + 1, 1)
+
+    reply = await make_team(fake, rest)
+
+    assert f"already on a team for this jam: <#{THREAD + 1}>" in reply
+    assert "`/jam leave`" in reply
+    rest.create_thread.assert_not_awaited()
+    assert list(fake.teams) == [str(THREAD + 1)]
+
+
+async def test_a_member_with_a_solo_entry_cannot_make_a_team():
+    fake, rest = FakeApi(), make_rest()
+    fake.entries["700"] = "solo:1"
+
+    reply = await make_team(fake, rest)
+
+    assert "already posted an entry on your own" in reply
+    rest.create_thread.assert_not_awaited()
+
+
+async def test_the_web_api_decides_when_teams_are_open():
+    fake, rest = FakeApi(), make_rest()
+    fake.refuse["members"] = "not_open"
+
+    assert await make_team(fake, rest) == jams.NOT_OPEN
+    rest.create_thread.assert_not_awaited()
+
+
 async def test_team_says_so_when_discord_refuses():
-    rest = make_rest()
+    fake, rest = FakeApi(), make_rest()
     rest.create_thread.side_effect = forbidden()
 
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi()),
-        rest,
-        jams.TeamLimits(),
-        GUILD,
-        1,
-        "Elves",
-        bot_user_id=BOT_ID,
-    )
+    reply = await make_team(fake, rest)
 
     assert "could not make" in reply
+    assert fake.teams == {}
 
 
 async def test_team_is_still_made_if_the_welcome_fails():
     rest = make_rest()
     rest.create_message.side_effect = forbidden()
 
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi()),
-        rest,
-        jams.TeamLimits(),
-        GUILD,
-        1,
-        "Elves",
-        bot_user_id=BOT_ID,
-    )
+    reply = await make_team(rest=rest)
 
     assert f"<#{THREAD}>" in reply
 
 
-async def invite(rest, body=None, limits=None, **overrides) -> str:
+async def test_a_thread_the_web_api_will_not_record_is_removed():
+    """Two requests from one member can both pass the first check."""
+    fake, rest, limits = FakeApi(), make_rest(), jams.TeamLimits()
+    fake.refuse["teams"] = "on_a_team"
+
+    reply = await make_team(fake, rest, limits)
+
+    assert "already on a team" in reply
+    rest.delete_channel.assert_awaited_once_with(THREAD)
+    rest.add_thread_member.assert_not_awaited()
+    rest.create_message.assert_not_awaited()
+    assert limits.wait_seconds(GUILD, 1) == 0
+
+
+async def test_a_thread_that_could_not_be_recorded_is_removed():
+    fake, rest, limits = FakeApi(), make_rest(), jams.TeamLimits()
+    fake.fail_posts.add("/jam/teams")
+
+    reply = await make_team(fake, rest, limits)
+
+    assert "could not make" in reply
+    rest.delete_channel.assert_awaited_once_with(THREAD)
+    rest.add_thread_member.assert_not_awaited()
+    assert limits.wait_seconds(GUILD, 1) == 0
+
+
+async def test_a_team_saved_by_a_call_that_failed_is_taken_back():
+    """The web API can save the team and the reply still be lost."""
+    fake, rest, limits = FakeApi(), make_rest(), jams.TeamLimits()
+    fake.lose_replies.add("/jam/teams")
+
+    reply = await make_team(fake, rest, limits)
+
+    assert "could not make" in reply
+    assert fake.teams == {}
+    rest.delete_channel.assert_awaited_once_with(THREAD)
+    assert limits.wait_seconds(GUILD, 1) == 0
+
+
+async def test_a_thread_its_maker_could_not_join_is_removed():
+    fake, rest, limits = FakeApi(), make_rest(), jams.TeamLimits()
+    rest.add_thread_member.side_effect = forbidden()
+
+    reply = await make_team(fake, rest, limits)
+
+    assert "could not make" in reply
+    rest.delete_channel.assert_awaited_once_with(THREAD)
+    rest.create_message.assert_not_awaited()
+    assert limits.wait_seconds(GUILD, 1) == 0
+    # The record goes too, so the member is not left on a team with no thread.
+    assert fake.posts[-1] == (f"{JAM_API}/teams/{THREAD}/leave", {"user_id": "1"})
+    assert fake.teams == {}
+
+    rest.delete_channel.side_effect = forbidden()
+    assert "could not make" in await make_team(fake, rest, limits)
+
+
+async def invite(rest, fake=None, **overrides) -> str:
+    if fake is None:
+        fake = FakeApi()
+        fake.add_team(THREAD, 1)
     values = {
         "guild_id": GUILD,
         "channel_id": THREAD,
-        "bot_user_id": BOT_ID,
+        "user_id": 1,
         "target_id": 2,
         "target_is_bot": False,
     }
     values.update(overrides)
-    return await jams.invite_to_team(
-        jams.JamApi(FakeApi(body)), rest, limits or jams.TeamLimits(), **values
-    )
+    return await jams.invite_to_team(jams.JamApi(fake), rest, **values)
 
 
 async def test_invite_adds_a_teammate():
-    rest = make_rest(ids=[BOT_ID, 1])
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
 
-    reply = await invite(rest)
+    reply = await invite(rest, fake)
 
+    assert fake.posts == [
+        (f"{JAM_API}/teams/{THREAD}/members", {"user_id": "2", "invited_by": "1"})
+    ]
     rest.add_thread_member.assert_awaited_once_with(THREAD, 2)
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1", "2"]
     assert reply == "<@2> is now on the team."
 
 
-async def test_invite_stops_at_the_team_size_and_does_not_count_the_bot():
-    almost = make_rest(ids=[BOT_ID, 1, 3])
-    full = make_rest(ids=[BOT_ID, 1, 3, 4])
+async def test_invite_stops_at_the_team_size():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 3)
 
-    assert "now on the team" in await invite(almost)
-    reply = await invite(full)
+    assert "now on the team" in await invite(rest, fake, target_id=4)
+    reply = await invite(rest, fake, target_id=5)
 
     assert "full" in reply and "3 people" in reply
-    full.add_thread_member.assert_not_awaited()
+    rest.add_thread_member.assert_awaited_once_with(THREAD, 4)
 
 
-async def test_invite_refuses_bots_and_people_already_on_the_team():
-    rest = make_rest(ids=[BOT_ID, 1, 2])
+async def test_invite_refuses_a_bot_without_asking():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
 
-    assert "bot cannot" in await invite(rest, target_id=9, target_is_bot=True)
-    assert "already" in await invite(rest)
+    assert "bot cannot" in await invite(rest, fake, target_id=9, target_is_bot=True)
+    assert fake.posts == []
     rest.add_thread_member.assert_not_awaited()
+
+
+async def test_inviting_a_teammate_again_lets_them_back_into_the_thread():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
+
+    reply = await invite(rest, fake)
+
+    assert reply == "<@2> is already on this team."
+    rest.add_thread_member.assert_awaited_once_with(THREAD, 2)
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1", "2"]
+
+
+async def test_invite_only_works_in_a_team_thread():
+    rest = make_rest()
+
+    reply = await invite(rest, FakeApi())
+
+    assert "inside your team's thread" in reply
+    rest.add_thread_member.assert_not_awaited()
+
+
+async def test_only_a_team_member_can_invite():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+
+    reply = await invite(rest, fake, user_id=7)
+
+    assert reply == "Only this team's members can add people to it."
+    rest.add_thread_member.assert_not_awaited()
+
+
+async def test_invite_refuses_someone_on_another_team():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+    fake.add_team(THREAD + 1, 2)
+
+    reply = await invite(rest, fake)
+
+    assert reply == "<@2> is already on another team for this jam."
+    rest.add_thread_member.assert_not_awaited()
+
+
+async def test_invite_refuses_someone_with_a_solo_entry():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+    fake.entries["700"] = "solo:2"
+
+    reply = await invite(rest, fake)
+
+    assert reply == "<@2> has already posted an entry on their own for this jam."
+    rest.add_thread_member.assert_not_awaited()
+
+
+async def test_a_team_with_an_entry_takes_no_new_members():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+    fake.entries["700"] = str(THREAD)
+
+    assert await invite(rest, fake) == jams.TEAM_HAS_ENTRY
+    rest.add_thread_member.assert_not_awaited()
+
+
+async def test_invite_needs_an_open_jam():
+    rest = make_rest()
+
+    assert await invite(rest, FakeApi(guild_jam(jam=False))) == jams.NO_JAM
+    rest.add_thread_member.assert_not_awaited()
+
+
+async def test_a_teammate_discord_would_not_add_is_taken_off_the_roster():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+    rest.add_thread_member.side_effect = not_found()
+
+    assert "could not add" in await invite(rest, fake)
+    assert fake.posts[-1] == (f"{JAM_API}/teams/{THREAD}/leave", {"user_id": "2"})
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1"]
+
+
+async def test_a_failed_re_add_leaves_the_roster_alone():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
+    rest.add_thread_member.side_effect = not_found()
+
+    assert "could not add" in await invite(rest, fake)
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1", "2"]
+
+
+async def leave(rest, fake, user=1) -> str:
+    return await jams.leave_team(jams.JamApi(fake), rest, GUILD, user)
+
+
+async def test_leave_takes_the_member_off_the_team_and_out_of_the_thread():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2, name="Tinsel Bots")
+
+    reply = await leave(rest, fake, user=2)
+
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1"]
+    rest.remove_thread_member.assert_awaited_once_with(THREAD, 2)
+    notice = rest.create_message.await_args
+    assert notice.args == (THREAD, "<@2> left the team.")
+    assert notice.kwargs["user_mentions"] is False
+    rest.edit_channel.assert_not_awaited()
+    assert reply == "You left **Tinsel Bots**. You can make or join another team."
+
+
+async def test_a_team_its_last_member_leaves_is_closed():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+
+    reply = await leave(rest, fake)
+
+    assert fake.teams == {}
+    edit = rest.edit_channel.await_args
+    assert edit.args == (THREAD,)
+    assert edit.kwargs["archived"] is True and edit.kwargs["locked"] is True
+    rest.create_message.assert_not_awaited()
+    assert "You left **Elves**" in reply
+
+
+async def test_leave_needs_a_team():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 2)
+
+    assert await leave(rest, fake) == jams.NOT_ON_A_TEAM
+    assert await leave(rest, FakeApi(guild_jam(jam=False))) == jams.NO_JAM
+    assert rest.mock_calls == []
+
+
+async def test_nobody_leaves_a_team_that_has_an_entry():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
+    fake.entries["700"] = str(THREAD)
+
+    assert await leave(rest, fake) == jams.TEAM_HAS_ENTRY
+    assert fake.teams[str(THREAD)]["member_ids"] == ["1", "2"]
+    assert rest.mock_calls == []
+
+
+async def test_leave_counts_even_if_discord_keeps_them_in_the_thread():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
+    rest.remove_thread_member.side_effect = forbidden()
+    rest.create_message.side_effect = forbidden()
+
+    assert "You left" in await leave(rest, fake)
+    assert fake.teams[str(THREAD)]["member_ids"] == ["2"]
 
 
 @pytest.mark.parametrize(
-    "channel",
-    [
-        SimpleNamespace(type=hikari.ChannelType.GUILD_TEXT, parent_id=None),
-        team_thread(parent_id=999),
-        team_thread(type=hikari.ChannelType.GUILD_PUBLIC_THREAD),
-        team_thread(owner_id=1),
-    ],
-    ids=[
-        "a channel",
-        "a private thread elsewhere",
-        "a public thread",
-        "a private thread a member made by hand",
-    ],
+    "command", ["subscribe", "unsubscribe", "team", "invite", "leave"]
 )
-async def test_invite_only_works_in_a_team_thread(channel):
-    rest = make_rest()
-    rest.fetch_channel.return_value = channel
-
-    reply = await invite(rest)
-
-    assert "inside your team's thread" in reply
-    rest.fetch_thread_members.assert_not_awaited()
-    rest.add_thread_member.assert_not_awaited()
-
-
-async def test_two_invites_at_once_cannot_share_the_last_seat():
-    """Each invite reads the members, then adds; the second waits its turn."""
-    members = [BOT_ID, 1, 3]
-    rest = make_rest()
-
-    async def read_members(thread_id):
-        seen = [SimpleNamespace(user_id=uid) for uid in members]
-        await asyncio.sleep(0)
-        return seen
-
-    async def add_member(thread_id, user_id):
-        await asyncio.sleep(0)
-        members.append(user_id)
-
-    rest.fetch_thread_members.side_effect = read_members
-    rest.add_thread_member.side_effect = add_member
-    limits = jams.TeamLimits()
-
-    replies = await asyncio.gather(
-        invite(rest, limits=limits, target_id=4),
-        invite(rest, limits=limits, target_id=5),
-    )
-
-    assert members == [BOT_ID, 1, 3, 4]
-    assert "now on the team" in replies[0]
-    assert "full" in replies[1]
-
-
-async def test_invites_in_different_threads_do_not_wait_for_each_other():
-    limits = jams.TeamLimits()
-
-    async with limits.thread_lock(THREAD):
-        reply = await asyncio.wait_for(
-            invite(make_rest(), limits=limits, channel_id=THREAD + 1), timeout=1
-        )
-
-    assert "now on the team" in reply
-
-
-@pytest.mark.parametrize("command", ["join", "leave", "team", "invite"])
 async def test_an_api_outage_is_not_called_a_missing_setup(command):
     fake = FakeApi()
     fake.fail_get = True
     api, rest, limits = jams.JamApi(fake), make_rest(), jams.TeamLimits()
 
     reply = await {
-        "join": lambda: jams.join_jam(api, rest, GUILD, 1),
-        "leave": lambda: jams.leave_jam(api, rest, GUILD, 1),
+        "subscribe": lambda: jams.join_jam(api, rest, GUILD, 1),
+        "unsubscribe": lambda: jams.leave_jam(api, rest, GUILD, 1),
         "team": lambda: jams.create_team(
-            api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID
+            api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID, now=NOW
         ),
         "invite": lambda: jams.invite_to_team(
             api,
             rest,
-            limits,
             guild_id=GUILD,
             channel_id=THREAD,
-            bot_user_id=BOT_ID,
+            user_id=1,
             target_id=2,
             target_is_bot=False,
         ),
+        "leave": lambda: jams.leave_team(api, rest, GUILD, 1),
     }[command]()
 
     assert reply == jams.UNAVAILABLE
@@ -738,50 +1027,46 @@ async def test_an_api_outage_is_not_called_a_missing_setup(command):
 # -- team limits ---------------------------------------------------------------
 
 
+def threads_in_turn(rest) -> None:
+    """Give each new team thread its own id."""
+    ids = iter(range(THREAD, THREAD + 50))
+    rest.create_thread.side_effect = lambda *a, **k: SimpleNamespace(id=next(ids))
+
+
 async def test_a_member_makes_one_team_per_cooldown():
     now = [0.0]
     limits = jams.TeamLimits(clock=lambda: now[0])
-    api, rest = jams.JamApi(FakeApi()), make_rest()
+    fake, rest = FakeApi(), make_rest()
+    threads_in_turn(rest)
 
-    first = await jams.create_team(
-        api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID
-    )
+    first = await make_team(fake, rest, limits, name="Elves")
+    assert "You left" in await leave(rest, fake)
     now[0] = jams.TEAM_COOLDOWN_SECONDS - 61
-    second = await jams.create_team(
-        api, rest, limits, GUILD, 1, "More Elves", bot_user_id=BOT_ID
-    )
-    someone_else = await jams.create_team(
-        api, rest, limits, GUILD, 2, "Reindeer", bot_user_id=BOT_ID
-    )
+    second = await make_team(fake, rest, limits, name="More Elves")
+    someone_else = await make_team(fake, rest, limits, user=2, name="Reindeer")
 
     assert "ready" in first and "ready" in someone_else
     assert "another in 2 minutes" in second
     assert rest.create_thread.await_count == 2
 
     now[0] = jams.TEAM_COOLDOWN_SECONDS
-    assert "ready" in await jams.create_team(
-        api, rest, limits, GUILD, 1, "Elves 2", bot_user_id=BOT_ID
-    )
+    assert "ready" in await make_team(fake, rest, limits, name="Elves 2")
 
 
 async def test_a_team_that_was_not_made_does_not_start_the_cooldown():
     limits = jams.TeamLimits()
-    api, rest = jams.JamApi(FakeApi()), make_rest()
+    fake, rest = FakeApi(), make_rest()
     rest.create_thread.side_effect = forbidden()
 
-    assert "could not make" in await jams.create_team(
-        api, rest, limits, GUILD, 1, "A", bot_user_id=BOT_ID
-    )
+    assert "could not make" in await make_team(fake, rest, limits)
     rest.create_thread.side_effect = None
 
-    assert "ready" in await jams.create_team(
-        api, rest, limits, GUILD, 1, "A", bot_user_id=BOT_ID
-    )
+    assert "ready" in await make_team(fake, rest, limits)
 
 
 async def test_two_teams_at_once_from_one_member_make_one_thread():
     limits = jams.TeamLimits()
-    api, rest = jams.JamApi(FakeApi()), make_rest()
+    fake, rest = FakeApi(), make_rest()
 
     async def slow_create(*args, **kwargs):
         await asyncio.sleep(0)
@@ -790,8 +1075,7 @@ async def test_two_teams_at_once_from_one_member_make_one_thread():
     rest.create_thread.side_effect = slow_create
 
     replies = await asyncio.gather(
-        jams.create_team(api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID),
-        jams.create_team(api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID),
+        make_team(fake, rest, limits), make_team(fake, rest, limits)
     )
 
     assert rest.create_thread.await_count == 1
@@ -799,21 +1083,16 @@ async def test_two_teams_at_once_from_one_member_make_one_thread():
 
 
 async def test_a_guild_has_a_cap_on_open_team_threads():
-    rest = make_rest()
+    fake, rest, limits = FakeApi(), make_rest(), jams.TeamLimits()
     elsewhere = [team_thread(parent_id=SHOWCASE) for _ in range(500)]
     teams = [team_thread() for _ in range(jams.TEAM_THREADS_MAX)]
     rest.fetch_active_threads.return_value = [*elsewhere, *teams[1:]]
-    api, limits = jams.JamApi(FakeApi()), jams.TeamLimits()
 
-    assert "ready" in await jams.create_team(
-        api, rest, limits, GUILD, 1, "Last", bot_user_id=BOT_ID
-    )
+    assert "ready" in await make_team(fake, rest, limits, name="Last")
     rest.fetch_active_threads.assert_awaited_with(GUILD)
 
     rest.fetch_active_threads.return_value = [*elsewhere, *teams]
-    reply = await jams.create_team(
-        api, rest, limits, GUILD, 2, "One too many", bot_user_id=BOT_ID
-    )
+    reply = await make_team(fake, rest, limits, user=2, name="One too many")
 
     assert "already 100 team threads open" in reply
     assert rest.create_thread.await_count == 1
@@ -828,15 +1107,7 @@ async def test_threads_members_open_by_hand_do_not_use_up_the_cap():
     ]
     rest.fetch_active_threads.return_value = by_hand * jams.TEAM_THREADS_MAX
 
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi()),
-        rest,
-        jams.TeamLimits(),
-        GUILD,
-        1,
-        "Elves",
-        bot_user_id=BOT_ID,
-    )
+    reply = await make_team(rest=rest)
 
     assert "ready" in reply
     rest.create_thread.assert_awaited_once()
@@ -846,56 +1117,136 @@ async def test_no_team_is_made_when_the_open_threads_cannot_be_counted():
     rest = make_rest()
     rest.fetch_active_threads.side_effect = server_error()
 
-    reply = await jams.create_team(
-        jams.JamApi(FakeApi()),
-        rest,
-        jams.TeamLimits(),
-        GUILD,
-        1,
-        "Elves",
-        bot_user_id=BOT_ID,
-    )
+    reply = await make_team(rest=rest)
 
     assert "could not make" in reply
     rest.create_thread.assert_not_awaited()
 
 
-async def test_a_thread_its_maker_could_not_join_is_removed():
-    rest = make_rest()
-    rest.add_thread_member.side_effect = forbidden()
-    api, limits = jams.JamApi(FakeApi()), jams.TeamLimits()
+# -- showcase entries ----------------------------------------------------------
 
-    reply = await jams.create_team(
-        api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID
-    )
 
-    assert "could not make" in reply
-    rest.delete_channel.assert_awaited_once_with(THREAD)
-    rest.create_message.assert_not_awaited()
-    assert limits.wait_seconds(GUILD, 1) == 0
-
-    rest.delete_channel.side_effect = forbidden()
-    assert "could not make" in await jams.create_team(
-        api, rest, limits, GUILD, 1, "Elves", bot_user_id=BOT_ID
+async def record(fake, rest, **post) -> bool:
+    return await jams.record_showcase_post(
+        jams.JamApi(fake), rest, showcase_post(**post), NOW
     )
 
 
-async def test_invite_needs_an_open_jam():
-    rest = make_rest()
+async def test_a_team_members_post_is_the_teams_entry():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
 
-    assert await invite(rest, guild_jam(jam=False)) == jams.NO_JAM
-    rest.add_thread_member.assert_not_awaited()
+    assert await record(fake, rest, owner_id=2) is True
+
+    assert fake.posts == [
+        (f"{JAM_API}/submissions", {"thread_id": "700", "author_id": "2"})
+    ]
+    assert fake.entries == {"700": str(THREAD)}
+    notice = rest.create_message.await_args
+    assert notice.args[0] == THREAD
+    assert "Your team's entry is in: <#700>" in notice.args[1]
+    assert notice.kwargs["user_mentions"] is False
 
 
-async def test_invite_says_so_when_the_members_cannot_be_read_or_added():
-    unreadable = make_rest()
-    unreadable.fetch_thread_members.side_effect = server_error()
-    gone = make_rest()
-    gone.add_thread_member.side_effect = not_found()
+async def test_a_post_from_someone_with_no_team_is_a_solo_entry():
+    fake, rest = FakeApi(), make_rest()
 
-    assert "could not read" in await invite(unreadable)
-    unreadable.add_thread_member.assert_not_awaited()
-    assert "could not add" in await invite(gone)
+    assert await record(fake, rest) is True
+
+    assert fake.entries == {"700": "solo:1"}
+    assert rest.mock_calls == []
+
+
+async def test_a_second_post_from_a_team_stays_up_and_the_team_is_told():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
+    await record(fake, rest, owner_id=1)
+    rest.reset_mock()
+
+    assert await record(fake, rest, id=701, owner_id=2) is True
+
+    assert fake.entries == {"700": str(THREAD), "701": str(THREAD)}
+    notice = rest.create_message.await_args
+    assert notice.args[0] == THREAD
+    assert "<@2>, your post <#701> is up" in notice.args[1]
+    assert "your team already has an entry" in notice.args[1]
+    assert "<#700>" in notice.args[1]
+    assert notice.kwargs["user_mentions"] == [2]
+    assert notice.kwargs["mentions_everyone"] is False
+    rest.delete_channel.assert_not_awaited()
+    rest.create_dm_channel.assert_not_awaited()
+
+
+async def test_a_second_solo_post_is_answered_by_dm():
+    fake, rest = FakeApi(), make_rest()
+    await record(fake, rest)
+
+    assert await record(fake, rest, id=701) is True
+
+    rest.create_dm_channel.assert_awaited_once_with(1)
+    notice = rest.create_message.await_args
+    assert notice.args[0] == DM
+    assert "you already have an entry" in notice.args[1]
+    assert "<#700>" in notice.args[1]
+    rest.delete_channel.assert_not_awaited()
+
+
+async def test_a_closed_dm_is_not_an_error():
+    closed, refused = make_rest(), make_rest()
+    closed.create_dm_channel.side_effect = forbidden()
+    refused.create_message.side_effect = forbidden()
+
+    for rest in (closed, refused):
+        fake = FakeApi()
+        fake.entries["600"] = "solo:1"
+        assert await record(fake, rest) is True
+        assert "700" in fake.entries
+
+
+async def test_a_post_seen_twice_is_announced_once():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1)
+    await record(fake, rest)
+
+    assert await record(fake, rest) is False
+
+    rest.create_message.assert_awaited_once()
+
+
+@pytest.mark.parametrize(
+    "post",
+    [
+        {"parent_id": CHAT},
+        {"type": hikari.ChannelType.GUILD_PRIVATE_THREAD},
+        {"created_at": NOW - jams.NEW_POST_WINDOW - timedelta(seconds=1)},
+    ],
+    ids=["another channel", "a private thread", "an old post"],
+)
+async def test_only_a_new_showcase_post_is_recorded(post):
+    fake, rest = FakeApi(), make_rest()
+
+    assert await record(fake, rest, **post) is False
+    assert fake.posts == []
+
+
+async def test_nothing_is_recorded_between_jams():
+    fake, rest = FakeApi(guild_jam(jam=False)), make_rest()
+
+    assert await record(fake, rest) is False
+    assert fake.posts == []
+
+
+async def test_a_deleted_showcase_post_is_forgotten():
+    fake = FakeApi()
+    fake.entries["700"] = "solo:1"
+    api = jams.JamApi(fake)
+
+    assert await jams.forget_showcase_post(api, GUILD, CHAT, 700) is False
+    assert fake.posts == []
+    assert await jams.forget_showcase_post(api, GUILD, SHOWCASE, 700) is True
+
+    assert fake.posts == [(f"{JAM_API}/submissions/700/remove", {})]
+    assert fake.entries == {}
 
 
 # -- the plugin ----------------------------------------------------------------
@@ -934,7 +1285,7 @@ def test_load_plugins_loads_the_jams_plugin():
     assert "smarter_dev.bot.plugins.jams" in loaded
 
 
-def test_the_jam_command_has_its_four_subcommands():
+def test_the_jam_command_has_its_five_subcommands():
     group = jams_plugin.jam_group
     assert group.name == "jam"
     assert {child.name for child in group.subcommands} == {
@@ -942,6 +1293,7 @@ def test_the_jam_command_has_its_four_subcommands():
         "unsubscribe",
         "team",
         "invite",
+        "leave",
     }
 
 
@@ -977,7 +1329,9 @@ async def test_a_command_that_breaks_still_answers(wired):
     assert "went wrong" in ctx.respond.await_args.args[0]
 
 
-async def test_team_and_invite_pass_their_options(wired):
+async def test_team_invite_and_leave_pass_who_and_where(wired):
+    wired.api.body["jam"]["starts_at"] = "2000-01-01T00:00:00+00:00"
+
     await jams_plugin.team_command.callback(make_ctx(wired, name="Elves"))
     await jams_plugin.invite_command.callback(
         make_ctx(wired, user=SimpleNamespace(id=2, is_bot=False))
@@ -985,6 +1339,16 @@ async def test_team_and_invite_pass_their_options(wired):
 
     assert wired.rest.create_thread.await_args.args[2] == "Elves"
     assert wired.rest.add_thread_member.await_args_list[-1].args == (THREAD, 2)
+    assert wired.api.posts[-1] == (
+        f"{JAM_API}/teams/{THREAD}/members",
+        {"user_id": "2", "invited_by": "1"},
+    )
+
+    ctx = make_ctx(wired)
+    await jams_plugin.leave_command.callback(ctx)
+
+    assert "You left **Elves**" in ctx.respond.await_args.args[0]
+    assert wired.api.teams[str(THREAD)]["member_ids"] == ["2"]
 
 
 async def test_team_waits_until_the_bot_knows_its_own_id(wired):
@@ -999,16 +1363,14 @@ async def test_team_waits_until_the_bot_knows_its_own_id(wired):
     wired.rest.create_thread.assert_not_awaited()
 
 
-async def test_invite_waits_until_the_bot_knows_its_own_id(wired):
+async def test_invite_and_leave_do_not_need_the_bots_own_id(wired):
     wired.bot.get_me = lambda: None
+    wired.api.add_team(THREAD, 1)
     ctx = make_ctx(wired, user=SimpleNamespace(id=2, is_bot=False))
 
     await jams_plugin.invite_command.callback(ctx)
 
-    ctx.respond.assert_awaited_once()
-    assert "still starting up" in ctx.respond.await_args.args[0]
-    assert ctx.respond.await_args.kwargs == {"flags": hikari.MessageFlag.EPHEMERAL}
-    assert wired.rest.mock_calls == []
+    assert "now on the team" in ctx.respond.await_args.args[0]
 
 
 async def test_commands_say_try_again_without_the_bot_api(wired):
@@ -1047,10 +1409,12 @@ async def test_a_new_thread_event_tags_a_showcase_post(wired):
     await jams_plugin.on_thread_create(SimpleNamespace(thread=post))
 
     wired.rest.edit_channel.assert_awaited_once()
+    assert wired.api.entries == {"700": "solo:1"}
 
 
 async def test_a_thread_event_never_raises(wired):
     wired.rest.edit_channel.side_effect = RuntimeError("boom")
+    wired.api.fail_posts.add("/jam/submissions")
     post = showcase_post(created_at=datetime.now(UTC))
     wired.api.body["jam"]["starts_at"] = "2000-01-01T00:00:00+00:00"
     wired.api.body["jam"]["submissions_close_at"] = "2999-01-01T00:00:00+00:00"
@@ -1058,3 +1422,26 @@ async def test_a_thread_event_never_raises(wired):
     await jams_plugin.on_thread_create(SimpleNamespace(thread=post))
 
     wired.rest.edit_channel.assert_awaited_once()
+    assert wired.api.entries == {}
+
+
+async def test_a_failed_tag_does_not_stop_the_entry_being_recorded(wired):
+    wired.rest.edit_channel.side_effect = RuntimeError("boom")
+    post = showcase_post(created_at=datetime.now(UTC))
+    wired.api.body["jam"]["starts_at"] = "2000-01-01T00:00:00+00:00"
+    wired.api.body["jam"]["submissions_close_at"] = "2999-01-01T00:00:00+00:00"
+
+    await jams_plugin.on_thread_create(SimpleNamespace(thread=post))
+
+    assert wired.api.entries == {"700": "solo:1"}
+
+
+async def test_a_deleted_thread_event_forgets_the_entry(wired):
+    wired.api.entries["700"] = "solo:1"
+    event = SimpleNamespace(guild_id=GUILD, parent_id=SHOWCASE, thread_id=700)
+
+    await jams_plugin.on_thread_delete(event)
+
+    assert wired.api.entries == {}
+    wired.api.fail_posts.add("/remove")
+    await jams_plugin.on_thread_delete(event)

@@ -1,16 +1,18 @@
 """What the bot does for code jams.
 
-Four jobs, all driven by what an administrator set up on the jam admin pages:
+Five jobs, all driven by what an administrator set up on the jam admin pages:
 
 - post scheduled jam messages when they fall due;
 - tag a new post in the showcase forum with the jam's tag and its year;
+- record that post as an entry of its author's team, or of the author alone;
 - give and take the Jammer role (``/jam subscribe``, ``/jam unsubscribe``);
-- make a private team thread and add teammates up to the jam's team size
-  (``/jam team``, ``/jam invite``).
+- make a private team thread, add teammates up to the jam's team size and
+  let a member leave (``/jam team``, ``/jam invite``, ``/jam leave``).
 
-Jams live in the web database, and a team is its Discord thread: its members
-are the thread's members. The only state kept here is :class:`TeamLimits`,
-which is in memory and forgotten when the bot restarts.
+Jams, teams and entries live in the web database, which also decides who may
+join or leave a team. A team's roster is its rows there, not the people in
+its Discord thread. The only state kept here is :class:`TeamLimits`, which is
+in memory and forgotten when the bot restarts.
 
 The functions take the REST client and return the text to answer with, so the
 plugin (``smarter_dev.bot.plugins.jams``) is only wiring.
@@ -64,6 +66,12 @@ _REST_LOGGER = "hikari.rest"
 NO_JAM = "There is no code jam open right now."
 NOT_SET_UP = "The code jam is not set up in this server yet. Please tell a moderator."
 UNAVAILABLE = "I could not check the jam right now. Please try again in a minute."
+NOT_OPEN = "Teams can be made and changed only while the jam is open."
+TEAM_HAS_ENTRY = (
+    "Your team has posted its entry, so the team can no longer change. "
+    "Ask a moderator if something is wrong."
+)
+NOT_ON_A_TEAM = "You are not on a team for this jam."
 
 
 @dataclass(frozen=True)
@@ -132,6 +140,54 @@ class JamApi:
             return None
         self._guild_jams[guild_id] = (self._clock(), info)
         return info
+
+    async def _team_call(self, guild_id: int, path: str, body: dict) -> dict[str, Any]:
+        response = await self._client.post(
+            f"/guilds/{guild_id}/jam/{path}", json_data=body
+        )
+        return dict(response.json())
+
+    async def member(self, guild_id: int, user_id: int) -> dict[str, Any]:
+        """The member's team in the current jam, and why they cannot join one."""
+        response = await self._client.get(f"/guilds/{guild_id}/jam/members/{user_id}")
+        return dict(response.json())
+
+    async def create_team(
+        self, guild_id: int, name: str, thread_id: int, user_id: int
+    ) -> dict[str, Any]:
+        return await self._team_call(
+            guild_id,
+            "teams",
+            {"name": name, "thread_id": str(thread_id), "user_id": str(user_id)},
+        )
+
+    async def add_team_member(
+        self, guild_id: int, thread_id: int, user_id: int, invited_by: int
+    ) -> dict[str, Any]:
+        return await self._team_call(
+            guild_id,
+            f"teams/{thread_id}/members",
+            {"user_id": str(user_id), "invited_by": str(invited_by)},
+        )
+
+    async def leave_team(
+        self, guild_id: int, thread_id: int | str, user_id: int
+    ) -> dict[str, Any]:
+        return await self._team_call(
+            guild_id, f"teams/{thread_id}/leave", {"user_id": str(user_id)}
+        )
+
+    async def record_submission(
+        self, guild_id: int, thread_id: int, author_id: int
+    ) -> dict[str, Any]:
+        return await self._team_call(
+            guild_id,
+            "submissions",
+            {"thread_id": str(thread_id), "author_id": str(author_id)},
+        )
+
+    async def remove_submission(self, guild_id: int, thread_id: int) -> None:
+        await self._team_call(guild_id, f"submissions/{thread_id}/remove", {})
 
     async def claim_due_messages(self) -> list[dict[str, Any]]:
         """Claim the messages that are due. Each claim is handed out once."""
@@ -267,26 +323,37 @@ async def _report(call: Any, message_id: str) -> None:
 # -- Showcase tags ------------------------------------------------------------
 
 
+async def _entry_jam(api: JamApi, thread: Any, now: datetime | None) -> GuildJam | None:
+    """The guild's jam setup if ``thread`` is a new entry to its jam.
+
+    Only a post made in the guild's showcase forum while the jam is taking
+    submissions is an entry.
+    """
+    now = now or datetime.now(UTC)
+    if thread.type != hikari.ChannelType.GUILD_PUBLIC_THREAD:
+        return None
+    if now - thread.created_at > NEW_POST_WINDOW:
+        return None
+    info = await api.guild_jam(str(thread.guild_id))
+    if info is None or info.jam is None:
+        return None
+    showcase_id = info.channels.get("showcase")
+    if not showcase_id or str(thread.parent_id) != showcase_id:
+        return None
+    if not info.jam.accepts_entries(now):
+        return None
+    return info
+
+
 async def tag_showcase_post(
     api: JamApi, rest: Any, thread: Any, now: datetime | None = None
 ) -> bool:
     """Tag a new showcase post as an entry to the current jam.
 
-    Returns whether tags were added. Only a post made in the guild's showcase
-    forum while the jam is taking submissions is an entry.
+    Returns whether tags were added.
     """
-    now = now or datetime.now(UTC)
-    if thread.type != hikari.ChannelType.GUILD_PUBLIC_THREAD:
-        return False
-    if now - thread.created_at > NEW_POST_WINDOW:
-        return False
-    info = await api.guild_jam(str(thread.guild_id))
-    if info is None or info.jam is None:
-        return False
-    showcase_id = info.channels.get("showcase")
-    if not showcase_id or str(thread.parent_id) != showcase_id:
-        return False
-    if not info.jam.accepts_entries(now):
+    info = await _entry_jam(api, thread, now)
+    if info is None:
         return False
     wanted = [tag for tag in (info.jam.showcase_tag_id, info.jam.year_tag_id) if tag]
     current = [str(tag) for tag in thread.applied_tag_ids]
@@ -304,6 +371,81 @@ async def tag_showcase_post(
         logger.warning("could not tag jam entry %s: %r", thread.id, error)
         return False
     return True
+
+
+async def record_showcase_post(
+    api: JamApi, rest: Any, thread: Any, now: datetime | None = None
+) -> bool:
+    """Record a new showcase post as an entry; returns whether it was new.
+
+    The web API ties the post to its author's team, or to the author alone.
+    A team is told in its thread that its entry is in. When the team or the
+    solo member already had an entry, the post is left up and they are told
+    privately which post counts: a team in its thread, a solo member by DM.
+    """
+    info = await _entry_jam(api, thread, now)
+    if info is None:
+        return False
+    author_id = int(thread.owner_id)
+    result = await api.record_submission(
+        int(thread.guild_id), int(thread.id), author_id
+    )
+    if not result.get("ok") or not result.get("new"):
+        return False
+    team = result.get("team")
+    entry_id = str(result.get("entry_thread_id"))
+    if entry_id == str(thread.id):
+        if team:
+            await _tell(
+                rest,
+                int(team["thread_id"]),
+                f"Your team's entry is in: <#{thread.id}>. The team is now "
+                "fixed: `/jam invite` and `/jam leave` no longer work for it.",
+            )
+        return True
+    whose = "your team already has" if team else "you already have"
+    text = (
+        f"<@{author_id}>, your post <#{thread.id}> is up, but {whose} an entry "
+        f"in **{info.jam.name}**: <#{entry_id}>. Only the first post counts. "
+        "Ask a moderator if you want to switch."
+    )
+    try:
+        if team:
+            channel_id = int(team["thread_id"])
+        else:
+            channel_id = (await rest.create_dm_channel(author_id)).id
+    except hikari.HTTPError as error:
+        logger.info("could not open a DM about an extra jam post: %r", error)
+        return True
+    await _tell(rest, channel_id, text, mention=author_id if team else None)
+    return True
+
+
+async def forget_showcase_post(
+    api: JamApi, guild_id: int, parent_id: int, thread_id: int
+) -> bool:
+    """Drop the record of a showcase post that was deleted in Discord."""
+    info = await api.guild_jam(str(guild_id))
+    if info is None or str(parent_id) != info.channels.get("showcase"):
+        return False
+    await api.remove_submission(guild_id, thread_id)
+    return True
+
+
+async def _tell(
+    rest: Any, channel_id: int, text: str, *, mention: int | None = None
+) -> None:
+    """Post a notice; one that cannot be posted is logged and dropped."""
+    try:
+        await rest.create_message(
+            channel_id,
+            text,
+            mentions_everyone=False,
+            user_mentions=[mention] if mention else False,
+            role_mentions=False,
+        )
+    except hikari.HTTPError as error:
+        logger.warning("could not post a jam notice in %s: %r", channel_id, error)
 
 
 # -- Jammer role --------------------------------------------------------------
@@ -369,23 +511,14 @@ class TeamLimits:
         # (guild, member) -> when their last team thread was made.
         self._made: dict[tuple[int, int], float] = {}
         # A lock nobody holds or waits for is dropped.
-        self._locks: WeakValueDictionary[tuple[str, int], asyncio.Lock] = (
-            WeakValueDictionary()
-        )
-
-    def _lock(self, kind: str, key: int) -> asyncio.Lock:
-        lock = self._locks.get((kind, key))
-        if lock is None:
-            lock = self._locks[(kind, key)] = asyncio.Lock()
-        return lock
+        self._locks: WeakValueDictionary[int, asyncio.Lock] = WeakValueDictionary()
 
     def guild_lock(self, guild_id: int) -> asyncio.Lock:
         """One team is made at a time in a guild, so the cap is not overrun."""
-        return self._lock("guild", guild_id)
-
-    def thread_lock(self, thread_id: int) -> asyncio.Lock:
-        """One invite at a time in a thread, so two cannot share the last seat."""
-        return self._lock("thread", thread_id)
+        lock = self._locks.get(guild_id)
+        if lock is None:
+            lock = self._locks[guild_id] = asyncio.Lock()
+        return lock
 
     def wait_seconds(self, guild_id: int, user_id: int) -> float:
         """How long until the member may make another team; 0 if they may now."""
@@ -426,6 +559,45 @@ def _is_team_thread(thread: Any, chat_channel_id: str | None, bot_user_id: int) 
     )
 
 
+def _refusal(result: dict[str, Any], *, who: str | None = None) -> str:
+    """The sentence for a team change the web API refused.
+
+    ``who`` is the mention of the member being added; without it the sentence
+    is about the caller.
+    """
+    reason = result.get("reason")
+    team = result.get("team") or {}
+    if reason == "no_jam":
+        return NO_JAM
+    if reason == "not_open":
+        return NOT_OPEN
+    if reason == "solo_jam":
+        return "This is a solo jam, so there are no teams."
+    if reason == "on_a_team":
+        if who:
+            return f"{who} is already on another team for this jam."
+        where = f": <#{team['thread_id']}>" if team.get("thread_id") else ""
+        return (
+            f"You are already on a team for this jam{where}. "
+            "Leave it with `/jam leave` before you make another."
+        )
+    if reason == "has_entry":
+        if who:
+            return f"{who} has already posted an entry on their own for this jam."
+        return (
+            "You have already posted an entry on your own, so you cannot be "
+            "on a team for this jam."
+        )
+    if reason == "not_a_team":
+        return "Use this inside your team's thread. Make one with `/jam team`."
+    if reason == "not_your_team":
+        return "Only this team's members can add people to it."
+    if reason == "team_has_entry":
+        return TEAM_HAS_ENTRY
+    logger.warning("unknown jam team refusal: %r", reason)
+    return "I could not do that. Please tell a moderator."
+
+
 async def create_team(
     api: JamApi,
     rest: Any,
@@ -435,13 +607,16 @@ async def create_team(
     raw_name: str,
     *,
     bot_user_id: int,
+    now: datetime | None = None,
 ) -> str:
     """Make a private team thread in the jam chat channel and add its creator.
 
-    A member may make one team per :data:`TEAM_COOLDOWN_SECONDS`, and a guild
-    may have :data:`TEAM_THREADS_MAX` team threads open. Only threads the bot
-    made count towards that: a thread a member opens by hand in the chat
-    channel is not a team, so members cannot use up the cap for everyone.
+    A team belongs to the current jam, and a member is on one team per jam;
+    the web API holds both. A member may also make one team per
+    :data:`TEAM_COOLDOWN_SECONDS`, and a guild may have
+    :data:`TEAM_THREADS_MAX` team threads open. Only threads the bot made
+    count towards that: a thread a member opens by hand in the chat channel
+    is not a team, so members cannot use up the cap for everyone.
     """
     info = await api.guild_jam(str(guild_id))
     if info is None:
@@ -453,6 +628,11 @@ async def create_team(
         return NOT_SET_UP
     if info.jam.max_team_size < 2:
         return f"**{info.jam.name}** is a solo jam, so there are no teams."
+    if (now or datetime.now(UTC)) < info.jam.starts_at:
+        return (
+            f"Teams open when **{info.jam.name}** starts, "
+            f"<t:{int(info.jam.starts_at.timestamp())}:F>."
+        )
     name = clean_team_name(raw_name)
     if name is None:
         return f"A team name needs 1 to {TEAM_NAME_MAX} characters."
@@ -464,6 +644,11 @@ async def create_team(
                 f"in {_minutes(wait)}. To rename or remove a thread, ask a moderator."
             )
         failed = "I could not make the team thread. Please tell a moderator."
+        # Asked before the thread is made, so a member who cannot have a team
+        # does not get a thread that is deleted a moment later.
+        allowed = await api.member(guild_id, user_id)
+        if not allowed.get("ok"):
+            return _refusal(allowed)
         try:
             threads = await rest.fetch_active_threads(guild_id)
         except hikari.HTTPError as error:
@@ -487,33 +672,44 @@ async def create_team(
                 name,
                 auto_archive_duration=_TEAM_THREAD_ARCHIVE,
                 # Members cannot add people themselves; `/jam invite` does it
-                # and counts the seats.
+                # and the web API counts the seats.
                 invitable=False,
                 reason=f"Code jam team made by {user_id}",
             )
         except hikari.HTTPError as error:
             logger.warning("could not make a jam team in %s: %r", guild_id, error)
             return failed
+        # The record decides: the thread is a team only once the web API has
+        # the row. Anything else and the thread is removed again.
+        try:
+            made = await api.create_team(guild_id, name, int(thread.id), user_id)
+        except Exception as error:  # noqa: BLE001 - the thread must not be left over
+            logger.warning("could not record jam team %s: %r", thread.id, error)
+            # The web API may have saved the team before the call failed.
+            await _forget_member(api, guild_id, thread.id, user_id)
+            await _remove_empty_team(rest, thread.id)
+            return failed
+        if not made.get("ok"):
+            await _remove_empty_team(rest, thread.id)
+            return _refusal(made)
         try:
             await rest.add_thread_member(thread.id, user_id)
         except hikari.HTTPError as error:
             logger.warning("could not add %s to their jam team: %r", user_id, error)
+            await _forget_member(api, guild_id, thread.id, user_id)
             await _remove_empty_team(rest, thread.id)
             return failed
         limits.record(guild_id, user_id)
     others = info.jam.max_team_size - 1
-    try:
-        await rest.create_message(
-            thread.id,
-            f"This is your team's private thread for **{info.jam.name}**. "
-            f"Add up to {others} teammate{'s' if others != 1 else ''} here "
-            "with `/jam invite`.",
-            mentions_everyone=False,
-            user_mentions=False,
-            role_mentions=False,
-        )
-    except hikari.HTTPError as error:
-        logger.warning("could not post in jam team thread %s: %r", thread.id, error)
+    await _tell(
+        rest,
+        thread.id,
+        f"This is your team's private thread for **{info.jam.name}**. "
+        f"Add up to {others} teammate{'s' if others != 1 else ''} here "
+        "with `/jam invite`. Each member can be on one team, and "
+        "`/jam leave` takes you off this one. When one of you posts in the "
+        "showcase, that post is the team's entry and the team is fixed.",
+    )
     return f"Your team thread is ready: <#{thread.id}>"
 
 
@@ -525,58 +721,100 @@ async def _remove_empty_team(rest: Any, thread_id: Any) -> None:
         logger.warning("could not remove empty jam team %s: %r", thread_id, error)
 
 
+async def _forget_member(
+    api: JamApi, guild_id: int, thread_id: Any, user_id: int
+) -> None:
+    """Take back a roster row for a thread the member is not in."""
+    try:
+        await api.leave_team(guild_id, thread_id, user_id)
+    except Exception as error:  # noqa: BLE001 - reported; the caller already failed
+        logger.error(
+            "jam team %s: %s is on the roster but not in the thread: %r",
+            thread_id,
+            user_id,
+            error,
+        )
+
+
 async def invite_to_team(
     api: JamApi,
     rest: Any,
-    limits: TeamLimits,
     *,
     guild_id: int,
     channel_id: int,
-    bot_user_id: int,
+    user_id: int,
     target_id: int,
     target_is_bot: bool,
 ) -> str:
-    """Add a member to the team thread the command was used in.
+    """Add a member to the team whose thread the command was used in.
 
-    Only a thread the bot made counts as a team: a private thread a member
-    made by hand in the chat channel lets its members add anyone, so its
-    size could not be held to the limit.
+    The web API decides: the thread must be a team's, the caller must be on
+    that team, the team must have a free seat and no entry yet, and the new
+    member must not be on another team. Its checks run one at a time, so two
+    invites sent together cannot share the last seat.
     """
     info = await api.guild_jam(str(guild_id))
     if info is None:
         return UNAVAILABLE
     if info.jam is None:
         return NO_JAM
-    chat_channel_id = info.channels.get("chat")
-    here = "Use this inside your team's thread. Make one with `/jam team`."
-    try:
-        thread = await rest.fetch_channel(channel_id)
-    except hikari.HTTPError:
-        return here
-    if not _is_team_thread(thread, chat_channel_id, bot_user_id):
-        return here
     if target_is_bot:
         return "A bot cannot join a team."
-    # Counted and added under the thread's lock: two invites sent together
-    # would otherwise both see the last free seat.
-    async with limits.thread_lock(channel_id):
-        try:
-            members = await rest.fetch_thread_members(channel_id)
-        except hikari.HTTPError as error:
-            logger.warning("could not read jam team %s: %r", channel_id, error)
-            return "I could not read this team's members. Please try again."
-        people = {int(member.user_id) for member in members} - {bot_user_id}
-        if target_id in people:
-            return f"<@{target_id}> is already on this team."
+    added = await api.add_team_member(guild_id, channel_id, target_id, user_id)
+    if added.get("reason") == "full":
         limit = info.jam.max_team_size
-        if len(people) >= limit:
-            return f"This team is full. A team can have up to {limit} people."
-        try:
-            await rest.add_thread_member(channel_id, target_id)
-        except hikari.HTTPError as error:
-            logger.warning("could not add to jam team %s: %r", channel_id, error)
-            return (
-                "I could not add them. Check that they are still in the server "
-                "and that this thread is not locked, then try again."
-            )
+        return f"This team is full. A team can have up to {limit} people."
+    if not added.get("ok"):
+        return _refusal(added, who=f"<@{target_id}>")
+    try:
+        # Also for someone already on the team: they may have left the thread
+        # by hand, and nobody but the bot can let them back in.
+        await rest.add_thread_member(channel_id, target_id)
+    except hikari.HTTPError as error:
+        logger.warning("could not add to jam team %s: %r", channel_id, error)
+        if not added.get("already"):
+            await _forget_member(api, guild_id, channel_id, target_id)
+        return (
+            "I could not add them. Check that they are still in the server "
+            "and that this thread is not locked, then try again."
+        )
+    if added.get("already"):
+        return f"<@{target_id}> is already on this team."
     return f"<@{target_id}> is now on the team."
+
+
+async def leave_team(api: JamApi, rest: Any, guild_id: int, user_id: int) -> str:
+    """Take the member off their team in the current jam (``/jam leave``).
+
+    Works from any channel: a member has one team. A team whose last member
+    leaves is gone, and its thread is closed.
+    """
+    info = await api.guild_jam(str(guild_id))
+    if info is None:
+        return UNAVAILABLE
+    if info.jam is None:
+        return NO_JAM
+    team = (await api.member(guild_id, user_id)).get("team")
+    if not team:
+        return NOT_ON_A_TEAM
+    thread_id = int(team["thread_id"])
+    left = await api.leave_team(guild_id, thread_id, user_id)
+    if not left.get("ok"):
+        return _refusal(left)
+    try:
+        await rest.remove_thread_member(thread_id, user_id)
+    except hikari.HTTPError as error:
+        logger.info("could not take %s out of thread %s: %r", user_id, thread_id, error)
+    if left.get("members_left"):
+        await _tell(rest, thread_id, f"<@{user_id}> left the team.")
+    else:
+        try:
+            await rest.edit_channel(
+                thread_id,
+                archived=True,
+                locked=True,
+                reason="Code jam team with no members left",
+            )
+        except hikari.HTTPError as error:
+            logger.warning("could not close empty jam team %s: %r", thread_id, error)
+    return f"You left **{team['name']}**. You can make or join another team."
