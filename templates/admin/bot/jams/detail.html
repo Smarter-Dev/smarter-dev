@@ -27,6 +27,7 @@
                     <tbody>
                         <tr><th>Starts</th><td>{{ jam.starts_at.strftime("%Y-%m-%d %H:%M") }} UTC</td></tr>
                         <tr><th>Submissions close</th><td>{{ jam.submissions_close_at.strftime("%Y-%m-%d %H:%M") }} UTC</td></tr>
+                        <tr><th>Team threads locked</th><td>{% if jam.teams_closed_at %}{{ jam.teams_closed_at.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}<span class="sk-text-muted">Not yet</span>{% endif %}</td></tr>
                         <tr><th>Voting ends</th><td>{% if jam.voting_ends_at %}{{ jam.voting_ends_at.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}<span class="sk-text-muted">Not set</span>{% endif %}</td></tr>
                         <tr><th>Winners</th><td>{% if jam.winners_at %}{{ jam.winners_at.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}<span class="sk-text-muted">Not set</span>{% endif %}</td></tr>
                         <tr><th>Showcase tags</th><td>{{ jam.tag_name }}, {{ jam.year_tag_name }}</td></tr>
@@ -128,7 +129,7 @@
                                 {% endif %}
                             </td>
                             <td style="white-space:nowrap;">
-                                <form method="post" action="{{ jam_url }}/entries/{{ row.thread_id }}/remove" style="display:inline;" onsubmit="return confirm('Stop counting this post as an entry? The post stays in Discord. If the same team or member has a later post, that one becomes the entry.')">
+                                <form method="post" action="{{ jam_url }}/entries/{{ row.thread_id }}/remove" style="display:inline;" onsubmit="return confirm('Stop counting this post as an entry? The post stays in Discord and you can restore it here. If the same team or member has a later post, that one becomes the entry.')">
 {{ csrf_field() }}
                                     <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Remove entry</button>
                                 </form>
@@ -139,6 +140,85 @@
                 </table>
                 {% else %}
                 <p class="sk-no-items">No entries yet.</p>
+                {% endif %}
+                {% if removed %}
+                <table class="sk-admin-table" style="margin-top:1rem;">
+                    <thead>
+                        <tr>
+                            <th>Removed post</th>
+                            <th>From</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in removed %}
+                        <tr>
+                            <td><a href="{{ discord_url }}{{ row.thread_id }}" target="_blank" rel="noopener"><code>{{ row.thread_id }}</code></a></td>
+                            <td>{% if row.team_name %}{{ row.team_name }}{% else %}Solo{% endif %}<div class="sk-text-muted" style="font-size:0.85rem;">posted by <code>{{ row.author_id }}</code></div></td>
+                            <td style="white-space:nowrap;">
+                                <form method="post" action="{{ jam_url }}/entries/{{ row.thread_id }}/restore" style="display:inline;">
+{{ csrf_field() }}
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">Restore</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <small class="sk-text-muted">Removed posts do not count and are not in the results.</small>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Results</div>
+            <div class="sk-panel-body">
+                {% if results is none %}
+                {% if not jam.voting_ends_at %}
+                <p class="sk-no-items">Voting end is not set, so votes are never counted. Set it on the Edit page.</p>
+                {% elif voting_ended %}
+                {% if teams_closing %}
+                <p class="sk-no-items">Voting has ended, but the bot has not finished locking the team threads. It counts the votes after that, or {{ close_within_days }} days after submissions closed at the latest. Check the bot's log for the thread it cannot lock.</p>
+                {% else %}
+                <p class="sk-no-items">Voting has ended. The bot is counting the votes. Reload this page in a few minutes.</p>
+                {% endif %}
+                {% else %}
+                <p class="sk-no-items">The bot counts the votes when voting ends, {{ jam.voting_ends_at.strftime("%Y-%m-%d %H:%M") }} UTC.</p>
+                {% endif %}
+                {% else %}
+                {% if results %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Place</th>
+                            <th>Entry</th>
+                            <th>From</th>
+                            <th>Reactions</th>
+                            <th>People who reacted</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in results %}
+                        <tr>
+                            <td>{{ row.rank }}{% if row.tied %} <span class="sk-pill sk-pill-draft">Tied</span>{% endif %}</td>
+                            <td><a href="{{ discord_url }}{{ row.thread_id }}" target="_blank" rel="noopener"><code>{{ row.thread_id }}</code></a></td>
+                            <td>{% if row.team_name %}{{ row.team_name }}{% else %}Solo{% endif %}<div class="sk-text-muted" style="font-size:0.85rem;">posted by <code>{{ row.author_id }}</code></div></td>
+                            <td>{{ row.reactions }}</td>
+                            <td>{{ row.reactors }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No entries to rank.</p>
+                {% endif %}
+                <small class="sk-text-muted">Counted {{ votes_counted_at.strftime("%Y-%m-%d %H:%M") }} UTC. Reactions are every reaction on the entry's first message, as Discord shows them. Entries with the same reactions are ordered by how many different people reacted; "Tied" entries are level on both.</small>
+                <div style="margin-top:1rem;">
+                    <form method="post" action="{{ jam_url }}/recount" style="display:inline;" onsubmit="return confirm('Throw away these counts and count the reactions again as they are now?')">
+{{ csrf_field() }}
+                        <button type="submit" class="sk-btn-outline sk-btn-small">Count again</button>
+                    </form>
+                </div>
                 {% endif %}
             </div>
         </div>

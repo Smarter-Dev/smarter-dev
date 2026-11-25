@@ -35,7 +35,10 @@ The bot needs these permissions:
 - Create Private Threads, for team threads;
 - Manage Threads, to put the jam's tags on members' showcase posts (the tags
   are moderator-only), to remove a team thread that could not be finished,
-  and to lock a team thread once its last member has left;
+  and to lock a team thread once its last member has left or submissions
+  have closed;
+- Read Message History in the showcase forum, to find posts it missed and to
+  count reactions;
 - Mention @everyone, @here and All Roles, to ping the `Jammer` role, which
   members cannot mention themselves.
 
@@ -76,11 +79,54 @@ later post, that one becomes the entry.
 The jam's admin page lists the teams with their members, and every recorded
 post marked "Entry" or "Extra post". "Remove entry" stops counting a post and
 leaves it in Discord; use it when a team wants a later post to count instead.
-Removing a team's only post unlocks the team again.
+Removing a team's only post unlocks the team again. A removed post is listed
+under the entries with a "Restore" button, which counts it again.
 
 Only threads made by `/jam team` after this feature went live are teams. A
 team thread made before that has no team record: its members count as solo
 until they run `/jam team` again.
+
+## When submissions close, and results
+
+Every ten minutes the bot asks the web app what each jam needs.
+
+**Missed posts.** While a jam is open, the bot looks through the showcase
+forum for posts it never recorded, for example ones made while it was
+restarting. It records and tags them as if it had seen them when they were
+posted, using the time Discord says the post was made. Only posts made
+between the jam's start and its close count.
+
+**Closing.** After submissions close the bot looks for missed posts one last
+time. Then it posts a notice in every team thread and locks the thread. The
+notice names the team's entry, or says the team did not post one, and says
+when voting ends. If a thread cannot be locked the bot tries again on its next
+round. The admin page shows "Team threads locked" once every team is done. A
+jam that closed more than seven days ago without this happening is left alone.
+
+**Results.** An entry's score is the number of reactions on the first message
+of its post when voting ends, exactly as Discord shows them. Every emoji
+counts and nothing is left out. Ties go to the entry that more different
+people reacted to. Entries level on both share a place and are marked "Tied".
+
+After voting ends the bot counts once and the jam's admin page shows the
+Results table: place, entry, reactions, and people who reacted. "Count again"
+throws the counts away, and the bot counts again within ten minutes using the
+reactions as they are then.
+
+Things to know:
+
+- The bot needs Read Message History in the showcase forum to count. If any
+  post cannot be read, nothing is saved and the whole count is tried again.
+- The count runs on the bot's first round after voting ends, so reactions
+  added in those last minutes are included.
+- The count waits for the team threads to be locked. If that keeps failing,
+  results appear seven days after submissions closed.
+- Super reactions count as reactions, but the people who left them are not in
+  "people who reacted".
+- A post deleted in Discord before the count is dropped. A post whose first
+  message was deleted scores zero.
+- Do not move a jam's dates after its submissions have closed. The closing
+  notice and the count each run once.
 
 ## Team threads are private: keep handlers off `#jam-chat`
 

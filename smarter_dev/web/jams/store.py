@@ -150,6 +150,16 @@ async def current_jam(
     return min(open_jams, key=lambda jam: as_utc(jam.starts_at), default=None)
 
 
+async def jam_taking_entries_at(
+    session: AsyncSession, guild_id: str, moment: datetime
+) -> Jam | None:
+    """The guild's jam that was open at ``moment``: started, submissions not closed."""
+    for jam in await list_jams(session, guild_id):
+        if as_utc(jam.starts_at) <= moment <= as_utc(jam.submissions_close_at):
+            return jam
+    return None
+
+
 async def get_setup(session: AsyncSession, guild_id: str) -> JamDiscordSetup | None:
     """The guild's shared jam channels and role, if setup has ever run."""
     return await session.get(JamDiscordSetup, guild_id)

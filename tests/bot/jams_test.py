@@ -77,6 +77,9 @@ class FakeApi:
         # showcase thread id -> the team's thread id, or "solo:<author>"
         self.entries: dict[str, str] = {}
         self.refuse: dict[str, str] = {}
+        # What ``/jam-work`` answers, and what its reports are answered with.
+        self.work: list[dict] = []
+        self.work_reply: dict = {"ok": True, "reason": None}
 
     def add_team(self, thread_id: int = THREAD, *members: int, name: str = "Elves"):
         self.teams[str(thread_id)] = {
@@ -115,6 +118,9 @@ class FakeApi:
             if "members" in self.refuse:
                 body = {"ok": False, "reason": self.refuse["members"], "team": None}
             return SimpleNamespace(json=lambda: body)
+        if path == "/jam-work":
+            work = list(self.work)
+            return SimpleNamespace(json=lambda: {"jams": work})
         return SimpleNamespace(json=lambda: self.body)
 
     async def post(self, path, json_data=None):
@@ -130,6 +136,8 @@ class FakeApi:
         if path.startswith(f"{JAM_API}/"):
             body = self._jam_post(path[len(JAM_API) + 1 :].split("/"), json_data)
             return SimpleNamespace(json=lambda: body)
+        if path.startswith("/jam-work/"):
+            return SimpleNamespace(json=lambda: dict(self.work_reply))
         return SimpleNamespace(json=lambda: {"success": True})
 
     def _jam_post(self, parts: list[str], data: dict) -> dict:
@@ -203,7 +211,18 @@ def make_rest() -> Mock:
     rest.create_thread = AsyncMock(return_value=SimpleNamespace(id=THREAD))
     rest.fetch_active_threads = AsyncMock(return_value=[])
     rest.create_dm_channel = AsyncMock(return_value=SimpleNamespace(id=DM))
+    rest.fetch_public_archived_threads = Mock(side_effect=lambda channel: lazy([]))
     return rest
+
+
+def lazy(items):
+    """What hikari returns for a paged list: something to ``async for`` over."""
+
+    async def each():
+        for item in items:
+            yield item
+
+    return each()
 
 
 def team_thread(**overrides) -> SimpleNamespace:
@@ -238,6 +257,7 @@ def showcase_post(**overrides) -> SimpleNamespace:
         "type": hikari.ChannelType.GUILD_PUBLIC_THREAD,
         "created_at": NOW - timedelta(seconds=2),
         "applied_tag_ids": [],
+        "is_archived": False,
     }
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -1139,7 +1159,14 @@ async def test_a_team_members_post_is_the_teams_entry():
     assert await record(fake, rest, owner_id=2) is True
 
     assert fake.posts == [
-        (f"{JAM_API}/submissions", {"thread_id": "700", "author_id": "2"})
+        (
+            f"{JAM_API}/submissions",
+            {
+                "thread_id": "700",
+                "author_id": "2",
+                "posted_at": (NOW - timedelta(seconds=2)).isoformat(),
+            },
+        )
     ]
     assert fake.entries == {"700": str(THREAD)}
     notice = rest.create_message.await_args
@@ -1249,6 +1276,521 @@ async def test_a_deleted_showcase_post_is_forgotten():
     assert fake.entries == {}
 
 
+# -- after the jam starts ------------------------------------------------------
+
+CLOSE = datetime(2027, 1, 3, tzinfo=UTC)
+VOTING_ENDS = datetime(2027, 1, 10, tzinfo=UTC)
+
+
+def jam_work(**overrides) -> dict:
+    """One jam as ``/jam-work`` lists it while it is open."""
+    work = {
+        "jam_id": "j1",
+        "guild_id": str(GUILD),
+        "name": "Holiday Chatbot Jam",
+        "showcase_channel_id": str(SHOWCASE),
+        "tag_ids": ["31", "32"],
+        "starts_at": "2026-12-01T00:00:00+00:00",
+        "submissions_close_at": CLOSE.isoformat(),
+        "voting_ends_at": VOTING_ENDS.isoformat(),
+        "known_posts": [],
+        "find_missed_posts": True,
+        "teams_to_close": None,
+        "count_votes": False,
+    }
+    work.update(overrides)
+    return work
+
+
+def closing_work(*teams: tuple[str, int, str | None], **overrides) -> dict:
+    return jam_work(
+        teams_to_close=[
+            {"name": name, "thread_id": str(thread), "entry_thread_id": entry}
+            for name, thread, entry in teams
+        ],
+        **overrides,
+    )
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+async def run_work(fake, rest, pacer=None, **kwargs) -> None:
+    await jams.run_jam_work(
+        jams.JamApi(fake), rest, pacer or jams.WorkPacer(), **kwargs
+    )
+
+
+def submissions(fake) -> list[dict]:
+    return [body for path, body in fake.posts if path == f"{JAM_API}/submissions"]
+
+
+def work_reports(fake) -> list[tuple[str, dict | None]]:
+    return [post for post in fake.posts if post[0].startswith("/jam-work/")]
+
+
+def notices(rest) -> dict[int, str]:
+    return {call.args[0]: call.args[1] for call in rest.create_message.await_args_list}
+
+
+async def test_a_missed_post_is_tagged_recorded_and_announced():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(THREAD, 1, 2)
+    fake.work = [jam_work(known_posts=["700"])]
+    made = NOW - timedelta(days=3)
+    rest.fetch_active_threads.return_value = [
+        showcase_post(id=700),
+        showcase_post(id=701, owner_id=2, created_at=made),
+    ]
+
+    await run_work(fake, rest)
+
+    rest.fetch_active_threads.assert_awaited_once_with(GUILD)
+    rest.fetch_public_archived_threads.assert_called_once_with(SHOWCASE)
+    assert submissions(fake) == [
+        {"thread_id": "701", "author_id": "2", "posted_at": made.isoformat()}
+    ]
+    rest.edit_channel.assert_awaited_once()
+    assert rest.edit_channel.await_args.args == (701,)
+    assert rest.edit_channel.await_args.kwargs["applied_tags"] == [31, 32]
+    assert "Your team's entry is in: <#701>" in notices(rest)[THREAD]
+    assert work_reports(fake) == []
+
+
+@pytest.mark.parametrize(
+    "post",
+    [
+        {"parent_id": CHAT},
+        {"type": hikari.ChannelType.GUILD_PRIVATE_THREAD},
+        {"created_at": datetime(2026, 11, 30, 23, 59, 59, tzinfo=UTC)},
+        {"created_at": CLOSE + timedelta(seconds=1)},
+    ],
+    ids=["another channel", "private thread", "before the jam", "after the close"],
+)
+async def test_only_posts_made_in_the_showcase_during_the_jam_are_picked_up(post):
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [jam_work()]
+    rest.fetch_active_threads.return_value = [showcase_post(id=701, **post)]
+
+    await run_work(fake, rest)
+
+    assert fake.posts == []
+    rest.edit_channel.assert_not_awaited()
+
+
+async def test_posts_made_at_the_first_and_last_moment_are_picked_up():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [jam_work()]
+    rest.fetch_active_threads.return_value = [
+        showcase_post(id=702, created_at=CLOSE),
+        showcase_post(id=701, created_at=datetime(2026, 12, 1, tzinfo=UTC)),
+    ]
+
+    await run_work(fake, rest)
+
+    # Oldest first, so the earlier post is the one that counts.
+    assert [body["thread_id"] for body in submissions(fake)] == ["701", "702"]
+
+
+async def test_an_archived_missed_post_is_recorded_but_not_reopened_to_tag_it():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [jam_work()]
+    before_jam = datetime(2026, 11, 20, tzinfo=UTC)
+    archived = [
+        showcase_post(id=702, is_archived=True, archive_timestamp=NOW),
+        showcase_post(
+            id=650, is_archived=True, archive_timestamp=before_jam, created_at=NOW
+        ),
+        # Never reached: the list is newest first and 650 is from before the jam.
+        showcase_post(id=703, is_archived=True, archive_timestamp=NOW),
+    ]
+    rest.fetch_public_archived_threads = Mock(
+        side_effect=lambda channel: lazy(archived)
+    )
+
+    await run_work(fake, rest)
+
+    assert [body["thread_id"] for body in submissions(fake)] == ["702"]
+    rest.edit_channel.assert_not_awaited()
+
+
+async def test_missed_posts_are_looked_for_once_per_wait():
+    fake, rest, clock = FakeApi(), make_rest(), Clock()
+    fake.work = [jam_work()]
+    pacer = jams.WorkPacer(clock=clock)
+
+    await run_work(fake, rest, pacer)
+    clock.now += jams.WORK_EVERY_SECONDS - 1
+    await run_work(fake, rest, pacer)
+
+    assert rest.fetch_active_threads.await_count == 1
+
+    clock.now += 1
+    await run_work(fake, rest, pacer)
+
+    assert rest.fetch_active_threads.await_count == 2
+
+
+async def test_a_forum_that_cannot_be_read_is_tried_again_later(caplog):
+    fake, rest, clock = FakeApi(), make_rest(), Clock()
+    fake.work = [closing_work(("Elves", THREAD, None))]
+    rest.fetch_active_threads.side_effect = server_error()
+    pacer = jams.WorkPacer(clock=clock)
+
+    with caplog.at_level(logging.WARNING, logger="smarter_dev.bot.jams"):
+        await run_work(fake, rest, pacer)
+
+    # A team is not told it has no entry while the entries cannot be checked.
+    assert "could not read the showcase" in caplog.text
+    rest.edit_channel.assert_not_awaited()
+    assert fake.posts == []
+
+    rest.fetch_active_threads.side_effect = None
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    clock.now += jams.WORK_EVERY_SECONDS
+    await run_work(fake, rest, pacer)
+
+    assert work_reports(fake) == [("/jam-work/j1/teams-closed", None)]
+
+
+async def test_no_showcase_means_no_posts_to_look_for():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [jam_work(showcase_channel_id=None)]
+
+    await run_work(fake, rest)
+
+    rest.fetch_active_threads.assert_not_awaited()
+
+
+async def test_closing_locks_each_team_thread_and_tells_the_team():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, "700"), ("Reindeer", 501, None))]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    order = Mock()
+    order.attach_mock(rest.edit_channel, "lock")
+    order.attach_mock(rest.create_message, "tell")
+
+    await run_work(fake, rest)
+
+    assert [call[0] for call in order.mock_calls] == ["lock", "tell", "lock", "tell"]
+    for call, thread in zip(rest.edit_channel.await_args_list, (500, 501), strict=True):
+        assert call.args == (thread,)
+        assert call.kwargs["locked"] is True and call.kwargs["archived"] is False
+    told = notices(rest)
+    assert "Submissions for **Holiday Chatbot Jam** are closed" in told[500]
+    assert "this thread is now locked" in told[500]
+    assert "Your team's entry: <#700>" in told[500]
+    assert "Your team did not post an entry." in told[501]
+    assert f"Voting is open until <t:{int(VOTING_ENDS.timestamp())}:F>" in told[501]
+    assert f"<#{SHOWCASE}>" in told[501]
+    for call in rest.create_message.await_args_list:
+        assert call.kwargs["user_mentions"] is False
+        assert call.kwargs["mentions_everyone"] is False
+    assert work_reports(fake) == [("/jam-work/j1/teams-closed", None)]
+
+
+async def test_the_closing_notice_leaves_out_voting_that_is_not_coming():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [
+        closing_work(("Elves", 500, None), voting_ends_at=None),
+        closing_work(
+            ("Old", 501, None),
+            jam_id="j0",
+            voting_ends_at="2020-01-10T00:00:00+00:00",
+        ),
+    ]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+
+    await run_work(fake, rest)
+
+    told = notices(rest)
+    assert "Voting" not in told[500] and "Voting" not in told[501]
+
+
+async def test_a_team_already_locked_or_gone_is_not_told_again():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None), ("Gone", 501, None))]
+    rest.fetch_channel = AsyncMock(
+        side_effect=[team_thread(is_locked=True), not_found()]
+    )
+
+    await run_work(fake, rest)
+
+    rest.edit_channel.assert_not_awaited()
+    rest.create_message.assert_not_awaited()
+    assert work_reports(fake) == [("/jam-work/j1/teams-closed", None)]
+
+
+async def test_a_thread_deleted_as_it_is_locked_counts_as_done():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    rest.edit_channel.side_effect = not_found()
+
+    await run_work(fake, rest)
+
+    rest.create_message.assert_not_awaited()
+    assert work_reports(fake) == [("/jam-work/j1/teams-closed", None)]
+
+
+@pytest.mark.parametrize("step", ["fetch_channel", "edit_channel"])
+async def test_a_team_that_cannot_be_locked_keeps_the_closing_open(step, caplog):
+    fake, rest, clock = FakeApi(), make_rest(), Clock()
+    fake.work = [closing_work(("Elves", 500, None), ("Reindeer", 501, None))]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    getattr(rest, step).side_effect = [forbidden(), team_thread(is_locked=False)]
+    pacer = jams.WorkPacer(clock=clock)
+
+    with caplog.at_level(logging.WARNING, logger="smarter_dev.bot.jams"):
+        await run_work(fake, rest, pacer)
+
+    # The other team is still closed; the closing is not reported as done.
+    assert "team thread 500 (Elves)" in caplog.text
+    assert list(notices(rest)) == [501]
+    assert work_reports(fake) == []
+
+    await run_work(fake, rest, pacer)
+
+    assert rest.fetch_channel.await_count == 2
+
+
+async def test_a_notice_that_cannot_be_posted_does_not_hold_up_the_closing():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    rest.create_message.side_effect = forbidden()
+
+    await run_work(fake, rest)
+
+    rest.edit_channel.assert_awaited_once()
+    assert work_reports(fake) == [("/jam-work/j1/teams-closed", None)]
+
+
+async def test_a_post_found_at_the_close_is_named_as_the_teams_entry():
+    fake, rest = FakeApi(), make_rest()
+    fake.add_team(500, 1)
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_active_threads.return_value = [
+        showcase_post(id=700, owner_id=1, created_at=CLOSE - timedelta(minutes=1))
+    ]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    api = jams.JamApi(fake)
+    asked = api.jam_work
+
+    async def ask_again():
+        # The web API now knows the post, as it would after recording it.
+        if "700" in fake.entries:
+            fake.work = [closing_work(("Elves", 500, "700"), known_posts=["700"])]
+        return await asked()
+
+    api.jam_work = ask_again
+
+    await jams.run_jam_work(api, rest, jams.WorkPacer())
+
+    assert fake.gets.count("/jam-work") == 2
+    closing = rest.create_message.await_args_list[-1]
+    assert closing.args[0] == 500
+    assert "Your team's entry: <#700>" in closing.args[1]
+    assert "did not post" not in closing.args[1]
+    assert work_reports(fake) == [("/jam-work/j1/teams-closed", None)]
+
+
+async def test_closing_stops_if_the_jam_is_no_longer_closing_after_a_found_post():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_active_threads.return_value = [
+        showcase_post(id=700, owner_id=9, created_at=CLOSE - timedelta(minutes=1))
+    ]
+    api = jams.JamApi(fake)
+    asked = api.jam_work
+
+    async def ask_again():
+        if fake.entries:
+            fake.work = []
+        return await asked()
+
+    api.jam_work = ask_again
+
+    await jams.run_jam_work(api, rest, jams.WorkPacer())
+
+    rest.edit_channel.assert_awaited_once()  # the tag on the found post
+    assert work_reports(fake) == []
+
+
+def reaction(emoji: str, count: int) -> SimpleNamespace:
+    return SimpleNamespace(emoji=emoji, count=count)
+
+
+def voted_rest(posts: dict[int, dict[str, list[int]]], extra: dict | None = None):
+    """A server where each post's first message has these reactors per emoji.
+
+    ``extra`` adds to an emoji's shown count without a listed reactor, the
+    way a super reaction does.
+    """
+    rest = make_rest()
+    extra = extra or {}
+
+    async def fetch_message(channel, message):
+        assert channel == message
+        if isinstance(posts.get(channel), Exception):
+            raise posts[channel]
+        return SimpleNamespace(
+            reactions=[
+                reaction(emoji, len(users) + extra.get((channel, emoji), 0))
+                for emoji, users in posts[channel].items()
+            ]
+        )
+
+    rest.fetch_message = AsyncMock(side_effect=fetch_message)
+    rest.fetch_reactions_for_emoji = Mock(
+        side_effect=lambda channel, message, emoji: lazy(
+            SimpleNamespace(id=user) for user in posts[channel][emoji]
+        )
+    )
+    return rest
+
+
+def counting_work(*posts: str, **overrides) -> dict:
+    return jam_work(
+        known_posts=list(posts), find_missed_posts=False, count_votes=True, **overrides
+    )
+
+
+async def test_votes_are_every_reaction_and_the_people_behind_them():
+    fake = FakeApi()
+    fake.work = [counting_work("700", "701", "702")]
+    rest = voted_rest(
+        {
+            700: {"🎄": [1, 2, 3], "⭐": [1, 2], "🔥": [4]},
+            701: {"🎄": [5]},
+            702: {},
+        },
+        extra={(701, "🎄"): 2},
+    )
+
+    await run_work(fake, rest)
+
+    assert work_reports(fake) == [
+        (
+            "/jam-work/j1/votes",
+            {
+                "counts": [
+                    {"thread_id": "700", "reactions": 6, "reactors": 4},
+                    {"thread_id": "701", "reactions": 3, "reactors": 1},
+                    {"thread_id": "702", "reactions": 0, "reactors": 0},
+                ],
+                "gone": [],
+            },
+        )
+    ]
+    rest.fetch_active_threads.assert_not_awaited()
+
+
+async def test_a_deleted_post_is_reported_gone_and_a_deleted_first_message_is_zero():
+    fake = FakeApi()
+    fake.work = [counting_work("700", "701", "702")]
+    rest = voted_rest({700: not_found(), 701: not_found(), 702: {"🎄": [1]}})
+    rest.fetch_channel = AsyncMock(side_effect=[not_found(), showcase_post(id=701)])
+
+    await run_work(fake, rest)
+
+    [(_, body)] = work_reports(fake)
+    assert body == {
+        "counts": [
+            {"thread_id": "701", "reactions": 0, "reactors": 0},
+            {"thread_id": "702", "reactions": 1, "reactors": 1},
+        ],
+        "gone": ["700"],
+    }
+
+
+async def test_a_count_that_cannot_be_finished_saves_nothing(caplog):
+    fake, clock = FakeApi(), Clock()
+    fake.work = [counting_work("700", "701")]
+    posts = {700: {"🎄": [1]}, 701: server_error()}
+    rest = voted_rest(posts)
+    pacer = jams.WorkPacer(clock=clock)
+
+    with caplog.at_level(logging.WARNING, logger="smarter_dev.bot.jams"):
+        await run_work(fake, rest, pacer)
+
+    assert work_reports(fake) == []
+    assert "jam work failed for j1" in caplog.text
+
+    posts[701] = {"🎄": [1, 2]}
+    await run_work(fake, rest, pacer)
+    assert work_reports(fake) == []
+
+    clock.now += jams.WORK_EVERY_SECONDS
+    await run_work(fake, rest, pacer)
+
+    [(_, body)] = work_reports(fake)
+    assert [count["reactions"] for count in body["counts"]] == [1, 2]
+
+
+async def test_a_refused_count_is_logged(caplog):
+    fake = FakeApi()
+    fake.work = [counting_work("700")]
+    fake.work_reply = {"ok": False, "reason": "too_early"}
+
+    with caplog.at_level(logging.WARNING, logger="smarter_dev.bot.jams"):
+        await run_work(fake, voted_rest({700: {}}))
+
+    assert "votes for jam j1 were refused: too_early" in caplog.text
+
+
+async def test_one_jams_failure_does_not_stop_the_next(caplog):
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [
+        closing_work(("Elves", 500, None), jam_id="j0"),
+        jam_work(jam_id="j1"),
+    ]
+    fake.fail_posts = {"/j0/teams-closed"}
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    rest.fetch_active_threads.side_effect = [[], [showcase_post(id=701)]]
+
+    with caplog.at_level(logging.WARNING, logger="smarter_dev.bot.jams"):
+        await run_work(fake, rest)
+
+    assert "jam work failed for j0" in caplog.text
+    assert [body["thread_id"] for body in submissions(fake)] == ["701"]
+
+
+async def test_each_post_and_team_is_finished_even_through_a_shutdown():
+    fake, rest = FakeApi(), make_rest()
+    fake.work = [closing_work(("Elves", 500, None))]
+    rest.fetch_active_threads.return_value = [
+        showcase_post(id=700, created_at=CLOSE - timedelta(minutes=1))
+    ]
+    rest.fetch_channel = AsyncMock(return_value=team_thread(is_locked=False))
+    shielded = []
+
+    async def shield(work):
+        shielded.append(work.__name__)
+        return await work
+
+    await run_work(fake, rest, shield=shield)
+
+    assert shielded == ["_record_post", "_close_team"]
+
+
+def test_work_from_the_web_api_is_read_with_its_times_and_ids():
+    work = jams._parse_work(
+        closing_work(("Elves", 500, "700"), known_posts=["700"], voting_ends_at=None)
+    )
+
+    assert (work.guild_id, work.showcase_channel_id) == (GUILD, SHOWCASE)
+    assert work.submissions_close_at == CLOSE and work.voting_ends_at is None
+    assert work.known_posts == frozenset({"700"})
+    assert work.teams_to_close == (("Elves", 500, "700"),)
+    assert jams._parse_work(jam_work()).teams_to_close is None
+
+
 # -- the plugin ----------------------------------------------------------------
 
 
@@ -1263,6 +1805,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(jams_plugin.plugin, "_app", bot)
     monkeypatch.setattr(jams_plugin, "_api", None)
     monkeypatch.setattr(jams_plugin, "_limits", jams.TeamLimits())
+    monkeypatch.setattr(jams_plugin, "_pacer", jams.WorkPacer())
     return SimpleNamespace(api=api, rest=rest, bot=bot)
 
 
@@ -1395,6 +1938,44 @@ async def test_poll_posts_only_when_this_process_is_acting(wired, monkeypatch):
 
     wired.rest.create_message.assert_awaited_once()
     assert wired.api.posts[-1][0] == "/jam-messages/m1/mark-sent"
+
+
+async def test_jam_work_runs_only_when_this_process_is_acting(wired, monkeypatch):
+    wired.api.work = [jam_work()]
+    wired.rest.fetch_active_threads.return_value = [showcase_post(id=701)]
+    monkeypatch.setattr(leadership, "is_acting", lambda: False)
+
+    await jams_plugin.work_once()
+
+    assert wired.api.gets == [] and wired.api.posts == []
+    monkeypatch.setattr(leadership, "is_acting", lambda: True)
+
+    await jams_plugin.work_once()
+
+    assert [path for path, _ in wired.api.posts] == [f"{JAM_API}/submissions"]
+
+
+async def test_unloading_stops_both_loops(wired, monkeypatch):
+    started = []
+
+    async def forever():
+        started.append(1)
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(jams_plugin, "poll_once", forever)
+    monkeypatch.setattr(jams_plugin, "work_once", forever)
+    monkeypatch.setattr(jams_plugin, "_task", None)
+    monkeypatch.setattr(jams_plugin, "_work_task", None)
+    await jams_plugin.on_started(None)
+    await asyncio.sleep(0)
+    tasks = [jams_plugin._task, jams_plugin._work_task]
+    assert len(started) == 2
+
+    jams_plugin.unload(SimpleNamespace(remove_plugin=lambda plugin: None))
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+    assert all(task.cancelled() for task in tasks)
+    assert jams_plugin._task is None and jams_plugin._work_task is None
 
 
 async def test_a_new_thread_event_tags_a_showcase_post(wired):

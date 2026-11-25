@@ -21,8 +21,10 @@ plugin = lightbulb.Plugin("jams")
 POLL_SECONDS = 30.0
 
 _task: asyncio.Task | None = None
+_work_task: asyncio.Task | None = None
 _api: jams.JamApi | None = None
 _limits = jams.TeamLimits()
+_pacer = jams.WorkPacer()
 
 
 def _jam_api() -> jams.JamApi | None:
@@ -45,22 +47,40 @@ async def poll_once() -> None:
     await leadership.run_accepted(jams.post_due_messages(api, plugin.bot.rest))
 
 
-async def _poll_loop() -> None:
+async def work_once() -> None:
+    """Find missed entries, close teams and count votes, if this process acts.
+
+    A step can take minutes, so only one post's or one team's part is held
+    through a shutdown; the rest is picked up again by whichever process acts
+    next.
+    """
+    api = _jam_api()
+    if api is None or not leadership.is_acting():
+        return
+    await jams.run_jam_work(
+        api, plugin.bot.rest, _pacer, shield=leadership.run_accepted
+    )
+
+
+async def _loop(once, what: str) -> None:
     while True:
         try:
-            await poll_once()
+            await once()
         except asyncio.CancelledError:
             raise
         except Exception as error:  # noqa: BLE001 - the loop outlives any one failure
-            logger.warning("jam message poll failed: %r", error)
+            logger.warning("jam %s poll failed: %r", what, error)
         await asyncio.sleep(POLL_SECONDS)
 
 
 @plugin.listener(hikari.StartedEvent)
 async def on_started(event: hikari.StartedEvent) -> None:
-    global _task
+    global _task, _work_task
     if _task is None:
-        _task = asyncio.create_task(_poll_loop())
+        _task = asyncio.create_task(_loop(poll_once, "message"))
+    if _work_task is None:
+        # Its own loop: a long vote count never holds up a scheduled message.
+        _work_task = asyncio.create_task(_loop(work_once, "work"))
 
 
 @plugin.listener(hikari.GuildThreadCreateEvent)
@@ -217,9 +237,10 @@ def load(bot: lightbulb.BotApp) -> None:
 
 
 def unload(bot: lightbulb.BotApp) -> None:
-    global _task, _api
-    if _task is not None:
-        _task.cancel()
-        _task = None
+    global _task, _work_task, _api
+    for task in (_task, _work_task):
+        if task is not None:
+            task.cancel()
+    _task = _work_task = None
     _api = None
     bot.remove_plugin(plugin)

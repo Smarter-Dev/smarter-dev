@@ -6628,6 +6628,16 @@ class Jam(Base):
     showcase_tag_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     year_tag_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
 
+    # When the bot finished telling the teams that submissions closed and
+    # locking their threads. ``None`` until then.
+    teams_closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # When the bot counted the reactions on the entries, after voting ended.
+    votes_counted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_by: Mapped[str] = mapped_column(String(100), nullable=False)
 
     messages: Mapped[list["JamMessage"]] = relationship(
@@ -6778,6 +6788,7 @@ class JamSubmission(Base):
     ``team_id`` is the author's team when they posted, or ``None`` for a
     member working alone. Every post is kept. A team or a solo member has one
     entry, their earliest post; later ones are shown to the admin as extra.
+    A post an administrator removed counts for nothing until it is restored.
     """
 
     __tablename__ = "jam_submissions"
@@ -6801,6 +6812,16 @@ class JamSubmission(Base):
         PostgresUUID(as_uuid=True),
         ForeignKey("jam_teams.id", ondelete="CASCADE"),
         nullable=True,
+    )
+    # Counted once, after voting ends; ``None`` before. ``reaction_count`` is
+    # every reaction on the post's first message, as Discord shows them.
+    # ``reactor_count`` is how many different people left them.
+    reaction_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reactor_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Set when an administrator stops counting the post. The row is kept so
+    # the bot does not find the post in the forum and record it again.
+    removed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
     team: Mapped["JamTeam | None"] = relationship()

@@ -6,6 +6,7 @@ from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -18,7 +19,13 @@ from skrift.auth.guards import APIKeyOnly
 from smarter_dev.web.api_native import jams as jams_module
 from smarter_dev.web.api_native.jams import GuildJamController
 from smarter_dev.web.api_native.jams import JamMessageController
+from smarter_dev.web.api_native.jams import JamWorkController
+from smarter_dev.web.jams import results
 from smarter_dev.web.jams import store
+from smarter_dev.web.jams import teams
+from smarter_dev.web.models import JamSubmission
+from smarter_dev.web.models import JamTeam
+from smarter_dev.web.models import JamTeamMember
 from tests.web.jam_helpers import GUILD
 from tests.web.jam_helpers import make_jam
 from tests.web.jam_helpers import make_message
@@ -31,7 +38,11 @@ def client(db_session) -> Iterator[TestClient]:
     jams_module.BOT_API_GUARDS.clear()
     try:
         with create_test_client(
-            route_handlers=[JamMessageController, GuildJamController],
+            route_handlers=[
+                JamMessageController,
+                GuildJamController,
+                JamWorkController,
+            ],
             plugins=[PydanticPlugin()],
             dependencies={
                 "db_session": Provide(lambda: db_session, sync_to_thread=False)
@@ -72,14 +83,25 @@ def test_every_route_carries_the_bot_api_guards():
         "remove_jam_submission",
     ):
         assert getattr(GuildJamController, name).guards is guards
+    for name in ("list_jam_work", "mark_jam_teams_closed", "save_jam_votes"):
+        assert getattr(JamWorkController, name).guards is guards
     routes = [
         value
-        for controller in (JamMessageController, GuildJamController)
+        for controller in (JamMessageController, GuildJamController, JamWorkController)
         for value in vars(controller).values()
         if hasattr(value, "fn")
     ]
-    assert len(routes) == 10
+    assert len(routes) == 13
     assert all(route.guards is guards for route in routes)
+
+
+@pytest.mark.parametrize("config", ["app.yaml", "app.development.yaml"])
+def test_the_app_serves_every_jam_controller(config):
+    served = (Path(__file__).parents[3] / config).read_text()
+
+    for controller in (JamMessageController, GuildJamController, JamWorkController):
+        line = f"  - {controller.__module__}:{controller.__name__}\n"
+        assert served.count(line) == 1
 
 
 async def test_claim_hands_each_message_out_once(client, db_session):
@@ -383,3 +405,234 @@ async def test_malformed_team_requests_are_rejected(client, db_session, path, bo
     await _open_jam(db_session)
 
     assert client.post(f"{JAM}/{path}", json=body).status_code == 422
+
+
+# -- after the jam starts -----------------------------------------------------
+
+WORK = "/api/jam-work"
+
+
+def _work(client) -> list[dict]:
+    response = client.get(f"{WORK}/")
+    assert response.status_code == 200
+    return response.json()["jams"]
+
+
+async def _past_jam(db_session, *, closed: timedelta, voting: timedelta | None):
+    """A jam whose submissions closed ``closed`` ago; voting ends ``voting`` ago."""
+    now = datetime.now(UTC)
+    return await _open_jam(
+        db_session,
+        starts_at=now - closed - timedelta(days=30),
+        submissions_close_at=now - closed,
+        voting_ends_at=None if voting is None else now - voting,
+        showcase_tag_id="31",
+        year_tag_id="32",
+    )
+
+
+async def test_work_for_an_open_jam_is_to_look_for_missed_posts(client, db_session):
+    jam = await _open_jam(db_session, showcase_tag_id="31")
+    _post_entry(client, "700", "9")
+
+    [work] = _work(client)
+
+    assert work == {
+        "jam_id": str(jam.id),
+        "guild_id": GUILD,
+        "name": jam.name,
+        "showcase_channel_id": "14",
+        "tag_ids": ["31"],
+        "starts_at": store.as_utc(jam.starts_at).isoformat(),
+        "submissions_close_at": store.as_utc(jam.submissions_close_at).isoformat(),
+        "voting_ends_at": None,
+        "known_posts": ["700"],
+        "find_missed_posts": True,
+        "teams_to_close": None,
+        "count_votes": False,
+    }
+
+
+def test_no_work_without_a_jam(client):
+    assert _work(client) == []
+
+
+async def test_a_missed_post_is_recorded_after_submissions_close(client, db_session):
+    jam = await _past_jam(db_session, closed=timedelta(hours=1), voting=None)
+    during = store.as_utc(jam.submissions_close_at) - timedelta(days=1)
+    db_session.add(
+        JamTeam(
+            jam_id=jam.id,
+            name="Elves",
+            thread_id="500",
+            created_by="1",
+            members=[JamTeamMember(jam_id=jam.id, user_id="1")],
+        )
+    )
+    await db_session.commit()
+
+    late = client.post(
+        f"{JAM}/submissions",
+        json={
+            "thread_id": "701",
+            "author_id": "1",
+            "posted_at": (during + timedelta(days=2)).isoformat(),
+        },
+    ).json()
+    undated = client.post(
+        f"{JAM}/submissions", json={"thread_id": "702", "author_id": "1"}
+    ).json()
+    missed = client.post(
+        f"{JAM}/submissions",
+        json={"thread_id": "700", "author_id": "1", "posted_at": during.isoformat()},
+    ).json()
+
+    assert late == {"ok": False, "reason": "no_jam", "team": None}
+    assert undated == {"ok": False, "reason": "no_jam", "team": None}
+    assert (missed["ok"], missed["new"], missed["entry_thread_id"]) == (
+        True,
+        True,
+        "700",
+    )
+    assert missed["team"]["thread_id"] == "500"
+    [work] = _work(client)
+    assert work["known_posts"] == ["700"]
+    assert work["teams_to_close"] == [
+        {"name": "Elves", "thread_id": "500", "entry_thread_id": "700"}
+    ]
+
+
+async def test_a_post_cannot_claim_to_be_from_the_future(client, db_session):
+    now = datetime.now(UTC)
+    await _open_jam(
+        db_session,
+        starts_at=now + timedelta(days=1),
+        submissions_close_at=now + timedelta(days=30),
+    )
+
+    response = client.post(
+        f"{JAM}/submissions",
+        json={
+            "thread_id": "700",
+            "author_id": "9",
+            "posted_at": (now + timedelta(days=2)).isoformat(),
+        },
+    )
+
+    assert response.json() == {"ok": False, "reason": "no_jam", "team": None}
+
+
+@pytest.mark.parametrize("posted_at", ["2026-12-05T00:00:00", "yesterday"])
+async def test_a_post_time_must_say_its_timezone(client, db_session, posted_at):
+    await _open_jam(db_session)
+
+    response = client.post(
+        f"{JAM}/submissions",
+        json={"thread_id": "700", "author_id": "9", "posted_at": posted_at},
+    )
+
+    assert response.status_code == 422
+    assert await teams.list_entries(db_session, (await _only_jam(db_session)).id) == []
+
+
+async def _only_jam(db_session):
+    [jam] = await store.list_jams(db_session, GUILD)
+    return jam
+
+
+async def test_teams_closed_is_recorded_and_stops_the_work(client, db_session):
+    jam = await _past_jam(db_session, closed=timedelta(hours=1), voting=None)
+    assert _work(client)[0]["teams_to_close"] == []
+
+    first = client.post(f"{WORK}/{jam.id}/teams-closed")
+    second = client.post(f"{WORK}/{jam.id}/teams-closed")
+
+    assert first.status_code == 200
+    assert first.json() == second.json() == {"ok": True, "reason": None}
+    assert _work(client) == []
+
+
+async def test_teams_closed_is_refused_for_an_open_or_unknown_jam(client, db_session):
+    jam = await _open_jam(db_session)
+
+    early = client.post(f"{WORK}/{jam.id}/teams-closed")
+    unknown = client.post(f"{WORK}/{uuid4()}/teams-closed")
+
+    assert early.json() == {"ok": False, "reason": results.TOO_EARLY}
+    assert unknown.json() == {"ok": False, "reason": results.NO_JAM}
+    assert client.post(f"{WORK}/nope/teams-closed").status_code == 404
+
+
+async def test_votes_are_saved_and_make_the_results(client, db_session):
+    jam = await _past_jam(
+        db_session, closed=timedelta(days=8), voting=timedelta(hours=1)
+    )
+    db_session.add_all(
+        JamSubmission(jam_id=jam.id, thread_id=thread, author_id=author)
+        for thread, author in (("700", "7"), ("701", "8"), ("702", "9"))
+    )
+    await db_session.commit()
+    [work] = _work(client)
+    assert work["count_votes"] is True and work["known_posts"] == ["700", "701", "702"]
+
+    response = client.post(
+        f"{WORK}/{jam.id}/votes",
+        json={
+            "counts": [
+                {"thread_id": "700", "reactions": 3, "reactors": 3},
+                {"thread_id": "701", "reactions": 7, "reactors": 2},
+            ],
+            "gone": ["702"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "reason": None}
+    assert _work(client) == []
+    rows = await results.list_results(db_session, jam.id)
+    assert [(row.rank, row.thread_id, row.reactions) for row in rows] == [
+        (1, "701", 7),
+        (2, "700", 3),
+    ]
+
+
+async def test_votes_are_refused_while_voting_is_open(client, db_session):
+    jam = await _past_jam(
+        db_session, closed=timedelta(days=1), voting=-timedelta(days=6)
+    )
+    db_session.add(JamSubmission(jam_id=jam.id, thread_id="700", author_id="9"))
+    await db_session.commit()
+
+    response = client.post(
+        f"{WORK}/{jam.id}/votes",
+        json={"counts": [{"thread_id": "700", "reactions": 3, "reactors": 3}]},
+    )
+    unknown = client.post(f"{WORK}/{uuid4()}/votes", json={"counts": []})
+
+    assert response.json() == {"ok": False, "reason": results.TOO_EARLY}
+    assert unknown.json() == {"ok": False, "reason": results.NO_JAM}
+    [row] = await teams.list_entries(db_session, jam.id)
+    assert row.submission.reaction_count is None
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},
+        {"counts": [{"thread_id": "700", "reactions": -1, "reactors": 0}]},
+        {"counts": [{"thread_id": "700", "reactions": 1}]},
+        {"counts": [{"thread_id": "seven", "reactions": 1, "reactors": 1}]},
+        {"counts": [{"thread_id": "700", "reactions": 1.5, "reactors": 1}]},
+        {"counts": [], "gone": ["seven"]},
+        {"counts": [], "gone": "700"},
+    ],
+)
+async def test_malformed_votes_are_rejected(client, db_session, body):
+    jam = await _past_jam(
+        db_session, closed=timedelta(days=8), voting=timedelta(hours=1)
+    )
+
+    response = client.post(f"{WORK}/{jam.id}/votes", json=body)
+
+    assert response.status_code == 422
+    assert _work(client)[0]["count_votes"] is True

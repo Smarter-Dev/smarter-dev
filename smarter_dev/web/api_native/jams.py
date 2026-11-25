@@ -15,6 +15,9 @@ channel twice when the bot's REST client retries a timeout or a 5xx; see
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+from typing import Annotated
 from typing import Any
 from uuid import UUID
 
@@ -23,6 +26,7 @@ from litestar import get
 from litestar import post
 from litestar.exceptions import ValidationException
 from litestar.status_codes import HTTP_200_OK
+from pydantic import AwareDatetime
 from pydantic import BaseModel
 from pydantic import Field
 from skrift.auth.guards import APIKeyOnly
@@ -32,6 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
+from smarter_dev.web.jams import results
 from smarter_dev.web.jams import store
 from smarter_dev.web.jams import teams
 from smarter_dev.web.models import JAM_CHANNEL_COLUMNS
@@ -79,6 +84,25 @@ class RecordJamSubmissionRequest(BaseModel):
 
     thread_id: str = Field(pattern=_DISCORD_ID)
     author_id: str = Field(pattern=_DISCORD_ID)
+    # When the post was made. Left out, it is taken as made now.
+    posted_at: AwareDatetime | None = None
+
+
+class JamVoteCount(BaseModel):
+    """The reactions on one post's first message."""
+
+    thread_id: str = Field(pattern=_DISCORD_ID)
+    reactions: int = Field(ge=0, le=10_000_000)
+    reactors: int = Field(ge=0, le=10_000_000)
+
+
+class SaveJamVotesRequest(BaseModel):
+    """The bot's count of a jam's votes, and the posts it found deleted."""
+
+    counts: list[JamVoteCount] = Field(max_length=5000)
+    gone: list[Annotated[str, Field(pattern=_DISCORD_ID)]] = Field(
+        default_factory=list, max_length=5000
+    )
 
 
 def _team_json(team: teams.TeamInfo | None) -> dict[str, Any] | None:
@@ -161,6 +185,79 @@ class JamMessageController(Controller):
         if not marked:
             raise plain_error(404, "Jam message not found or not claimed")
         return {"success": True}
+
+
+def _work_json(work: results.JamWork) -> dict[str, Any]:
+    return {
+        "jam_id": str(work.jam_id),
+        "guild_id": work.guild_id,
+        "name": work.name,
+        "showcase_channel_id": work.showcase_channel_id,
+        "tag_ids": list(work.tag_ids),
+        "starts_at": work.starts_at.isoformat(),
+        "submissions_close_at": work.submissions_close_at.isoformat(),
+        "voting_ends_at": (
+            work.voting_ends_at.isoformat() if work.voting_ends_at else None
+        ),
+        "known_posts": list(work.known_posts),
+        "find_missed_posts": work.find_missed_posts,
+        "teams_to_close": None
+        if work.teams_to_close is None
+        else [
+            {
+                "name": team.name,
+                "thread_id": team.thread_id,
+                "entry_thread_id": team.entry_thread_id,
+            }
+            for team in work.teams_to_close
+        ],
+        "count_votes": work.count_votes,
+    }
+
+
+class JamWorkController(Controller):
+    """What the bot does for a jam after it starts, and its reports back.
+
+    A report the rules refuse is a 200 with ``"ok": false`` and why, like the
+    team routes.
+    """
+
+    path = "/api/jam-work"
+    exception_handlers = BOT_API_EXCEPTION_HANDLERS
+
+    @get("/", guards=BOT_API_GUARDS)
+    async def list_jam_work(self, db_session: AsyncSession) -> dict[str, Any]:
+        """Every jam with something for the bot to do now."""
+        work = await results.list_work(db_session)
+        return {"jams": [_work_json(item) for item in work]}
+
+    @post("/{jam_id:uuid}/teams-closed", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def mark_jam_teams_closed(
+        self, db_session: AsyncSession, jam_id: UUID
+    ) -> dict[str, Any]:
+        """Record that every team was told submissions closed and locked."""
+        refusal = await results.mark_teams_closed(db_session, jam_id)
+        return {"ok": refusal is None, "reason": refusal}
+
+    @post("/{jam_id:uuid}/votes", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def save_jam_votes(
+        self, db_session: AsyncSession, jam_id: UUID, data: SaveJamVotesRequest
+    ) -> dict[str, Any]:
+        """Keep the reaction counts the bot read after voting ended."""
+        refusal = await results.save_votes(
+            db_session,
+            jam_id,
+            [
+                results.VoteCount(
+                    thread_id=count.thread_id,
+                    reactions=count.reactions,
+                    reactors=count.reactors,
+                )
+                for count in data.counts
+            ],
+            list(data.gone),
+        )
+        return {"ok": refusal is None, "reason": refusal}
 
 
 class GuildJamController(Controller):
@@ -294,14 +391,22 @@ class GuildJamController(Controller):
         """Record a showcase post against its author's team.
 
         ``entry_thread_id`` is the post that counts for that team or solo
-        member. ``new`` is false when this post was recorded before.
+        member. ``new`` is false when this post was recorded before. The jam
+        is the one that was open when the post was made, so a post the bot
+        missed can be recorded after submissions close.
         """
-        jam = await store.current_jam(db_session, guild_id)
+        now = datetime.now(UTC)
+        posted_at = min(data.posted_at or now, now)
+        jam = await store.jam_taking_entries_at(db_session, guild_id, posted_at)
         outcome = (
             None
             if jam is None
             else await teams.record_submission(
-                db_session, jam, thread_id=data.thread_id, author_id=data.author_id
+                db_session,
+                jam,
+                thread_id=data.thread_id,
+                author_id=data.author_id,
+                posted_at=posted_at,
             )
         )
         if outcome is None:
