@@ -181,8 +181,9 @@ new route return 200 instead of 401.
 ## At cutover
 
 1. Zech adds the admin callback URI to each provider OAuth app **before**
-   changing the running app. Keep the existing `smarter.dev` callbacks for
-   rollback:
+   changing the running app. The `smarter.dev` callbacks no longer matter for
+   rollback: Google no longer accepts one, so rolling this change back would
+   break Google sign-in:
 
    | Provider | Add this callback URI |
    | --- | --- |
@@ -215,8 +216,8 @@ points to `admin.smarter.dev` for Python-owned bot configuration, signed
 channel-config links and chat-error links. Search links (`/s/<token>`,
 including the OpenSearch description), search previews (`/ai/search/<token>`)
 and the Polar checkout success URL (`/sudo/...`) use `SITE_BASE_URL`, because
-the Worker serves them (and redirects tokens it doesn't know to the admin
-host). Both default to `http://localhost:8000` for local
+the Worker serves them. The Worker redirects tokens it doesn't know to the
+admin host as of site PR 138. Both default to `http://localhost:8000` for local
 development.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and
